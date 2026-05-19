@@ -17,7 +17,7 @@ python --version >nul 2>&1
 if errorlevel 1 (
     echo  ERROR: Python not found on PATH. Install Python 3 and retry.
     echo.
-    pause
+    if not defined APEX_NOPAUSE pause
     exit /b 1
 )
 
@@ -28,7 +28,7 @@ python -m pip install --quiet --upgrade pyinstaller pyinstaller-hooks-contrib
 if errorlevel 1 (
     echo  ERROR: could not install PyInstaller. Check your internet/pip.
     echo.
-    pause
+    if not defined APEX_NOPAUSE pause
     exit /b 1
 )
 python -m pip install --quiet -r requirements.txt
@@ -36,7 +36,7 @@ if errorlevel 1 (
     echo  ERROR: could not install dependencies from requirements.txt.
     echo  Check your internet connection and try again.
     echo.
-    pause
+    if not defined APEX_NOPAUSE pause
     exit /b 1
 )
 echo  OK: tools + dependencies ready.
@@ -88,7 +88,7 @@ if not exist "dist\APEX\APEX.exe" (
     echo  ERROR: build failed - dist\APEX\APEX.exe was NOT created.
     echo  Scroll up to read the PyInstaller error.
     echo.
-    pause
+    if not defined APEX_NOPAUSE pause
     exit /b 1
 )
 echo  OK: dist\APEX\ folder created.
@@ -104,7 +104,7 @@ if not exist "%INNO%" (
     echo  then run build.bat again. For now you can still run
     echo  dist\APEX\APEX.exe directly.
     echo.
-    pause
+    if not defined APEX_NOPAUSE pause
     exit /b 0
 )
 if not exist installer mkdir installer
@@ -114,7 +114,7 @@ if not exist "installer\APEX_Setup.exe" (
     echo  ERROR: Inno Setup did not produce installer\APEX_Setup.exe.
     echo  Scroll up for the Inno Setup error.
     echo.
-    pause
+    if not defined APEX_NOPAUSE pause
     exit /b 1
 )
 
@@ -129,5 +129,5 @@ echo  Run installer\APEX_Setup.exe to install APEX.
 echo  After installing, type "APEX" in the Windows
 echo  search bar - it will appear there.
 echo.
-pause
+if not defined APEX_NOPAUSE pause
 endlocal
