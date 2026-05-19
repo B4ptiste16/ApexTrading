@@ -25,7 +25,16 @@ echo.
 
 REM --- 2. build the installer (non-interactive) ---
 set APEX_NOPAUSE=1
-call build.bat
+REM Force fresh build: delete any stale installer first so the existence
+REM check below is meaningful regardless of what happened in build.bat.
+if exist "installer\APEX_Setup.exe" del /q "installer\APEX_Setup.exe"
+call "%~dp0build.bat"
+if errorlevel 1 (
+    echo.
+    echo  ERROR: build.bat returned an error - release aborted.
+    if not defined APEX_NOPAUSE pause
+    exit /b 1
+)
 if not exist "installer\APEX_Setup.exe" (
     echo.
     echo  ERROR: build did not produce installer\APEX_Setup.exe - release aborted.

@@ -36,6 +36,8 @@ Thumbs.db
 *.tmp
 o.tmp
 e.tmp
+*.log
+_release.log
 
 # build installer output (ships as a GitHub Release asset, NOT in git)
 installer/
