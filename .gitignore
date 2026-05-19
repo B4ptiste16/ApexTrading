@@ -1,0 +1,41 @@
+# ───────── SECRETS — never commit ─────────
+.env
+.env.*
+*.env
+
+# ───────── per-user runtime data ─────────
+apex_settings.json
+*_state.json
+*_trade_log.jsonl
+*_analysis.txt
+*_snapshots.jsonl
+universe_manager_log.jsonl
+daybot_watchlist.txt
+*_universe.txt
+*.bak
+
+# ───────── chart output ─────────
+longv2_charts/
+shortv2_charts/
+daybot_charts/
+
+# ───────── build / packaging ─────────
+dist/
+build/
+*.spec
+__pycache__/
+*.pyc
+
+# ───────── archives / editor / OS ─────────
+*.zip
+.claude/
+.DS_Store
+Thumbs.db
+
+# stray temp files
+*.tmp
+o.tmp
+e.tmp
+
+# build installer output (ships as a GitHub Release asset, NOT in git)
+installer/

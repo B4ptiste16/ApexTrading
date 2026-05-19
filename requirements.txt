@@ -1,0 +1,14 @@
+# APEX runtime dependencies.
+# build.bat installs these so a fresh machine can build the app in one step.
+# (The end user who runs APEX_Setup.exe needs NONE of this - it is all
+#  bundled into APEX.exe by PyInstaller.)
+PyQt6
+PyQt6-WebEngine
+pandas
+numpy
+yfinance
+matplotlib
+anthropic
+alpaca-py
+python-dotenv
+requests
