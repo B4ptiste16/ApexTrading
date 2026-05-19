@@ -42,7 +42,9 @@ from ui.bot_tab    import BotTab
 from ui.overview  import ToolsTab
 from ui.universe   import UniverseTab
 from ui.styles     import DARK_STYLESHEET, COLORS
-from core.updater  import check_for_update, download_and_apply, get_current_version, restart_app
+from core.updater  import (check_for_update, download_and_apply,
+                            get_current_version, restart_app,
+                            launch_downloaded_installer)
 from core.paths     import DATA_DIR, ensure_data_dir
 
 
@@ -425,16 +427,46 @@ class ApexWindow(QMainWindow):
 
     def _on_update_done(self, ok: bool, msg: str, progress):
         progress.close()
+        if not ok:
+            dlg = QMessageBox(self)
+            dlg.setWindowTitle("Update Failed")
+            dlg.setText(msg)
+            dlg.setStyleSheet(self.styleSheet())
+            dlg.exec()
+            return
+
+        # Frozen install path: downloader saved a local installer and
+        # stripped Mark-of-the-Web. Ask the user before we close the
+        # app to install — they get to see the download finish and
+        # decide when to apply it.
+        local = (getattr(self, "_pending_update", {}) or {}).get("_local_path")
+        if local and getattr(sys, "frozen", False):
+            box = QMessageBox(self)
+            box.setWindowTitle("Update ready")
+            box.setText(
+                f"<b>{msg}</b><br><br>"
+                f"Click <b>Install now</b> to apply it. APEX will close "
+                f"while the installer runs (~1 minute) and then reopen "
+                f"automatically. You can also choose <b>Later</b> and "
+                f"install on next launch."
+            )
+            box.setStyleSheet(self.styleSheet())
+            install_btn = box.addButton("Install now",
+                                        QMessageBox.ButtonRole.AcceptRole)
+            box.addButton("Later", QMessageBox.ButtonRole.RejectRole)
+            box.exec()
+            if box.clickedButton() is install_btn:
+                launch_downloaded_installer(local)   # exits the process
+            return
+
+        # Source-mode (file-replacement) path: keep the original restart.
         dlg = QMessageBox(self)
-        dlg.setWindowTitle("Update Complete" if ok else "Update Failed")
+        dlg.setWindowTitle("Update Complete")
         dlg.setText(msg)
         dlg.setStyleSheet(self.styleSheet())
-        if ok:
-            dlg.setStandardButtons(QMessageBox.StandardButton.Ok)
-            dlg.exec()
-            restart_app()
-        else:
-            dlg.exec()
+        dlg.setStandardButtons(QMessageBox.StandardButton.Ok)
+        dlg.exec()
+        restart_app()
 
 
 # ─────────────────────────────────────────

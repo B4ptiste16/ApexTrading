@@ -106,36 +106,67 @@ def _latest_release_installer() -> Optional[str]:
 
 
 def _apply_installer(update_info: dict, progress_callback=None) -> tuple:
-    """Frozen build: download the release .exe and silently (re)install,
-    then relaunch the updated app. This process exits so files can be
-    replaced."""
-    import subprocess
+    """Frozen build: stream-download the release .exe, strip the
+    Mark-of-the-Web (so SmartScreen does NOT silently block the silent
+    install), and return success. The app does NOT exit here — the
+    caller asks the user, then calls launch_downloaded_installer() to
+    actually run it (the running app must exit at that point so the
+    installer can replace files)."""
     try:
         if progress_callback:
-            progress_callback(10, "Downloading update...")
-        r = requests.get(update_info["installer"], stream=True, timeout=60)
-        if r.status_code != 200:
-            return False, f"Download failed: HTTP {r.status_code}"
-        dst = Path(tempfile.gettempdir()) / "APEX_Setup_update.exe"
-        with open(dst, "wb") as f:
-            for chunk in r.iter_content(chunk_size=8192):
-                f.write(chunk)
+            progress_callback(2, "Connecting...")
+        with requests.get(update_info["installer"],
+                          stream=True, timeout=60) as r:
+            if r.status_code != 200:
+                return False, f"Download failed: HTTP {r.status_code}"
+            total = int(r.headers.get("content-length") or 0)
+            dst   = Path(tempfile.gettempdir()) / "APEX_Setup_update.exe"
+            done  = 0
+            with open(dst, "wb") as f:
+                for chunk in r.iter_content(chunk_size=64 * 1024):
+                    if not chunk:
+                        continue
+                    f.write(chunk)
+                    done += len(chunk)
+                    if progress_callback:
+                        if total:
+                            pct = 2 + int(done * 96 / total)   # 2..98
+                            msg = (f"Downloading update… "
+                                   f"{done // 1024 // 1024} / "
+                                   f"{total // 1024 // 1024} MB")
+                        else:
+                            pct = 50
+                            msg = f"Downloading update… {done // 1024 // 1024} MB"
+                        progress_callback(min(pct, 98), msg)
+
+        # Strip Mark-of-the-Web so SmartScreen does NOT block the
+        # silent execution of this freshly-downloaded unsigned .exe.
+        try:
+            os.remove(str(dst) + ":Zone.Identifier")
+        except Exception:
+            pass
 
         if progress_callback:
-            progress_callback(85, "Installing update...")
-        exe = sys.executable  # installed APEX.exe
-        # Silent install, then relaunch the app — detached so it outlives
-        # this process exiting.
-        cmd = (f'"{dst}" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART '
-               f'/CLOSEAPPLICATIONS & start "" "{exe}"')
-        subprocess.Popen(
-            ["cmd", "/c", cmd],
-            creationflags=0x00000008 | 0x00000200)  # DETACHED | NEW_GROUP
-        if progress_callback:
-            progress_callback(100, "Restarting...")
-        os._exit(0)   # let the installer replace files
+            progress_callback(100, "Download complete.")
+        update_info["_local_path"] = str(dst)
+        return True, (f"Downloaded v{update_info.get('latest','?')}  "
+                      f"— ready to install.")
     except Exception as e:
         return False, f"Update failed: {e}"
+
+
+def launch_downloaded_installer(local_path: str) -> None:
+    """Called AFTER the user confirms. Spawns the silent installer +
+    a detached relaunch of the installed app, then exits this process
+    so the installer can replace files."""
+    import subprocess
+    exe = sys.executable
+    cmd = (f'"{local_path}" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART '
+           f'/CLOSEAPPLICATIONS & start "" "{exe}"')
+    subprocess.Popen(
+        ["cmd", "/c", cmd],
+        creationflags=0x00000008 | 0x00000200)  # DETACHED | NEW_GROUP
+    os._exit(0)
 
 
 def download_and_apply(update_info: dict,
