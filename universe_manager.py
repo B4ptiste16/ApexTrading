@@ -357,7 +357,7 @@ def read_watchlist() -> dict:
     if not os.path.exists(WATCHLIST_FILE):
         return {}
     result = {}
-    with open(WATCHLIST_FILE) as f:
+    with open(WATCHLIST_FILE, encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if not line or line.startswith("#"):
@@ -372,7 +372,7 @@ def read_watchlist() -> dict:
 
 def append_watchlist(ticker: str, note: str):
     now = datetime.now().strftime("%Y-%m-%d")
-    with open(WATCHLIST_FILE, "a") as f:
+    with open(WATCHLIST_FILE, "a", encoding="utf-8") as f:
         f.write(f"{ticker:<8}  # {note} | added {now}\n")
     print(f"  [watchlist] + {ticker}: {note}")
 
@@ -381,7 +381,7 @@ def promote_from_watchlist(ticker: str):
     """Mark a watchlist ticker as promoted when it enters the universe."""
     if not os.path.exists(WATCHLIST_FILE):
         return
-    with open(WATCHLIST_FILE) as f:
+    with open(WATCHLIST_FILE, encoding="utf-8") as f:
         lines = f.readlines()
     now = datetime.now().strftime("%Y-%m-%d")
     new_lines = []
@@ -391,18 +391,18 @@ def promote_from_watchlist(ticker: str):
             new_lines.append(f"# PROMOTED {now}: {line.strip()}\n")
         else:
             new_lines.append(line)
-    with open(WATCHLIST_FILE, "w") as f:
+    with open(WATCHLIST_FILE, "w", encoding="utf-8") as f:
         f.writelines(new_lines)
 
 
 def log_run(data: dict):
-    with open(LOG_FILE, "a") as f:
+    with open(LOG_FILE, "a", encoding="utf-8") as f:
         f.write(json.dumps(data) + "\n")
 
 
 def ensure_watchlist_exists():
     if not os.path.exists(WATCHLIST_FILE):
-        with open(WATCHLIST_FILE, "w") as f:
+        with open(WATCHLIST_FILE, "w", encoding="utf-8") as f:
             f.write("# APEX DAY BOT — Watchlist\n")
             f.write("# Stocks being monitored for potential universe addition\n")
             f.write("# Format: TICKER  # reason | date added\n")
@@ -700,7 +700,7 @@ def print_status():
 
     # Show log if exists
     if os.path.exists(LOG_FILE):
-        with open(LOG_FILE) as f:
+        with open(LOG_FILE, encoding="utf-8") as f:
             lines = f.readlines()
         if lines:
             last = json.loads(lines[-1])

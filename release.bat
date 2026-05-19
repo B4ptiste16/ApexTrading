@@ -29,7 +29,7 @@ call build.bat
 if not exist "installer\APEX_Setup.exe" (
     echo.
     echo  ERROR: build did not produce installer\APEX_Setup.exe - release aborted.
-    pause
+    if not defined APEX_NOPAUSE pause
     exit /b 1
 )
 
@@ -39,7 +39,7 @@ git commit -m "Release v%VER%"
 git push origin main
 if errorlevel 1 (
     echo  ERROR: git push failed - release aborted.
-    pause
+    if not defined APEX_NOPAUSE pause
     exit /b 1
 )
 
@@ -47,7 +47,7 @@ REM --- 4. publish GitHub Release with the installer attached ---
 gh release create "v%VER%" "installer\APEX_Setup.exe" --title "APEX v%VER%" --notes "Automated release v%VER%"
 if errorlevel 1 (
     echo  ERROR: gh release failed. Is gh authenticated ^(gh auth status^)?
-    pause
+    if not defined APEX_NOPAUSE pause
     exit /b 1
 )
 
@@ -57,5 +57,5 @@ echo   DONE - v%VER% published.
 echo   Installed apps self-update overnight.
 echo  ===============================================
 echo.
-pause
+if not defined APEX_NOPAUSE pause
 endlocal
