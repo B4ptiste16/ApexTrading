@@ -156,19 +156,54 @@ def _apply_installer(update_info: dict, progress_callback=None) -> tuple:
 
 
 def launch_downloaded_installer(local_path: str) -> None:
-    """Called AFTER the user confirms. Spawns the silent installer +
-    a detached relaunch of the installed app, then exits this process
-    so the installer can replace files."""
+    """Called AFTER the user confirms.
+
+    Writes a relauncher batch script to %TEMP% that:
+      1. Waits for the old APEX.exe to fully exit (releases file locks)
+      2. Runs the installer silently
+      3. Pauses briefly so Windows can release file locks
+      4. Launches the freshly-installed APEX
+      5. Self-deletes
+    Then exits this process so the installer can replace files.
+
+    All steps log to %TEMP%\\apex_update.log so failures are debuggable.
+    """
     import subprocess
     exe = sys.executable
-    # /SILENT (not /VERYSILENT) so the user sees Inno's progress bar —
-    # confirms the install is actually happening. /SUPPRESSMSGBOXES still
-    # skips the "completed" dialog so the relaunch is seamless.
-    cmd = (f'"{local_path}" /SILENT /SUPPRESSMSGBOXES /NORESTART '
-           f'/CLOSEAPPLICATIONS /RESTARTAPPLICATIONS & start "" "{exe}"')
+    bat = Path(tempfile.gettempdir()) / "apex_update_relaunch.bat"
+    # Use CRLF + cp1252 — Windows cmd's preferred batch format.
+    bat.write_text(
+        "@echo off\r\n"
+        "rem APEX auto-update relauncher\r\n"
+        "set LOG=%TEMP%\\apex_update.log\r\n"
+        "echo === APEX Update %DATE% %TIME% === > \"%LOG%\"\r\n"
+        "rem Wait up to 30s for old APEX.exe to fully exit\r\n"
+        "set /a tries=0\r\n"
+        ":wait\r\n"
+        "set /a tries+=1\r\n"
+        "if %tries% GTR 30 goto run\r\n"
+        "tasklist /FI \"IMAGENAME eq APEX.exe\" 2>nul | find /I \"APEX.exe\" >nul\r\n"
+        "if errorlevel 1 goto run\r\n"
+        "timeout /t 1 /nobreak >nul\r\n"
+        "goto wait\r\n"
+        ":run\r\n"
+        "echo Waited %tries% seconds for old process. >> \"%LOG%\"\r\n"
+        f"echo Installer: \"{local_path}\" >> \"%LOG%\"\r\n"
+        f"\"{local_path}\" /SILENT /SUPPRESSMSGBOXES /NORESTART\r\n"
+        "echo Installer exit code: %ERRORLEVEL% >> \"%LOG%\"\r\n"
+        "rem Let Windows release file handles before relaunching\r\n"
+        "timeout /t 3 /nobreak >nul\r\n"
+        f"echo Launching: \"{exe}\" >> \"%LOG%\"\r\n"
+        f"start \"\" \"{exe}\"\r\n"
+        "echo Done. >> \"%LOG%\"\r\n"
+        "rem Self-delete this script\r\n"
+        "(goto) 2>nul & del \"%~f0\"\r\n",
+        encoding="cp1252",
+    )
     subprocess.Popen(
-        ["cmd", "/c", cmd],
-        creationflags=0x00000008 | 0x00000200)  # DETACHED | NEW_GROUP
+        ["cmd", "/c", str(bat)],
+        creationflags=0x00000008 | 0x00000200,  # DETACHED | NEW_GROUP
+    )
     os._exit(0)
 
 
