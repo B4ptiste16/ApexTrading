@@ -34,6 +34,42 @@ def _rgb(h):
     return f"{int(h[0:2],16)},{int(h[2:4],16)},{int(h[4:6],16)}"
 
 
+def _tight_yrange(values, pad=0.003):
+    """Return [min*(1-pad), max*(1+pad)] so small equity moves are visible."""
+    clean = [v for v in values if v and v > 0]
+    if len(clean) < 2:
+        return None
+    lo, hi = min(clean), max(clean)
+    spread = hi - lo
+    if spread < lo * 0.0005:          # nearly flat — give at least 0.1% room
+        spread = lo * 0.001
+    extra = spread * 0.15
+    return [lo - extra, hi + extra]
+
+
+def _prev_close_annotation(prev_val: float, x_end) -> list:
+    """Grey dotted line at the first (prev-close) value + label."""
+    if not prev_val or prev_val <= 0:
+        return [], []
+    shapes = [{
+        "type": "line",
+        "x0": 0, "x1": 1,
+        "y0": prev_val, "y1": prev_val,
+        "xref": "paper", "yref": "y",
+        "line": {"color": MUTED, "width": 1, "dash": "dot"},
+    }]
+    annotations = [{
+        "x": 0, "y": prev_val,
+        "xref": "paper", "yref": "y",
+        "text": f"prev  ${prev_val:,.0f}",
+        "showarrow": False,
+        "font": {"size": 8, "color": MUTED},
+        "xanchor": "left",
+        "yanchor": "bottom",
+    }]
+    return shapes, annotations
+
+
 def _base_layout(height=300, title="", color=TEXT, extra=None):
     layout = {
         "paper_bgcolor": "rgba(0,0,0,0)",
@@ -94,13 +130,16 @@ def equity_curve(equity_df: pd.DataFrame, side: str, period: str) -> str:
     if equity_df.empty:
         return empty_chart(f"No equity data — {period}")
     color = BOT_COLOR[side]
-    lv, fv = equity_df["equity"].iloc[-1], equity_df["equity"].iloc[0]
+    y = equity_df["equity"].tolist()
+    fv, lv = y[0], y[-1]
     c = color if lv >= fv else R
+    delta = lv - fv
+    pct   = (lv / fv - 1) * 100 if fv else 0
 
     data = [{
         "type": "scatter",
         "x":    equity_df["time"].astype(str).tolist(),
-        "y":    equity_df["equity"].tolist(),
+        "y":    y,
         "mode": "lines",
         "name": "Equity",
         "line": {"width": 2.5, "color": c},
@@ -108,22 +147,31 @@ def equity_curve(equity_df: pd.DataFrame, side: str, period: str) -> str:
         "fillcolor": f"rgba({_rgb(c)},0.07)",
         "hovertemplate": "<b>$%{y:,.2f}</b><br>%{x}<extra></extra>",
     }]
-    layout = _base_layout(280, f"Equity — {period}", color, {
-        "showlegend": False,
-        "hovermode": "x unified",
-        "yaxis": {"gridcolor": BORDER, "zeroline": False,
-                  "automargin": False, "tickprefix": "$"},
-    })
+
+    yr = _tight_yrange(y)
+    shapes, annots = _prev_close_annotation(fv, equity_df["time"].iloc[-1])
+    layout = _base_layout(
+        280,
+        f"Equity — {period}   ${lv:,.2f}   ({delta:+,.2f} / {pct:+.2f}%)",
+        c, {
+            "showlegend": False,
+            "hovermode": "x unified",
+            "shapes": shapes,
+            "annotations": annots,
+            "yaxis": {"gridcolor": BORDER, "zeroline": False,
+                      "automargin": False, "tickprefix": "$",
+                      **({"range": yr} if yr else {})},
+        })
     return _make_html(data, layout)
 
 
 def combined_history_chart(df: pd.DataFrame, period: str) -> str:
-    """Total portfolio value (all 3 accounts) over the selected period.
-    Live Alpaca data — updates even when the market is closed."""
+    """Total portfolio value (all 3 accounts) over the selected period."""
     if df is None or df.empty:
         return empty_chart(f"No portfolio data — {period}")
-    lv    = float(df["equity"].iloc[-1])
-    fv    = float(df["equity"].iloc[0])
+    y     = df["equity"].tolist()
+    fv    = float(y[0])
+    lv    = float(y[-1])
     delta = lv - fv
     pct   = (lv / fv - 1) * 100 if fv else 0.0
     c     = G if lv >= fv else R
@@ -131,7 +179,7 @@ def combined_history_chart(df: pd.DataFrame, period: str) -> str:
     data = [{
         "type": "scatter",
         "x":    df["time"].astype(str).tolist(),
-        "y":    df["equity"].tolist(),
+        "y":    y,
         "mode": "lines",
         "name": "Total",
         "line": {"width": 2.5, "color": c},
@@ -139,15 +187,19 @@ def combined_history_chart(df: pd.DataFrame, period: str) -> str:
         "fillcolor": f"rgba({_rgb(c)},0.07)",
         "hovertemplate": "<b>$%{y:,.2f}</b><br>%{x}<extra></extra>",
     }]
+    yr = _tight_yrange(y)
+    shapes, annots = _prev_close_annotation(fv, df["time"].iloc[-1])
     layout = _base_layout(
         300,
-        f"Total Portfolio — {period}   ${lv:,.2f}   "
-        f"({delta:+,.2f} / {pct:+.2f}%)",
+        f"Total Portfolio — {period}   ${lv:,.2f}   ({delta:+,.2f} / {pct:+.2f}%)",
         c, {
             "showlegend": False,
             "hovermode": "x unified",
+            "shapes": shapes,
+            "annotations": annots,
             "yaxis": {"gridcolor": BORDER, "zeroline": False,
-                      "automargin": False, "tickprefix": "$"},
+                      "automargin": False, "tickprefix": "$",
+                      **({"range": yr} if yr else {})},
         })
     return _make_html(data, layout)
 
@@ -159,6 +211,7 @@ def lifetime_chart(snaps: pd.DataFrame, side: str) -> str:
     pv    = snaps["portfolio_value"].values
     peak  = pd.Series(pv).cummax().tolist()
     ret   = (pv[-1]/pv[0]-1)*100 if pv[0]>0 else 0
+    yr    = _tight_yrange(pv.tolist())
 
     data = [
         {
@@ -185,7 +238,8 @@ def lifetime_chart(snaps: pd.DataFrame, side: str) -> str:
         "legend": {"orientation":"h","y":1.05,"x":0,
                    "bgcolor":"rgba(0,0,0,0)","font":{"size":9}},
         "yaxis": {"gridcolor":BORDER,"zeroline":False,
-                  "automargin":False,"tickprefix":"$"},
+                  "automargin":False,"tickprefix":"$",
+                  **({"range": yr} if yr else {})},
     })
     return _make_html(data, layout)
 

@@ -94,44 +94,76 @@ class OverviewTab(QWidget):
         color = BOT_COLOR[side]
         block = QFrame()
         block.setStyleSheet(
-            f"background:{C['panel']};border:1px solid {color}40;"
+            f"background:{C['panel']};border:1px solid {color}30;"
             f"border-radius:10px;border-left:3px solid {color};"
         )
         layout = QVBoxLayout(block)
-        layout.setContentsMargins(14,12,14,12)
-        layout.setSpacing(6)
+        layout.setContentsMargins(16, 14, 16, 14)
+        layout.setSpacing(10)
 
         labels = {
             "LONG":  "▲ LONG BOT",
             "SHORT": "▼ SHORT BOT",
             "DAY":   "◆ DAY BOT",
         }
+
+        # Title row with status dot
+        title_row = QHBoxLayout()
+        title_row.setSpacing(8)
+        status_dot = QLabel("●")
+        status_dot.setStyleSheet(
+            f"color:{C['muted']};font-size:9px;background:transparent;border:none;"
+        )
+        status_dot.setFixedSize(14, 16)
+        block._status_dot = status_dot
+
         title = QLabel(labels[side])
         title.setStyleSheet(
             f"font-family:'Syne',sans-serif;font-size:11px;font-weight:800;"
             f"letter-spacing:3px;color:{color};"
         )
-        layout.addWidget(title)
+        title_row.addWidget(status_dot)
+        title_row.addWidget(title)
+        title_row.addStretch()
+        layout.addLayout(title_row)
 
         cards_layout = QGridLayout()
-        cards_layout.setSpacing(6)
+        cards_layout.setSpacing(8)
 
         card_defs = [
-            ("PORTFOLIO",  "—", color),
-            ("DAY P/L",    "—", C["text"]),
-            ("UNREALIZED", "—", C["text"]),
-            ("POSITIONS",  "—", C["text"]),
+            ("PORTFOLIO", "—", color),
+            ("DAY P/L",   "—", C["text"]),
+            ("PERIOD P/L","—", C["text"]),
+            ("POSITIONS", "—", C["text"]),
         ]
         block._cards = {}
         for i, (lbl, val, c) in enumerate(card_defs):
             card = MetricCard(lbl, val, c)
-            card.setFixedHeight(70)
+            card.setFixedHeight(72)
             cards_layout.addWidget(card, i//2, i%2)
             block._cards[lbl] = card
 
         layout.addLayout(cards_layout)
         block.side = side
         return block
+
+    def update_bot_status(self, side: str, state: str):
+        """Called by main window to update the status dot for a bot block."""
+        block = self.blocks.get(side)
+        if not block:
+            return
+        dot = block._status_dot
+        dot_colors = {
+            "running":         C["green"],
+            "sleeping":        C["orange"],
+            "scheduled":       C["red"],
+            "stopped":         C["muted"],
+            "silenced":        C["border"],
+        }
+        c = dot_colors.get(state, C["muted"])
+        dot.setStyleSheet(
+            f"color:{c};font-size:9px;background:transparent;border:none;"
+        )
 
     def _period_combo(self) -> QComboBox:
         self.period_combo = QComboBox()
@@ -179,20 +211,32 @@ class OverviewTab(QWidget):
                 f"${bc.get('total',0):.4f}", BOT_COLOR[side])
 
     def _refresh_block(self, side, block):
-        a   = D.get_account(side)
-        pos = D.get_positions(side)
-        pv  = a.get("portfolio_value",0)
-        eq  = a.get("equity",0)
-        le  = a.get("last_equity",eq)
-        dp  = eq-le
-        unr = sum(float(p.get("unrealized_pl",0)) for p in pos)
-        arrow = "▲" if dp>=0 else "▼"
-        dc    = C["green"] if dp>=0 else C["red"]
-        uc    = C["green"] if unr>=0 else C["red"]
+        a    = D.get_account(side)
+        pos  = D.get_positions(side)
+        pv   = a.get("portfolio_value", 0)
+        eq   = a.get("equity", 0)
+        le   = a.get("last_equity", eq)
+        dp   = eq - le
+        arrow = "▲" if dp >= 0 else "▼"
+        dc    = C["green"] if dp >= 0 else C["red"]
+
+        # Period P/L: use 1D equity history
+        try:
+            hist = D.get_history(side, "1D")
+            if hist is not None and not hist.empty and len(hist) >= 2:
+                p_pl  = hist["equity"].iloc[-1] - hist["equity"].iloc[0]
+                p_pct = p_pl / hist["equity"].iloc[0] * 100 if hist["equity"].iloc[0] else 0
+                pc    = C["green"] if p_pl >= 0 else C["red"]
+                pa    = "▲" if p_pl >= 0 else "▼"
+                period_txt = f"{pa} ${abs(p_pl):,.2f} ({p_pct:+.1f}%)"
+            else:
+                period_txt, pc = "—", C["muted"]
+        except Exception:
+            period_txt, pc = "—", C["muted"]
+
         block._cards["PORTFOLIO"].update_value(f"${pv:,.2f}", BOT_COLOR[side])
-        block._cards["DAY P/L"].update_value(
-            f"{arrow} ${abs(dp):,.2f}", dc)
-        block._cards["UNREALIZED"].update_value(f"${unr:+,.2f}", uc)
+        block._cards["DAY P/L"].update_value(f"{arrow} ${abs(dp):,.2f}", dc)
+        block._cards["PERIOD P/L"].update_value(period_txt, pc)
         block._cards["POSITIONS"].update_value(str(len(pos)))
 
 

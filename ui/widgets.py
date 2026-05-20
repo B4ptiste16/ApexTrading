@@ -400,10 +400,10 @@ class ScrollContent(QScrollArea):
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
         self._inner = QWidget()
-        self._inner.setStyleSheet(f"background:{COLORS['bg']};")
+        self._inner.setStyleSheet("background:transparent;")
         self._layout = QVBoxLayout(self._inner)
-        self._layout.setContentsMargins(16, 12, 16, 24)
-        self._layout.setSpacing(12)
+        self._layout.setContentsMargins(20, 16, 20, 32)
+        self._layout.setSpacing(16)
         self.setWidget(self._inner)
 
     def add(self, widget: QWidget):
@@ -467,6 +467,115 @@ class WheelGuard(QObject):
             bar = sa.verticalScrollBar()
             bar.setValue(bar.value() - d)
         return True
+
+
+# ─────────────────────────────────────────
+# CLOSED TRADES FEED
+# ─────────────────────────────────────────
+
+class ClosedTradesFeed(QWidget):
+    """
+    Compact scrollable list of closed sell trades.
+    Shows: SOLD AAPL ×12  @$195.40  +$234.50 (+1.8%)  · 3h ago
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        self._scroll = QScrollArea()
+        self._scroll.setWidgetResizable(True)
+        self._scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self._scroll.setFixedHeight(180)
+        self._scroll.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+
+        self._container = QWidget()
+        self._container.setStyleSheet("background:transparent;")
+        self._vbox = QVBoxLayout(self._container)
+        self._vbox.setContentsMargins(0, 0, 0, 0)
+        self._vbox.setSpacing(3)
+        self._vbox.addStretch()
+        self._scroll.setWidget(self._container)
+        layout.addWidget(self._scroll)
+
+        self._empty = QLabel("No closed trades yet")
+        self._empty.setStyleSheet(
+            f"color:{C['muted']};font-size:11px;padding:8px 0;")
+        self._vbox.insertWidget(0, self._empty)
+
+    def load(self, trades: list):
+        """trades = list of dicts: ticker, qty, avg_sell, pl, pl_pct, closed_at"""
+        while self._vbox.count() > 0:
+            item = self._vbox.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        if not trades:
+            empty = QLabel("No closed trades yet")
+            empty.setStyleSheet(
+                f"color:{C['muted']};font-size:11px;padding:8px 0;")
+            self._vbox.addWidget(empty)
+            self._vbox.addStretch()
+            return
+
+        for t in trades:
+            row = self._make_row(t)
+            self._vbox.addWidget(row)
+        self._vbox.addStretch()
+
+    def _make_row(self, t: dict) -> QWidget:
+        ticker  = t.get("ticker", "")
+        qty     = t.get("qty", 0)
+        price   = t.get("avg_sell", 0)
+        pl      = t.get("pl", 0)
+        pl_pct  = t.get("pl_pct", 0)
+        when    = t.get("when", "")
+        pl_c    = C["green"] if pl >= 0 else C["red"]
+        sign    = "+" if pl >= 0 else ""
+
+        frame = QFrame()
+        frame.setStyleSheet(
+            f"background:{C['panel']};border:1px solid {C['border']};"
+            f"border-radius:6px;")
+        row = QHBoxLayout(frame)
+        row.setContentsMargins(12, 7, 12, 7)
+        row.setSpacing(8)
+
+        action = QLabel("SOLD")
+        action.setStyleSheet(
+            f"color:{C['red']};font-size:9px;font-weight:700;"
+            f"letter-spacing:2px;min-width:32px;")
+
+        sym = QLabel(ticker)
+        sym.setStyleSheet(
+            f"color:{C['text']};font-size:11px;font-weight:600;"
+            f"min-width:54px;")
+
+        qty_lbl = QLabel(f"×{abs(qty):.0f}" if qty == int(qty)
+                         else f"×{abs(qty):.4g}")
+        qty_lbl.setStyleSheet(f"color:{C['muted']};font-size:10px;")
+
+        price_lbl = QLabel(f"@ ${price:,.2f}")
+        price_lbl.setStyleSheet(f"color:{C['muted']};font-size:10px;")
+
+        pl_lbl = QLabel(f"{sign}${abs(pl):,.2f}  ({sign}{pl_pct:.1f}%)")
+        pl_lbl.setStyleSheet(
+            f"color:{pl_c};font-size:11px;font-weight:600;")
+
+        when_lbl = QLabel(when)
+        when_lbl.setStyleSheet(f"color:{C['muted']};font-size:9px;")
+
+        row.addWidget(action)
+        row.addWidget(sym)
+        row.addWidget(qty_lbl)
+        row.addWidget(price_lbl)
+        row.addWidget(pl_lbl)
+        row.addStretch()
+        row.addWidget(when_lbl)
+        return frame
 
 
 # ─────────────────────────────────────────

@@ -1,6 +1,5 @@
 """
-APEX UI Styles
-All Qt stylesheets and colour constants in one place.
+APEX UI Styles — V7
 """
 
 COLORS = {
@@ -9,12 +8,13 @@ COLORS = {
     "orange": "#d99a52",
     "yellow": "#d6c95e",
     "purple": "#8a93c9",
-    "bg":     "#0a0d12",
-    "panel":  "#10141b",
-    "panel2": "#161b24",
-    "border": "#222a36",
-    "text":   "#d6dce6",
-    "muted":  "#5a6478",
+    "bg":     "#0c0f16",   # gradient start (top-left, cool dark navy)
+    "bg2":    "#131a2a",   # gradient end  (bottom-right, warmer blue-grey)
+    "panel":  "#111622",
+    "panel2": "#181f2e",
+    "border": "#232d40",
+    "text":   "#d8dde8",
+    "muted":  "#5c6b82",
 }
 
 C = COLORS
@@ -28,7 +28,7 @@ BOT_COLOR = {
 DARK_STYLESHEET = f"""
 /* ── GLOBAL ── */
 QWidget {{
-    background-color: {C['bg']};
+    background-color: transparent;
     color: {C['text']};
     font-family: 'JetBrains Mono', monospace;
     font-size: 12px;
@@ -41,7 +41,11 @@ QMainWindow {{
 /* ── TABS ── */
 QTabWidget#mainTabs::pane {{
     border: none;
-    background: {C['bg']};
+    background: transparent;
+}}
+
+QTabWidget#mainTabs > QWidget {{
+    background: transparent;
 }}
 
 QTabBar::tab {{
@@ -51,19 +55,96 @@ QTabBar::tab {{
     font-size: 10px;
     font-weight: 500;
     letter-spacing: 1px;
-    padding: 12px 26px;
+    padding: 13px 22px;
     border: none;
-    border-bottom: 1px solid transparent;
-    margin-right: 4px;
+    border-bottom: 2px solid transparent;
+    margin-right: 2px;
 }}
 
 QTabBar::tab:selected {{
     color: {C['text']};
-    border-bottom: 1px solid {C['green']};
+    border-bottom: 2px solid {C['green']};
 }}
 
 QTabBar::tab:hover:!selected {{
     color: {C['text']};
+    background: rgba(255,255,255,0.025);
+}}
+
+/* ── CORNER BUTTONS (Universe / Tools) ── */
+QPushButton#cornerBtn {{
+    background: transparent;
+    color: {C['muted']};
+    border: none;
+    border-bottom: 2px solid transparent;
+    font-family: 'JetBrains Mono';
+    font-size: 10px;
+    font-weight: 500;
+    letter-spacing: 1px;
+    padding: 7px 14px;
+    border-radius: 0;
+    min-width: 0;
+}}
+
+QPushButton#cornerBtn:hover {{
+    color: {C['text']};
+}}
+
+QPushButton#cornerBtn[active="true"] {{
+    color: {C['text']};
+    border-bottom: 2px solid {C['purple']};
+}}
+
+/* ── TAB QUICK CONTROLS ── */
+QPushButton#tabPlayBtn {{
+    background: transparent;
+    color: {C['muted']};
+    border: none;
+    padding: 0;
+    font-size: 8px;
+    border-radius: 2px;
+    min-width: 0;
+    max-width: 16px;
+    max-height: 16px;
+}}
+
+QPushButton#tabPlayBtn:hover {{
+    color: {C['green']};
+    background: rgba(63,184,154,0.15);
+}}
+
+QPushButton#tabStopBtn {{
+    background: transparent;
+    color: {C['muted']};
+    border: none;
+    padding: 0;
+    font-size: 8px;
+    border-radius: 2px;
+    min-width: 0;
+    max-width: 16px;
+    max-height: 16px;
+}}
+
+QPushButton#tabStopBtn:hover {{
+    color: {C['red']};
+    background: rgba(199,92,107,0.15);
+}}
+
+QPushButton#tabRemoveBtn {{
+    background: transparent;
+    color: transparent;
+    border: none;
+    padding: 0;
+    font-size: 8px;
+    border-radius: 2px;
+    min-width: 0;
+    max-width: 16px;
+    max-height: 16px;
+}}
+
+QPushButton#tabRemoveBtn:hover {{
+    color: {C['muted']};
+    background: rgba(255,255,255,0.08);
 }}
 
 /* ── SCROLL AREA ── */
@@ -73,38 +154,41 @@ QScrollArea {{
 }}
 
 QScrollBar:vertical {{
-    background: {C['bg']};
-    width: 5px;
+    background: transparent;
+    width: 4px;
     border-radius: 2px;
+    margin: 0;
 }}
 
 QScrollBar::handle:vertical {{
     background: {C['border']};
     border-radius: 2px;
-    min-height: 20px;
+    min-height: 30px;
 }}
 
-QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
-    height: 0;
-}}
+QScrollBar::add-line:vertical,
+QScrollBar::sub-line:vertical {{ height: 0; }}
 
 QScrollBar:horizontal {{
-    background: {C['bg']};
-    height: 5px;
+    background: transparent;
+    height: 4px;
     border-radius: 2px;
 }}
 
 QScrollBar::handle:horizontal {{
     background: {C['border']};
     border-radius: 2px;
-    min-width: 20px;
+    min-width: 30px;
 }}
+
+QScrollBar::add-line:horizontal,
+QScrollBar::sub-line:horizontal {{ width: 0; }}
 
 /* ── FRAMES / PANELS ── */
 QFrame#card {{
     background: {C['panel']};
     border: 1px solid {C['border']};
-    border-radius: 6px;
+    border-radius: 8px;
 }}
 
 QFrame#sectionFrame {{
@@ -118,21 +202,20 @@ QLabel#sectionTitle {{
     font-size: 10px;
     font-weight: 600;
     letter-spacing: 2px;
-    text-transform: uppercase;
     color: {C['muted']};
     padding: 0;
 }}
 
 QLabel#cardLabel {{
-    font-size: 9px;
+    font-size: 8px;
     color: {C['muted']};
-    letter-spacing: 2px;
+    letter-spacing: 3px;
 }}
 
 QLabel#cardValue {{
     font-family: 'Syne', sans-serif;
-    font-size: 20px;
-    font-weight: 600;
+    font-size: 18px;
+    font-weight: 700;
     color: {C['text']};
 }}
 
@@ -146,7 +229,7 @@ QPushButton {{
     background: {C['panel2']};
     color: {C['text']};
     border: 1px solid {C['border']};
-    border-radius: 4px;
+    border-radius: 5px;
     font-family: 'JetBrains Mono';
     font-size: 10px;
     font-weight: 500;
@@ -212,6 +295,31 @@ QPushButton#updateBtn {{
     padding: 6px 16px;
 }}
 
+QPushButton#addBotBtn {{
+    background: rgba(63,184,154,0.08);
+    color: {C['green']};
+    border: 1px solid rgba(63,184,154,0.40);
+    font-size: 10px;
+    padding: 6px 14px;
+}}
+
+QPushButton#addBotBtn:hover {{
+    background: rgba(63,184,154,0.16);
+    border-color: {C['green']};
+}}
+
+QPushButton#silenceBtn {{
+    background: rgba(92,107,130,0.07);
+    color: {C['muted']};
+    border: 1px solid rgba(92,107,130,0.30);
+    font-size: 10px;
+    padding: 5px 12px;
+}}
+
+QPushButton#silenceBtn:hover {{
+    background: rgba(92,107,130,0.14);
+}}
+
 /* ── TABLE ── */
 QTableWidget {{
     background: {C['panel']};
@@ -224,7 +332,7 @@ QTableWidget {{
 }}
 
 QTableWidget::item {{
-    padding: 8px 12px;
+    padding: 9px 12px;
     border: none;
 }}
 
@@ -239,8 +347,7 @@ QHeaderView::section {{
     font-size: 9px;
     font-weight: 600;
     letter-spacing: 2px;
-    text-transform: uppercase;
-    padding: 8px 12px;
+    padding: 9px 12px;
     border: none;
     border-bottom: 1px solid {C['border']};
 }}
@@ -253,7 +360,7 @@ QComboBox {{
     border-radius: 5px;
     padding: 5px 10px;
     font-size: 11px;
-    min-width: 180px;
+    min-width: 80px;
 }}
 
 QComboBox::drop-down {{
@@ -265,7 +372,7 @@ QComboBox QAbstractItemView {{
     background: {C['panel']};
     color: {C['text']};
     border: 1px solid {C['border']};
-    selection-background-color: #111a24;
+    selection-background-color: {C['panel2']};
 }}
 
 /* ── PROGRESS BAR ── */
@@ -283,7 +390,7 @@ QProgressBar::chunk {{
     border-radius: 3px;
 }}
 
-/* ── TEXT EDIT (log view) ── */
+/* ── TEXT EDIT ── */
 QTextEdit, QPlainTextEdit {{
     background: {C['panel2']};
     color: {C['text']};
@@ -299,7 +406,7 @@ QLineEdit {{
     color: {C['text']};
     border: 1px solid {C['border']};
     border-radius: 5px;
-    padding: 5px 10px;
+    padding: 6px 12px;
     font-size: 11px;
 }}
 
@@ -336,7 +443,47 @@ QToolTip {{
     color: {C['text']};
     border: 1px solid {C['border']};
     font-size: 11px;
-    padding: 4px 8px;
+    padding: 5px 10px;
     border-radius: 4px;
+}}
+
+/* ── CHECKBOX ── */
+QCheckBox {{
+    color: {C['text']};
+    spacing: 6px;
+}}
+
+QCheckBox::indicator {{
+    width: 14px;
+    height: 14px;
+    border: 1px solid {C['border']};
+    border-radius: 3px;
+    background: {C['panel']};
+}}
+
+QCheckBox::indicator:checked {{
+    background: {C['green']};
+    border-color: {C['green']};
+}}
+
+/* ── SPIN BOX ── */
+QDoubleSpinBox, QSpinBox {{
+    background: {C['panel']};
+    color: {C['text']};
+    border: 1px solid {C['border']};
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-size: 11px;
+}}
+
+QDoubleSpinBox:focus, QSpinBox:focus {{
+    border-color: {C['muted']};
+}}
+
+QDoubleSpinBox::up-button, QDoubleSpinBox::down-button,
+QSpinBox::up-button, QSpinBox::down-button {{
+    border: none;
+    background: transparent;
+    width: 14px;
 }}
 """

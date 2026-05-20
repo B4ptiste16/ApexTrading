@@ -13,7 +13,7 @@ from PyQt6.QtCore import Qt, QTimer
 from ui.styles  import COLORS, BOT_COLOR
 from ui.widgets import (
     ChartView, MetricCard, SectionHeader,
-    BotProcessWidget, ScrollContent, DataTable,
+    BotProcessWidget, ScrollContent, DataTable, ClosedTradesFeed,
 )
 from core.worker import RefreshWorker
 import core.data   as D
@@ -46,13 +46,14 @@ class BotTab(QWidget):
         # 1. ACCOUNT CARDS
         s.add(SectionHeader("ACCOUNT SUMMARY", self.color))
         row = QHBoxLayout()
+        row.setSpacing(10)
         self.card_portfolio  = MetricCard("PORTFOLIO",  "—", self.color)
         self.card_day_pl     = MetricCard("DAY P/L",    "—")
-        self.card_unrealized = MetricCard("UNREALIZED", "—")
+        self.card_period_pl  = MetricCard("PERIOD P/L", "—")
         self.card_cash       = MetricCard("CASH",       "—")
         self.card_invested   = MetricCard("INVESTED",   "—")
         self.card_positions  = MetricCard("POSITIONS",  "—")
-        for c in [self.card_portfolio, self.card_day_pl, self.card_unrealized,
+        for c in [self.card_portfolio, self.card_day_pl, self.card_period_pl,
                   self.card_cash, self.card_invested, self.card_positions]:
             row.addWidget(c)
         if self.side == "DAY":
@@ -66,11 +67,16 @@ class BotTab(QWidget):
         rw = QWidget(); rw.setLayout(row)
         s.add(rw)
 
-        # 2. SIGNAL
+        # 2. RECENT CLOSED TRADES
+        s.add(SectionHeader("RECENT CLOSED TRADES", self.color))
+        self.closed_trades_feed = ClosedTradesFeed()
+        s.add(self.closed_trades_feed)
+
+        # 3. SIGNAL
         s.add(SectionHeader("LAST AI SIGNAL", self.color))
         s.add(self._build_signal_panel())
 
-        # 3. BOT CONTROLS
+        # 4. BOT CONTROLS
         s.add(SectionHeader("BOT CONTROLS", self.color))
         self.bot_ctrl = BotProcessWidget(self.side, self.script)
         s.add(self.bot_ctrl)
@@ -211,14 +217,14 @@ class BotTab(QWidget):
             arw = QWidget(); arw.setLayout(atr_row)
             s.add(arw)
 
-        # 4. POSITION GAUGE
+        # 5. POSITION GAUGE
         title = ("OPEN BRACKETS — LIVE" if self.side=="DAY"
                  else "POSITION GAUGE — vs ATR LEVELS")
         s.add(SectionHeader(title, self.color))
         self.gauge_chart = ChartView(height=260)
         s.add(self.gauge_chart)
 
-        # 5. EQUITY CURVES
+        # 6. EQUITY CURVES
         s.add(SectionHeader("EQUITY CURVES", self.color,
                             controls=self._period_combo()))
         cr = QHBoxLayout()
@@ -229,7 +235,7 @@ class BotTab(QWidget):
         cw = QWidget(); cw.setLayout(cr)
         s.add(cw)
 
-        # 6. TRADE HISTORY
+        # 7. TRADE HISTORY
         s.add(SectionHeader("TRADE HISTORY", self.color))
         self.timeline_chart = ChartView(height=260)
         s.add(self.timeline_chart)
@@ -239,7 +245,7 @@ class BotTab(QWidget):
         self.trade_table.setFixedHeight(200)
         s.add(self.trade_table)
 
-        # 7. P/L & ALLOCATION
+        # 8. P/L & ALLOCATION
         s.add(SectionHeader("P/L & ALLOCATION", self.color))
         pr = QHBoxLayout()
         self.pl_chart  = ChartView(height=220)
@@ -249,9 +255,10 @@ class BotTab(QWidget):
         pw = QWidget(); pw.setLayout(pr)
         s.add(pw)
 
-        # 8. RISK METRICS
-        s.add(SectionHeader("RISK METRICS", self.color))
+        # 9. RISK METRICS & STATS
+        s.add(SectionHeader("RISK METRICS & STATS", self.color))
         rr = QHBoxLayout()
+        rr.setSpacing(14)
         self.dd_chart = ChartView(height=180)
         rr.addWidget(self.dd_chart)
         self.risk_cards_frame = QFrame()
@@ -259,7 +266,7 @@ class BotTab(QWidget):
         rcl.setSpacing(8)
         self.risk_cards = {}
         for i, m in enumerate(["TOTAL RETURN","SHARPE","MAX DD",
-                                "WIN RATE","VOLATILITY"]):
+                                "WIN RATE","VOLATILITY","AVG DAILY"]):
             card = MetricCard(m, "—")
             rcl.addWidget(card, i//2, i%2)
             self.risk_cards[m] = card
@@ -267,7 +274,7 @@ class BotTab(QWidget):
         rrw = QWidget(); rrw.setLayout(rr)
         s.add(rrw)
 
-        # 9. API COST
+        # 10. API COST
         s.add(SectionHeader("API COST", self.color))
         cr2 = QHBoxLayout()
         self.cost_total   = MetricCard("TOTAL SPENT",  "—", C["yellow"])
@@ -279,7 +286,7 @@ class BotTab(QWidget):
         cw2 = QWidget(); cw2.setLayout(cr2)
         s.add(cw2)
 
-        # 10. POSITION MANAGEMENT
+        # 11. POSITION MANAGEMENT
         s.add(SectionHeader("POSITION MANAGEMENT", self.color))
         self.pos_table = DataTable()
         self.pos_table.setFixedHeight(180)
@@ -388,6 +395,7 @@ class BotTab(QWidget):
         """Called on main thread when background fetch completes."""
         self._cached = data
         self._apply_account(data)
+        self._apply_closed_trades(data)
         self._apply_signal(data)
         self._apply_gauge(data)
         self._apply_equity(data)
@@ -400,25 +408,40 @@ class BotTab(QWidget):
     # ── APPLY ────────────────────────────────────────────────
 
     def _apply_account(self, data):
-        a   = data.get("account", {})
-        pos = data.get("positions", [])
-        pv  = a.get("portfolio_value", 0)
-        eq  = a.get("equity", 0)
-        ca  = a.get("cash", 0)
-        le  = a.get("last_equity", eq)
-        dp  = eq - le
-        dpc = dp/le*100 if le else 0
-        unr = sum(float(p.get("unrealized_pl",0)) for p in pos)
-        inv = pv - ca
+        import pandas as pd
+        a    = data.get("account", {})
+        pos  = data.get("positions", [])
+        hist = data.get("history", pd.DataFrame())
+        pv   = a.get("portfolio_value", 0)
+        eq   = a.get("equity", 0)
+        ca   = a.get("cash", 0)
+        le   = a.get("last_equity", eq)
+        dp   = eq - le
+        dpc  = dp/le*100 if le else 0
+        inv  = pv - ca
         inv_pct = inv/pv*100 if pv else 0
         arrow = "▲" if dp>=0 else "▼"
         dc    = C["green"] if dp>=0 else C["red"]
-        uc    = C["green"] if unr>=0 else C["red"]
+
+        # Period P/L from equity history (replaces raw unrealized)
+        period = getattr(self, "period_combo",
+                         type("",(),{"currentText": lambda s: "1D"})()).currentText()
+        if hist is not None and not hist.empty and len(hist) >= 2:
+            p_pl  = hist["equity"].iloc[-1] - hist["equity"].iloc[0]
+            p_pct = p_pl / hist["equity"].iloc[0] * 100 if hist["equity"].iloc[0] else 0
+            pc    = C["green"] if p_pl >= 0 else C["red"]
+            pa    = "▲" if p_pl >= 0 else "▼"
+            period_txt = f"{pa} ${abs(p_pl):,.2f}"
+            period_sub = f"{p_pct:+.2f}%  ({period})"
+        else:
+            period_txt = "—"
+            period_sub = period
+            pc = C["muted"]
 
         self.card_portfolio.update_value(f"${pv:,.2f}", self.color)
         self.card_day_pl.update_value(
             f"{arrow} ${abs(dp):,.2f}", dc, sub=f"{dpc:+.2f}%")
-        self.card_unrealized.update_value(f"${unr:+,.2f}", uc)
+        self.card_period_pl.update_value(period_txt, pc, sub=period_sub)
         self.card_cash.update_value(
             f"${ca:,.2f}", sub=f"{ca/pv*100:.1f}%" if pv else "")
         self.card_invested.update_value(
@@ -438,6 +461,59 @@ class BotTab(QWidget):
                 f"${pnl:+,.2f}", C["green"] if pnl>=0 else C["red"])
             self.card_brackets.update_value(
                 str(len(st.get("open_brackets",{}))))
+
+    def _apply_closed_trades(self, data):
+        import pandas as pd
+        odf = data.get("orders", pd.DataFrame())
+        if odf.empty:
+            self.closed_trades_feed.load([])
+            return
+        filled = odf[odf["Filled"].notna()].copy()
+        sells  = filled[filled["Side"] == "SELL"].sort_values(
+            "Filled", ascending=False)
+        if sells.empty:
+            self.closed_trades_feed.load([])
+            return
+
+        now   = pd.Timestamp.now(tz="UTC")
+        items = []
+        for _, row in sells.head(25).iterrows():
+            t      = row["Ticker"]
+            qty    = float(row["Qty"])
+            price  = float(row["Avg Fill"])
+            filled_at = row["Filled"]
+
+            # Compute per-ticker round-trip P/L
+            t_ord  = filled[filled["Ticker"] == t]
+            buys   = t_ord[t_ord["Side"] == "BUY"]
+            t_sells= t_ord[t_ord["Side"] == "SELL"]
+            avg_b  = ((buys["Qty"] * buys["Avg Fill"]).sum() /
+                      buys["Qty"].sum()) if (not buys.empty and buys["Qty"].sum() > 0) else 0
+            avg_s  = ((t_sells["Qty"] * t_sells["Avg Fill"]).sum() /
+                      t_sells["Qty"].sum()) if (not t_sells.empty and t_sells["Qty"].sum() > 0) else price
+            pl     = (avg_s - avg_b) * t_sells["Qty"].sum() if avg_b > 0 else 0
+            pl_pct = (avg_s / avg_b - 1) * 100 if avg_b > 0 else 0
+
+            # Human-readable "when"
+            delta  = now - filled_at
+            secs   = int(delta.total_seconds())
+            if secs < 3600:
+                when = f"{secs//60}m ago"
+            elif secs < 86400:
+                when = f"{secs//3600}h ago"
+            else:
+                when = f"{secs//86400}d ago"
+
+            items.append({
+                "ticker":   t,
+                "qty":      qty,
+                "avg_sell": avg_s,
+                "pl":       pl,
+                "pl_pct":   pl_pct,
+                "when":     when,
+            })
+
+        self.closed_trades_feed.load(items)
 
     def _apply_signal(self, data):
         log = data.get("log")
@@ -558,6 +634,8 @@ class BotTab(QWidget):
         m = D.risk_metrics(snaps["portfolio_value"])
         if not m: return
         self.dd_chart.load_chart(CH.drawdown_chart(snaps))
+        days = max(1, (snaps["time"].max() - snaps["time"].min()).days + 1)
+        avg_daily = m["total_return"] / days if days > 0 else 0
         updates = {
             "TOTAL RETURN":(f"{m['total_return']:+.2f}%",
                             C["green"] if m["total_return"]>=0 else C["red"]),
@@ -570,6 +648,8 @@ class BotTab(QWidget):
             "WIN RATE":    (f"{m['win_rate']:.1f}%",
                             C["green"] if m["win_rate"]>=50 else C["red"]),
             "VOLATILITY":  (f"{m['volatility']:.2f}%/yr", C["muted"]),
+            "AVG DAILY":   (f"{avg_daily:+.3f}%/day",
+                            C["green"] if avg_daily>=0 else C["red"]),
         }
         for key,(val,color) in updates.items():
             if key in self.risk_cards:
