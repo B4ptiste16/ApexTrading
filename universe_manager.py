@@ -318,17 +318,40 @@ def scan_all(bot_type: str, current: list,
 # FILE I/O
 # ─────────────────────────────────────────
 
+def _read_text_lines(path: str) -> list:
+    """Read a text file as utf-8; tolerate legacy cp1252 bytes (em-dash 0x97
+    etc.) written by older builds. On fallback, rewrite the file as utf-8
+    so future reads stay clean."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            return f.readlines()
+    except UnicodeDecodeError:
+        pass
+    try:
+        with open(path, encoding="cp1252") as f:
+            data = f.readlines()
+    except UnicodeDecodeError:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            data = f.readlines()
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            f.writelines(data)
+        print(f"  [encoding] repaired {path} → utf-8")
+    except Exception:
+        pass
+    return data
+
+
 def read_universe(bot: str) -> list:
     path = UNIVERSE_FILES.get(bot, "")
     if not path or not os.path.exists(path):
         return []
     tickers = []
-    with open(path, encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line or line.startswith("#"):
-                continue
-            tickers.append(line.upper().split()[0])
+    for line in _read_text_lines(path):
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        tickers.append(line.upper().split()[0])
     return list(dict.fromkeys(tickers))
 
 
@@ -357,16 +380,15 @@ def read_watchlist() -> dict:
     if not os.path.exists(WATCHLIST_FILE):
         return {}
     result = {}
-    with open(WATCHLIST_FILE, encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line or line.startswith("#"):
-                continue
-            parts  = line.split("#", 1)
-            ticker = parts[0].strip().upper()
-            note   = parts[1].strip() if len(parts) > 1 else ""
-            if ticker:
-                result[ticker] = note
+    for line in _read_text_lines(WATCHLIST_FILE):
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        parts  = line.split("#", 1)
+        ticker = parts[0].strip().upper()
+        note   = parts[1].strip() if len(parts) > 1 else ""
+        if ticker:
+            result[ticker] = note
     return result
 
 
@@ -381,8 +403,7 @@ def promote_from_watchlist(ticker: str):
     """Mark a watchlist ticker as promoted when it enters the universe."""
     if not os.path.exists(WATCHLIST_FILE):
         return
-    with open(WATCHLIST_FILE, encoding="utf-8") as f:
-        lines = f.readlines()
+    lines = _read_text_lines(WATCHLIST_FILE)
     now = datetime.now().strftime("%Y-%m-%d")
     new_lines = []
     for line in lines:
@@ -700,8 +721,7 @@ def print_status():
 
     # Show log if exists
     if os.path.exists(LOG_FILE):
-        with open(LOG_FILE, encoding="utf-8") as f:
-            lines = f.readlines()
+        lines = _read_text_lines(LOG_FILE)
         if lines:
             last = json.loads(lines[-1])
             print(f"  Last run: {last.get('time','unknown')[:16]}")

@@ -11,16 +11,16 @@ import pandas as pd
 
 # All charts return HTML strings — no Qt imports needed here
 
-G   = "#00f5c3"
-R   = "#ff4d6d"
-OR2 = "#ff9f43"
-Y   = "#ffe353"
-PU  = "#7b8cff"
-BG     = "#060a0e"
-PANEL  = "#0b0f16"
-BORDER = "#18212e"
-TEXT   = "#d0d8e4"
-MUTED  = "#4a5568"
+G   = "#3fb89a"
+R   = "#c75c6b"
+OR2 = "#d99a52"
+Y   = "#d6c95e"
+PU  = "#8a93c9"
+BG     = "#0a0d12"
+PANEL  = "#10141b"
+BORDER = "#222a36"
+TEXT   = "#d6dce6"
+MUTED  = "#5a6478"
 
 BOT_COLOR = {"LONG": G, "SHORT": R, "DAY": OR2}
 

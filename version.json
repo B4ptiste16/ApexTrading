@@ -1,4 +1,4 @@
 {
-  "version": "1.0.4",
-  "notes": "Initial release \u00e2\u20ac\u201d PyQt6 desktop app with bracket gauge, position management, bot controls, and IBKR export."
+  "version": "1.0.5",
+  "notes": "Tolerant universe-file reader (auto-repairs legacy cp1252 bytes). Calmer, more spaced UI: muted palette, sober section headers, lighter tabs and tables."
 }

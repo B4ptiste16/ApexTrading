@@ -162,18 +162,32 @@ class SectionHeader(QWidget):
     def __init__(self, title: str, color: str = C["green"],
                  controls: QWidget = None, parent=None):
         super().__init__(parent)
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 8, 0, 6)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 18, 0, 10)
+        outer.setSpacing(6)
+
+        row = QHBoxLayout()
+        row.setContentsMargins(0, 0, 0, 0)
 
         lbl = QLabel(title)
         lbl.setStyleSheet(
-            f"font-family:'Syne',sans-serif;font-size:9px;font-weight:700;"
-            f"letter-spacing:4px;color:{color};"
+            f"font-family:'Syne',sans-serif;font-size:10px;font-weight:600;"
+            f"letter-spacing:2px;color:{C['muted']};"
+            f"text-transform:uppercase;"
         )
-        layout.addWidget(lbl)
-        layout.addStretch()
+        row.addWidget(lbl)
+        row.addStretch()
         if controls:
-            layout.addWidget(controls)
+            row.addWidget(controls)
+        outer.addLayout(row)
+
+        rule = QFrame()
+        rule.setFrameShape(QFrame.Shape.HLine)
+        rule.setFixedHeight(1)
+        rule.setStyleSheet(
+            f"background:{C['border']};border:none;max-height:1px;"
+        )
+        outer.addWidget(rule)
 
 
 # ─────────────────────────────────────────

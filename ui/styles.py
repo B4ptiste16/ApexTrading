@@ -4,17 +4,17 @@ All Qt stylesheets and colour constants in one place.
 """
 
 COLORS = {
-    "green":  "#00f5c3",
-    "red":    "#ff4d6d",
-    "orange": "#ff9f43",
-    "yellow": "#ffe353",
-    "purple": "#7b8cff",
-    "bg":     "#060a0e",
-    "panel":  "#0b0f16",
-    "panel2": "#0f1520",
-    "border": "#18212e",
-    "text":   "#d0d8e4",
-    "muted":  "#4a5568",
+    "green":  "#3fb89a",
+    "red":    "#c75c6b",
+    "orange": "#d99a52",
+    "yellow": "#d6c95e",
+    "purple": "#8a93c9",
+    "bg":     "#0a0d12",
+    "panel":  "#10141b",
+    "panel2": "#161b24",
+    "border": "#222a36",
+    "text":   "#d6dce6",
+    "muted":  "#5a6478",
 }
 
 C = COLORS
@@ -45,28 +45,25 @@ QTabWidget#mainTabs::pane {{
 }}
 
 QTabBar::tab {{
-    background: {C['panel']};
+    background: transparent;
     color: {C['muted']};
     font-family: 'JetBrains Mono';
     font-size: 10px;
-    font-weight: 600;
-    letter-spacing: 2px;
-    padding: 10px 22px;
-    border: 1px solid {C['border']};
-    border-bottom: none;
-    margin-right: 2px;
-    border-radius: 6px 6px 0 0;
+    font-weight: 500;
+    letter-spacing: 1px;
+    padding: 12px 26px;
+    border: none;
+    border-bottom: 1px solid transparent;
+    margin-right: 4px;
 }}
 
 QTabBar::tab:selected {{
-    background: {C['panel2']};
     color: {C['text']};
-    border-color: {C['border']};
+    border-bottom: 1px solid {C['green']};
 }}
 
 QTabBar::tab:hover:!selected {{
     color: {C['text']};
-    background: {C['panel2']};
 }}
 
 /* ── SCROLL AREA ── */
@@ -107,7 +104,7 @@ QScrollBar::handle:horizontal {{
 QFrame#card {{
     background: {C['panel']};
     border: 1px solid {C['border']};
-    border-radius: 8px;
+    border-radius: 6px;
 }}
 
 QFrame#sectionFrame {{
@@ -118,24 +115,24 @@ QFrame#sectionFrame {{
 /* ── LABELS ── */
 QLabel#sectionTitle {{
     font-family: 'Syne', sans-serif;
-    font-size: 9px;
-    font-weight: 700;
-    letter-spacing: 4px;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 2px;
     text-transform: uppercase;
-    color: {C['green']};
+    color: {C['muted']};
     padding: 0;
 }}
 
 QLabel#cardLabel {{
-    font-size: 8px;
+    font-size: 9px;
     color: {C['muted']};
-    letter-spacing: 3px;
+    letter-spacing: 2px;
 }}
 
 QLabel#cardValue {{
     font-family: 'Syne', sans-serif;
-    font-size: 18px;
-    font-weight: 700;
+    font-size: 20px;
+    font-weight: 600;
     color: {C['text']};
 }}
 
@@ -147,68 +144,72 @@ QLabel#cardSub {{
 /* ── BUTTONS ── */
 QPushButton {{
     background: {C['panel2']};
-    color: {C['muted']};
+    color: {C['text']};
     border: 1px solid {C['border']};
-    border-radius: 6px;
+    border-radius: 4px;
     font-family: 'JetBrains Mono';
     font-size: 10px;
-    font-weight: 600;
+    font-weight: 500;
     letter-spacing: 1px;
-    padding: 7px 16px;
+    padding: 8px 18px;
 }}
 
 QPushButton:hover {{
     color: {C['text']};
-    border-color: {C['border']};
+    border-color: {C['muted']};
     background: {C['panel']};
 }}
 
 QPushButton#runBtn {{
-    background: rgba(0,245,195,0.1);
+    background: rgba(63,184,154,0.10);
     color: {C['green']};
-    border: 1px solid {C['green']};
+    border: 1px solid rgba(63,184,154,0.55);
 }}
 
 QPushButton#runBtn:hover {{
-    background: rgba(0,245,195,0.2);
+    background: rgba(63,184,154,0.18);
+    border-color: {C['green']};
 }}
 
 QPushButton#stopBtn {{
-    background: rgba(255,77,109,0.1);
+    background: rgba(199,92,107,0.10);
     color: {C['red']};
-    border: 1px solid {C['red']};
+    border: 1px solid rgba(199,92,107,0.55);
 }}
 
 QPushButton#stopBtn:hover {{
-    background: rgba(255,77,109,0.2);
+    background: rgba(199,92,107,0.18);
+    border-color: {C['red']};
 }}
 
 QPushButton#dangerBtn {{
-    background: rgba(255,77,109,0.08);
+    background: rgba(199,92,107,0.08);
     color: {C['red']};
-    border: 1px solid {C['red']};
+    border: 1px solid rgba(199,92,107,0.45);
 }}
 
 QPushButton#dangerBtn:hover {{
-    background: rgba(255,77,109,0.2);
+    background: rgba(199,92,107,0.16);
+    border-color: {C['red']};
 }}
 
 QPushButton#toolBtn {{
-    background: rgba(123,140,255,0.08);
+    background: rgba(138,147,201,0.08);
     color: {C['purple']};
-    border: 1px solid {C['purple']};
+    border: 1px solid rgba(138,147,201,0.45);
 }}
 
 QPushButton#toolBtn:hover {{
-    background: rgba(123,140,255,0.2);
+    background: rgba(138,147,201,0.16);
+    border-color: {C['purple']};
 }}
 
 QPushButton#updateBtn {{
-    background: rgba(123,140,255,0.1);
+    background: rgba(138,147,201,0.10);
     color: {C['purple']};
-    border: 1px solid {C['purple']};
+    border: 1px solid rgba(138,147,201,0.45);
     font-size: 10px;
-    padding: 5px 14px;
+    padding: 6px 16px;
 }}
 
 /* ── TABLE ── */
@@ -219,28 +220,29 @@ QTableWidget {{
     border-radius: 6px;
     gridline-color: {C['border']};
     font-size: 11px;
-    selection-background-color: #111a24;
+    selection-background-color: {C['panel2']};
 }}
 
 QTableWidget::item {{
-    padding: 6px 10px;
+    padding: 8px 12px;
     border: none;
 }}
 
 QTableWidget::item:selected {{
-    background: #111a24;
+    background: {C['panel2']};
     color: {C['text']};
 }}
 
 QHeaderView::section {{
-    background: #0c1420;
-    color: {C['green']};
+    background: {C['panel2']};
+    color: {C['muted']};
     font-size: 9px;
     font-weight: 600;
     letter-spacing: 2px;
     text-transform: uppercase;
-    padding: 6px 10px;
-    border: 1px solid {C['border']};
+    padding: 8px 12px;
+    border: none;
+    border-bottom: 1px solid {C['border']};
 }}
 
 /* ── COMBO BOX ── */
@@ -302,7 +304,7 @@ QLineEdit {{
 }}
 
 QLineEdit:focus {{
-    border-color: {C['green']};
+    border-color: {C['muted']};
 }}
 
 /* ── MESSAGE BOX ── */
