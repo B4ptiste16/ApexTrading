@@ -1,4 +1,4 @@
 {
-  "version": "1.0.5",
+  "version": "1.0.6",
   "notes": "Tolerant universe-file reader (auto-repairs legacy cp1252 bytes). Calmer, more spaced UI: muted palette, sober section headers, lighter tabs and tables."
 }

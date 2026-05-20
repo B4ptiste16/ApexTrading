@@ -161,8 +161,11 @@ def launch_downloaded_installer(local_path: str) -> None:
     so the installer can replace files."""
     import subprocess
     exe = sys.executable
-    cmd = (f'"{local_path}" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART '
-           f'/CLOSEAPPLICATIONS & start "" "{exe}"')
+    # /SILENT (not /VERYSILENT) so the user sees Inno's progress bar —
+    # confirms the install is actually happening. /SUPPRESSMSGBOXES still
+    # skips the "completed" dialog so the relaunch is seamless.
+    cmd = (f'"{local_path}" /SILENT /SUPPRESSMSGBOXES /NORESTART '
+           f'/CLOSEAPPLICATIONS /RESTARTAPPLICATIONS & start "" "{exe}"')
     subprocess.Popen(
         ["cmd", "/c", cmd],
         creationflags=0x00000008 | 0x00000200)  # DETACHED | NEW_GROUP
