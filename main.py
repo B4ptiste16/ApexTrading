@@ -558,8 +558,9 @@ class UpdateChecker(QThread):
 
 class ApexWindow(QMainWindow):
 
-    def __init__(self):
+    def __init__(self, user: dict = None):
         super().__init__()
+        self._user = user or {}
         self.setWindowTitle(f"APEX Trading Platform  v{get_current_version()}")
         self.setMinimumSize(1280, 800)
         self.resize(1440, 900)
@@ -700,6 +701,16 @@ class ApexWindow(QMainWindow):
         self.update_btn.setObjectName("updateBtn")
         self.update_btn.clicked.connect(self._show_update_dialog)
         layout.addWidget(self.update_btn)
+
+        # Logged-in user chip
+        display = self._user.get("display_name") or self._user.get("username", "")
+        if display:
+            user_lbl = QLabel(f"▸  {display}")
+            user_lbl.setStyleSheet(
+                f"font-size:10px;color:{C['muted']};margin-left:12px;"
+                f"letter-spacing:0.5px;"
+            )
+            layout.addWidget(user_lbl)
 
         return header
 
@@ -952,6 +963,7 @@ class ApexWindow(QMainWindow):
             menu = QMenu()
             menu.addAction(QAction("Show APEX", self, triggered=self.show))
             menu.addSeparator()
+            menu.addAction(QAction("Sign Out", self, triggered=self._sign_out))
             menu.addAction(QAction("Quit", self, triggered=QApplication.quit))
             self.tray.setContextMenu(menu)
             self.tray.activated.connect(self._tray_activated)
@@ -963,6 +975,31 @@ class ApexWindow(QMainWindow):
         if reason == QSystemTrayIcon.ActivationReason.DoubleClick:
             self.show()
             self.raise_()
+
+    def _sign_out(self):
+        from ui.login import clear_auth, LoginWindow
+        clear_auth()
+        self.hide()
+        login = LoginWindow()
+        login.auth_success.connect(
+            lambda tok, usr: self._on_relogin(login, tok, usr))
+        login.offline_mode.connect(lambda: login.close())
+        login.show()
+        QApplication.instance()._relogin_win = login
+
+    def _on_relogin(self, login_win, token: str, user: dict):
+        from ui.login import save_auth
+        save_auth(token, user)
+        login_win.close()
+        self._user = user
+        # Update header user label if present
+        display = user.get("display_name") or user.get("username", "")
+        for child in self.centralWidget().findChildren(QLabel):
+            if child.text().startswith("▸  "):
+                child.setText(f"▸  {display}")
+                break
+        self.show()
+        self.raise_()
 
     def closeEvent(self, event):
         event.ignore()
@@ -1206,7 +1243,6 @@ def main():
         sys.exit(_run_bot(sys.argv[2]))
 
     if not _check_single_instance():
-        # Another instance is running — bring it to front via tray and exit
         sys.exit(0)
 
     ensure_data_dir()
@@ -1224,8 +1260,65 @@ def main():
     except Exception:
         pass
 
-    window = ApexWindow()
-    window.show()
+    from ui.login import (
+        LoginWindow, TokenVerifyWorker,
+        load_auth, save_auth, clear_auth, load_server_url,
+    )
+
+    def _launch(user: dict):
+        w = ApexWindow(user=user)
+        app._main_window = w
+        w.show()
+
+    def _on_login_success(login_win, token: str, user: dict):
+        login_win.close()
+        _launch(user)
+
+    def _on_offline(login_win):
+        login_win.close()
+        _launch({"display_name": "Offline"})
+
+    stored = load_auth()
+
+    if stored and stored.get("token"):
+        # ── Have a stored token: launch immediately, verify in background ──
+        _launch(stored.get("user", {}))
+
+        # Background token verification — if expired show re-login dialog
+        def _on_token_invalid():
+            clear_auth()
+            mw = getattr(app, "_main_window", None)
+            if mw:
+                from PyQt6.QtWidgets import QMessageBox
+                box = QMessageBox(mw)
+                box.setWindowTitle("Session Expired")
+                box.setText(
+                    "Your session has expired. Please log in again.\n\n"
+                    "(Your trading bots and settings are unaffected.)"
+                )
+                box.setStyleSheet(mw.styleSheet())
+                box.setStandardButtons(QMessageBox.StandardButton.Ok)
+                box.exec()
+                mw._sign_out()
+
+        srv_url = load_server_url()
+        verify = TokenVerifyWorker(stored["token"], srv_url)
+        verify.valid.connect(lambda u: save_auth(stored["token"], u))   # refresh user info
+        verify.invalid.connect(_on_token_invalid)
+        # offline → do nothing (keep user logged in)
+        app._token_verify = verify
+        QTimer.singleShot(3_000, verify.start)   # defer 3s so app opens first
+
+    else:
+        # ── No token: show login window ──────────────────────────────────────
+        login = LoginWindow()
+        login.auth_success.connect(
+            lambda tok, usr: _on_login_success(login, tok, usr))
+        login.offline_mode.connect(
+            lambda: _on_offline(login))
+        app._login = login
+        login.show()
+
     sys.exit(app.exec())
 
 

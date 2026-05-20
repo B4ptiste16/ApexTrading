@@ -12,3 +12,5 @@ anthropic
 alpaca-py
 python-dotenv
 requests
+# Server deps (install separately via server/requirements.txt for deployment)
+# fastapi uvicorn[standard] bcrypt PyJWT pydantic

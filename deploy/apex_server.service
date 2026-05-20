@@ -1,0 +1,36 @@
+[Unit]
+Description=APEX Trading Platform — Auth Server
+Documentation=https://github.com/B4ptiste16/ApexTrading
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=apex
+Group=apex
+WorkingDirectory=/home/apex/apex_server
+
+# Load env file (JWT secret, DB path)
+EnvironmentFile=-/home/apex/apex_data/.env
+
+# Add the server's parent folder to PYTHONPATH so `from server import …` works
+Environment=PYTHONPATH=/home/apex
+
+ExecStart=/home/apex/apex_venv/bin/uvicorn server.app:app \
+          --host 0.0.0.0 \
+          --port 8000 \
+          --workers 2 \
+          --log-level info
+
+Restart=always
+RestartSec=5
+
+StandardOutput=append:/home/apex/apex_data/server.log
+StandardError=append:/home/apex/apex_data/server.log
+
+# Security hardening
+NoNewPrivileges=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

@@ -1,4 +1,4 @@
 {
-  "version": "1.0.7",
-  "notes": "Tolerant universe-file reader (auto-repairs legacy cp1252 bytes). Calmer, more spaced UI: muted palette, sober section headers, lighter tabs and tables."
+  "version": "1.1.0",
+  "notes": "V7+ — Login/signup system, FastAPI auth server, Oracle Cloud deploy scripts, gradient UI, blinking status dots, MoreBots tab, tight y-axis charts, closed-trades feed, single instance enforcement."
 }
