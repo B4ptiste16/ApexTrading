@@ -1,4 +1,4 @@
 {
-  "version": "1.1.9",
-  "notes": "V7.1.9: NEW Make-Your-Own-Bot tab (corner button between UNIVERSE and TOOLS) — describe a strategy in plain English, pick Anthropic / OpenAI / OpenRouter, paste your API key, generate a bot.py the AI wrote. Save locally or publish to the APEX store. Plus daybot fix: bracket exit legs (take-profit + stop-loss) are now GTC instead of DAY, so Alpaca no longer cancels them at 16:00 ET. Includes a re-arm safety net: if any open position is found with no live exit orders (e.g. a legacy DAY bracket that already expired), the bot places fresh GTC TP/SL legs on startup."
+  "version": "1.1.10",
+  "notes": "V7.1.10: per-bot auto-schedule. The single 'Auto-trade on US market schedule' checkbox is replaced by a row of per-bot checkboxes in Tools → AUTOMATION — tick only the bots you want APEX to auto-start at market open and auto-stop at the close. Existing users with the legacy global flag are migrated automatically. Silenced bots are excluded from the row until you un-silence them. Next on the roadmap: bots running 24/7 on the Oracle server with cloud-side scheduling, so laptops can be off."
 }

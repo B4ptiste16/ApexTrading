@@ -301,15 +301,58 @@ def load_settings() -> dict:
 
 
 def get_auto_schedule() -> bool:
-    """Auto start/stop bots on the US market schedule (off by default)."""
-    return bool(load_settings().get("auto_schedule", False))
+    """Back-compat: True if any bot has auto-schedule enabled. Used
+    elsewhere as a coarse 'is the schedule feature active' check."""
+    return bool(get_auto_schedule_active_bots())
 
 
 def set_auto_schedule(on: bool) -> None:
+    """Legacy global toggle, kept for migration. New code uses
+    set_auto_schedule_for(side, on)."""
     s = load_settings()
     s["auto_schedule"] = bool(on)
     with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
         json.dump(s, f, indent=2)
+
+
+# ── V7.1.10: per-bot auto-schedule ──────────────────────────────────
+
+def get_auto_schedule_for(side: str) -> bool:
+    """Per-bot auto-schedule. Falls back to the legacy global flag for
+    users upgrading from before V7.1.10."""
+    s = load_settings()
+    per_bot = s.get("auto_schedule_bots", None)
+    if per_bot is not None and side in per_bot:
+        return bool(per_bot[side])
+    # No per-bot entry yet → use the legacy global as a default so
+    # existing users don't suddenly lose their schedule.
+    return bool(s.get("auto_schedule", False))
+
+
+def set_auto_schedule_for(side: str, on: bool) -> None:
+    s = load_settings()
+    per_bot = dict(s.get("auto_schedule_bots") or {})
+    per_bot[side] = bool(on)
+    s["auto_schedule_bots"] = per_bot
+    # Drop the legacy global once any per-bot entry exists, otherwise
+    # newly-added bots would silently inherit the old global.
+    s.pop("auto_schedule", None)
+    with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
+        json.dump(s, f, indent=2)
+
+
+def get_auto_schedule_active_bots() -> list[str]:
+    """Set of bot sides currently flagged for auto-start at open."""
+    s = load_settings()
+    per_bot = s.get("auto_schedule_bots", None)
+    if per_bot is not None:
+        return [side for side, on in per_bot.items() if on]
+    # Legacy migration — if the global flag was on, treat every active
+    # bot from the registry as scheduled.
+    if s.get("auto_schedule"):
+        reg = s.get("bot_registry", {})
+        return list(reg.get("active", ["LONG", "SHORT", "DAY"]))
+    return []
 
 
 # ── V7.1+: force-update setting ─────────────────────────────────────

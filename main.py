@@ -1650,31 +1650,54 @@ class ApexWindow(QMainWindow):
     # ── AUTO-TRADE SCHEDULE ──────────────────────────────────
 
     def _tick_schedule(self):
+        """V7.1.10: per-bot auto-schedule. Each bot has its own
+        checkbox in Tools → AUTOMATION; only the checked ones get
+        started/stopped on the market-open / market-close edge."""
         try:
-            if not D.get_auto_schedule():
+            scheduled = set(D.get_auto_schedule_active_bots())
+            if not scheduled:
                 return
             from core.schedule import market_is_open
             is_open = market_is_open()
             if is_open is None:
                 return
-            bot_tabs = list(self._bot_tabs.values())
             if is_open and self._mkt_open_prev in (None, False):
-                for t in bot_tabs:
-                    bc = getattr(t, "bot_ctrl", None)
+                started = []
+                for side in scheduled:
+                    tab = self._bot_tabs.get(side)
+                    if not tab:
+                        continue
+                    bc = getattr(tab, "bot_ctrl", None)
                     if bc and not bc.is_running():
-                        bc.start_bot()
-                self.statusBar().showMessage(
-                    "Auto-schedule: market OPEN — bots started")
+                        try:
+                            bc.start_bot()
+                            started.append(side)
+                        except Exception as e:
+                            print(f"[schedule] start {side}: {e}")
+                if started:
+                    self.statusBar().showMessage(
+                        f"Auto-schedule: market OPEN — started "
+                        f"{', '.join(started)}")
             elif (not is_open) and self._mkt_open_prev in (None, True):
-                for t in bot_tabs:
-                    bc = getattr(t, "bot_ctrl", None)
+                stopped = []
+                for side in scheduled:
+                    tab = self._bot_tabs.get(side)
+                    if not tab:
+                        continue
+                    bc = getattr(tab, "bot_ctrl", None)
                     if bc and bc.is_running():
-                        bc.stop_bot()
-                self.statusBar().showMessage(
-                    "Auto-schedule: market CLOSED — bots stopped")
+                        try:
+                            bc.stop_bot()
+                            stopped.append(side)
+                        except Exception as e:
+                            print(f"[schedule] stop {side}: {e}")
+                if stopped:
+                    self.statusBar().showMessage(
+                        f"Auto-schedule: market CLOSED — stopped "
+                        f"{', '.join(stopped)}")
             self._mkt_open_prev = is_open
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[schedule] tick error: {e}")
 
     # ── AUTO-UPDATE ──────────────────────────────────────────
 

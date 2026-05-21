@@ -570,23 +570,37 @@ class ToolsTab(QWidget):
         fl.addWidget(bwrap, len(fields) + 1, 0, 1, 2)
         s.add(form)
 
-        # ── AUTOMATION ───────────────────────────────────
+        # ── AUTOMATION  (V7.1.10) ────────────────────────
         s.add(SectionHeader("AUTOMATION", C["green"]))
-        self.auto_chk = QCheckBox(
-            "Auto-trade on US market schedule  (start all bots at the "
-            "open, stop them at the close)")
-        self.auto_chk.setStyleSheet(f"color:{C['text']};font-size:11px;")
-        try:
-            self.auto_chk.setChecked(D.get_auto_schedule())
-        except Exception:
-            pass
-        self.auto_chk.toggled.connect(self._toggle_auto)
-        s.add(self.auto_chk)
+        auto_intro = QLabel(
+            "Tick each bot you want APEX to auto-start at the US "
+            "market open (and auto-stop at the close). Bots not "
+            "ticked stay manual — press ▶ on their tab.")
+        auto_intro.setStyleSheet(f"color:{C['muted']};font-size:11px;")
+        auto_intro.setWordWrap(True)
+        s.add(auto_intro)
+
+        # Container the row gets rebuilt into when bots are
+        # added / removed / silenced. Refresh() also calls
+        # _rebuild_auto_schedule_row so the visible bots stay in sync.
+        self._auto_sched_holder = QFrame()
+        self._auto_sched_holder.setStyleSheet(
+            f"background:{C['panel']};border:1px solid {C['border']};"
+            f"border-radius:8px;")
+        self._auto_sched_layout = QHBoxLayout(self._auto_sched_holder)
+        self._auto_sched_layout.setContentsMargins(14, 10, 14, 10)
+        self._auto_sched_layout.setSpacing(18)
+        s.add(self._auto_sched_holder)
+        self._auto_sched_checks: dict[str, QCheckBox] = {}
+        self._rebuild_auto_schedule_row()
+
         auto_note = QLabel(
-            "When on, bots launch automatically at the US open and stop at "
-            "the close — you don't need to press RUN. The installed app also "
-            "self-updates only overnight (after close, before open); running "
-            "from run.bat never auto-updates.")
+            "Bots run on this computer. They stop if you quit APEX. "
+            "To keep bots trading 24/7 with your laptop off, see "
+            "Tools → ACCOUNT LINKING and sync your keys to the APEX "
+            "server (server-side bot execution coming in a future "
+            "update)."
+        )
         auto_note.setStyleSheet(f"color:{C['muted']};font-size:10px;")
         auto_note.setWordWrap(True)
         s.add(auto_note)
@@ -821,13 +835,79 @@ class ToolsTab(QWidget):
         s.add_stretch()
 
     def refresh(self):
-        pass  # Tools tab is mostly static
+        # V7.1.10 — keep the per-bot auto-schedule row up to date with
+        # the active bot registry. Cheap (just QCheckBox creation).
+        try:
+            self._rebuild_auto_schedule_row()
+        except Exception:
+            pass
 
     def _toggle_auto(self, on: bool):
+        # Legacy global toggle, kept so any older signal connection
+        # still works. V7.1.10 routes new clicks to set_auto_schedule_for.
         try:
             D.set_auto_schedule(bool(on))
         except Exception:
             pass
+
+    # ── V7.1.10: per-bot auto-schedule row ─────────────────
+
+    def _rebuild_auto_schedule_row(self):
+        """Tear down and rebuild the AUTOMATION checkbox row to mirror
+        the current active-bot registry. Silenced bots are skipped (a
+        silenced bot stays manual until the user un-silences it)."""
+        # Clear current checkboxes
+        layout = self._auto_sched_layout
+        while layout.count():
+            item = layout.takeAt(0)
+            w = item.widget()
+            if w is not None:
+                w.deleteLater()
+        self._auto_sched_checks.clear()
+
+        try:
+            reg = D.load_settings().get("bot_registry", {})
+        except Exception:
+            reg = {}
+        active   = reg.get("active",   ["LONG", "SHORT", "DAY"])
+        silenced = set(reg.get("silenced", []))
+        customs  = {c["id"]: c for c in reg.get("custom", [])
+                    if isinstance(c, dict)}
+
+        builtin_labels = {"LONG":  "▲ LONG",
+                          "SHORT": "▼ SHORT",
+                          "DAY":   "◆ DAY"}
+        any_added = False
+        for sid in active:
+            if sid in silenced:
+                continue
+            label = builtin_labels.get(sid)
+            if label is None:
+                label = customs.get(sid, {}).get("label", sid).upper()
+            cb = QCheckBox(label)
+            cb.setStyleSheet(
+                f"color:{C['text']};font-size:11px;letter-spacing:1px;")
+            try:
+                cb.setChecked(D.get_auto_schedule_for(sid))
+            except Exception:
+                pass
+            cb.toggled.connect(
+                lambda on, s=sid: self._on_per_bot_schedule_toggled(s, on))
+            layout.addWidget(cb)
+            self._auto_sched_checks[sid] = cb
+            any_added = True
+
+        if not any_added:
+            empty = QLabel("(no active bots — add some from MORE BOTS)")
+            empty.setStyleSheet(f"color:{C['muted']};font-size:10px;")
+            layout.addWidget(empty)
+        layout.addStretch()
+
+    def _on_per_bot_schedule_toggled(self, side: str, on: bool):
+        try:
+            D.set_auto_schedule_for(side, bool(on))
+        except Exception as e:
+            print(f"[schedule] toggle {side}: {e}")
 
     # ── V7.1+ handlers ──────────────────────────────────────
 
