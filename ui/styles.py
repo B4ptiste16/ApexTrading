@@ -3,18 +3,23 @@ APEX UI Styles — V7
 """
 
 COLORS = {
-    "green":  "#3fb89a",
-    "red":    "#c75c6b",
-    "orange": "#d99a52",
-    "yellow": "#d6c95e",
-    "purple": "#8a93c9",
-    "bg":     "#0c0f16",   # gradient start (top-left, cool dark navy)
-    "bg2":    "#131a2a",   # gradient end  (bottom-right, warmer blue-grey)
-    "panel":  "#111622",
-    "panel2": "#181f2e",
-    "border": "#232d40",
-    "text":   "#d8dde8",
-    "muted":  "#5c6b82",
+    # V7.1.6 — softer accent palette, lighter dark backgrounds.
+    # The previous teal-green and coral-red looked a touch neon at
+    # standard monitor brightness; these are desaturated by ~25 %.
+    # Backgrounds also moved one step lighter so the gradient feels
+    # less cave-like.
+    "green":  "#5fa68f",   # was #3fb89a (toned-down teal)
+    "red":    "#b66f7a",   # was #c75c6b (muted rose)
+    "orange": "#c89060",   # was #d99a52
+    "yellow": "#cdc578",   # was #d6c95e
+    "purple": "#8a93c9",   # kept — already soft
+    "bg":     "#161a26",   # gradient start  (was #0c0f16)
+    "bg2":    "#1d2336",   # gradient end    (was #131a2a)
+    "panel":  "#1a1f2d",   # card / row bg   (was #111622)
+    "panel2": "#222837",   # nested bg       (was #181f2e)
+    "border": "#2a3447",   # 1px frames      (was #232d40)
+    "text":   "#d8dde8",   # body text       (kept)
+    "muted":  "#6a7894",   # secondary text  (was #5c6b82)
 }
 
 C = COLORS

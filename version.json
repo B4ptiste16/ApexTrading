@@ -1,4 +1,4 @@
 {
-  "version": "1.1.5",
-  "notes": "V7.1.5: actually-working updater. Replaced the wait-for-exit loop (which was getting stuck on lingering APEX.exe bot subprocesses) with taskkill /F /T. Hidden the relauncher cmd shell with CREATE_NO_WINDOW so the empty command-prompt window seen in v1.1.4 is gone. Inno's own Launch APEX checkbox handles relaunch — no more double-spawn fighting the single-instance mutex. Every step now logs to %TEMP%\\apex_update.log for easy diagnosis."
+  "version": "1.1.6",
+  "notes": "V7.1.6: softer color palette (less neon green/red, lighter dark backgrounds), Period dropdown in the Overview ALL ACCOUNTS header so you can switch the PERIOD P/L timeframe (1D/1W/1M/3M/6M/1Y) and the choice persists, smoother bot-tab drag — the brief freeze after dropping a tab is gone (deferred reorder + no data refetch on move)."
 }

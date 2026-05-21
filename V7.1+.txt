@@ -33,3 +33,12 @@ To Improve (V7.1.1)
 - When i meant i want a drag and drop feature to download then publish a self-made bot, i meant drag and drop it wherever i want in the apex window and it will detect it and ask for confirmation before dowloading. 
 
 - To make your own bots i want an instructions file someone can read if want to code manually or that can be given to AI to help craft it perfectly.
+
+
+To Improve v1.0.7
+
+- I want a full website with a home page with a big download button in the middle to download the app and a login/signup button in the top right corner
+
+- Keep this website simple
+
+- The website access on the phone doesn't show any info except the bots. I want to be able to click on the tabs to have more details on It (whether its a bot, overview, the universe, or the tools). And the actual tabs I can see when on my phone on the website must show the same info as  shown on the top of every page on the desktop app (profit, value etc...)

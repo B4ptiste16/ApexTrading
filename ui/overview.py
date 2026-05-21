@@ -58,8 +58,8 @@ class OverviewTab(QWidget):
 
         # ── Account blocks for ONLY active (non-silenced) bots ──
         # V7.1.4: Sort dropdown drives the block order in the row.
-        # Persisted in apex_settings.json under overview_sort so the
-        # last choice sticks across restarts.
+        # V7.1.6: Period dropdown drives the timeframe used by every
+        # block's PERIOD P/L card. Both choices persist.
         self._sort_combo = QComboBox()
         for key, label in self._SORT_OPTIONS:
             self._sort_combo.addItem(label, key)
@@ -71,8 +71,30 @@ class OverviewTab(QWidget):
         except Exception:
             pass
         self._sort_combo.currentIndexChanged.connect(self._on_sort_changed)
-        s.add(SectionHeader("ALL ACCOUNTS", C["text"],
-                            controls=self._sort_combo))
+
+        self._period_combo = QComboBox()
+        self._period_combo.addItems(["1D", "1W", "1M", "3M", "6M", "1Y"])
+        self._period_combo.setFixedWidth(56)
+        try:
+            saved_period = D.load_settings().get("overview_period", "1D")
+            self._period_combo.setCurrentText(saved_period)
+        except Exception:
+            pass
+        self._period_combo.currentTextChanged.connect(self._on_period_changed)
+
+        # Wrap both controls in a small row so the section header can
+        # show them side-by-side.
+        controls_w = QWidget()
+        cl = QHBoxLayout(controls_w)
+        cl.setContentsMargins(0, 0, 0, 0)
+        cl.setSpacing(8)
+        period_lbl = QLabel("Period:")
+        period_lbl.setStyleSheet(f"color:{C['muted']};font-size:10px;")
+        cl.addWidget(period_lbl)
+        cl.addWidget(self._period_combo)
+        cl.addSpacing(16)
+        cl.addWidget(self._sort_combo)
+        s.add(SectionHeader("ALL ACCOUNTS", C["text"], controls=controls_w))
 
         self._blocks_row = QHBoxLayout()
         self._blocks_row.setSpacing(10)
@@ -193,6 +215,32 @@ class OverviewTab(QWidget):
             pass
         self._rebuild_account_blocks()
 
+    def _on_period_changed(self, period: str):
+        """V7.1.6: persist + recompute the PERIOD P/L card on every
+        bot block for the newly-selected timeframe. We re-run
+        _refresh_block for each existing block (cheap — only touches
+        the one card) instead of a full refresh()."""
+        try:
+            s = D.load_settings()
+            s["overview_period"] = period
+            from json import dump
+            with open(D.SETTINGS_FILE, "w", encoding="utf-8") as f:
+                dump(s, f, indent=2)
+        except Exception:
+            pass
+        # Recompute PERIOD P/L for every visible block
+        for side, block in self.blocks.items():
+            try:
+                self._refresh_block(side, block)
+            except Exception:
+                pass
+
+    def _current_period(self) -> str:
+        try:
+            return self._period_combo.currentText() or "1D"
+        except Exception:
+            return "1D"
+
     def _rebuild_account_blocks(self):
         """Tear down and rebuild the row of bot blocks based on the
         current registry. Called by main.py whenever the registry
@@ -234,6 +282,23 @@ class OverviewTab(QWidget):
             self.refresh()
         except Exception:
             pass
+
+    def reorder_active_bots(self):
+        """V7.1.6: lightweight path called by main.py after a bot-tab
+        drag. Just shuffles the existing block widgets within the row
+        — no widget creation, no Alpaca calls, no flicker. The block
+        contents stay populated from the most recent refresh tick."""
+        try:
+            ordered_sides = [b["side"] for b in self._displayable_bots()]
+            # Remove all blocks (widgets persist), then re-add in order.
+            for side, w in list(self.blocks.items()):
+                self._blocks_row.removeWidget(w)
+            for side in ordered_sides:
+                w = self.blocks.get(side)
+                if w is not None:
+                    self._blocks_row.addWidget(w)
+        except Exception as e:
+            print(f"[overview reorder] {e}")
 
     def _account_block(self, side: str,
                        label_text: str | None = None,
@@ -401,9 +466,11 @@ class OverviewTab(QWidget):
         arrow = "▲" if dp >= 0 else "▼"
         dc    = C["green"] if dp >= 0 else C["red"]
 
-        # Period P/L: use 1D equity history
+        # Period P/L: history over the period the user selected in the
+        # ALL ACCOUNTS header (V7.1.6). Falls back to 1D if the combo
+        # hasn't been built yet (very early refresh during _build).
         try:
-            hist = D.get_history(side, "1D")
+            hist = D.get_history(side, self._current_period())
             if hist is not None and not hist.empty and len(hist) >= 2:
                 p_pl  = hist["equity"].iloc[-1] - hist["equity"].iloc[0]
                 p_pct = p_pl / hist["equity"].iloc[0] * 100 if hist["equity"].iloc[0] else 0

@@ -1295,9 +1295,14 @@ class ApexWindow(QMainWindow):
         reg["active"] = new_order + tabless
         _save_registry(reg)
 
-        # Keep the Overview block ordering in sync so the cards row
-        # mirrors the tab order.
-        self._sync_overview_blocks()
+        # V7.1.6: keep the Overview block order in sync, but defer it
+        # via QTimer.singleShot(0) so the drag animation completes
+        # first (the user felt a brief freeze otherwise) AND use the
+        # lightweight reorder path that just shuffles the existing
+        # block widgets in their layout — no Alpaca refetch.
+        ov = getattr(self, "overview_tab", None)
+        if ov and hasattr(ov, "reorder_active_bots"):
+            QTimer.singleShot(0, ov.reorder_active_bots)
 
     def _grey_tab(self, side: str, silenced: bool):
         tab = self._bot_tabs.get(side)
