@@ -602,12 +602,33 @@ class ToolsTab(QWidget):
         self._auto_sched_checks: dict[str, QCheckBox] = {}
         self._rebuild_auto_schedule_row()
 
+        # V7.1.13: cloud-execution toggle row, immediately under the
+        # auto-schedule row so the two related concepts live together.
+        cloud_intro = QLabel(
+            "Run on Oracle 24/7  (laptop optional — APEX-server "
+            "manages the process, with cloud-side market-clock scheduling):"
+        )
+        cloud_intro.setStyleSheet(f"color:{C['muted']};font-size:11px;")
+        cloud_intro.setWordWrap(True)
+        s.add(cloud_intro)
+
+        self._cloud_holder = QFrame()
+        self._cloud_holder.setStyleSheet(
+            f"background:{C['panel']};border:1px solid {C['border']};"
+            f"border-radius:8px;")
+        self._cloud_layout = QHBoxLayout(self._cloud_holder)
+        self._cloud_layout.setContentsMargins(14, 10, 14, 10)
+        self._cloud_layout.setSpacing(18)
+        s.add(self._cloud_holder)
+        self._cloud_checks: dict[str, QCheckBox] = {}
+        self._rebuild_cloud_row()
+
         auto_note = QLabel(
-            "Bots run on this computer. They stop if you quit APEX. "
-            "To keep bots trading 24/7 with your laptop off, see "
-            "Tools → ACCOUNT LINKING and sync your keys to the APEX "
-            "server (server-side bot execution coming in a future "
-            "update)."
+            "Local bots run on this computer and stop if you quit "
+            "APEX. Cloud bots run on the Oracle server — they keep "
+            "trading with your laptop closed. The cloud's own "
+            "scheduler starts/stops them based on the US market "
+            "clock when their auto-schedule box (above) is also ticked."
         )
         auto_note.setStyleSheet(f"color:{C['muted']};font-size:10px;")
         auto_note.setWordWrap(True)
@@ -843,10 +864,15 @@ class ToolsTab(QWidget):
         s.add_stretch()
 
     def refresh(self):
-        # V7.1.10 — keep the per-bot auto-schedule row up to date with
-        # the active bot registry. Cheap (just QCheckBox creation).
+        # V7.1.10 — keep the per-bot auto-schedule row in sync with the
+        # active bot registry. Cheap (just QCheckBox creation).
+        # V7.1.13 — same for the cloud-execution row.
         try:
             self._rebuild_auto_schedule_row()
+        except Exception:
+            pass
+        try:
+            self._rebuild_cloud_row()
         except Exception:
             pass
 
@@ -916,6 +942,115 @@ class ToolsTab(QWidget):
             D.set_auto_schedule_for(side, bool(on))
         except Exception as e:
             print(f"[schedule] toggle {side}: {e}")
+        # V7.1.13: schedule changes affect the cloud schedule too —
+        # only the intersection cloud ∩ scheduled gets pushed to server.
+        self._push_schedule_to_server()
+
+    # ── V7.1.13: cloud toggles ─────────────────────────────────
+
+    def _rebuild_cloud_row(self):
+        """Tear down + rebuild the Run-on-Oracle checkbox row to mirror
+        the current active-bot set. Silenced bots are excluded."""
+        layout = self._cloud_layout
+        while layout.count():
+            item = layout.takeAt(0)
+            w = item.widget()
+            if w is not None:
+                w.deleteLater()
+        self._cloud_checks.clear()
+
+        try:
+            reg = D.load_settings().get("bot_registry", {})
+        except Exception:
+            reg = {}
+        active   = reg.get("active",   ["LONG", "SHORT", "DAY"])
+        silenced = set(reg.get("silenced", []))
+        customs  = {c["id"]: c for c in reg.get("custom", [])
+                    if isinstance(c, dict)}
+
+        builtin_labels = {"LONG":  "▲ LONG",
+                          "SHORT": "▼ SHORT",
+                          "DAY":   "◆ DAY"}
+        any_added = False
+        cloud_set = {s.upper() for s in D.get_cloud_bots()}
+        for sid in active:
+            if sid in silenced:
+                continue
+            label = builtin_labels.get(sid) or customs.get(sid, {}).get("label", sid).upper()
+            cb = QCheckBox(label)
+            cb.setStyleSheet(
+                f"color:{C['text']};font-size:11px;letter-spacing:1px;")
+            cb.setChecked(sid.upper() in cloud_set)
+            cb.toggled.connect(
+                lambda on, s=sid: self._on_cloud_toggled(s, on))
+            layout.addWidget(cb)
+            self._cloud_checks[sid] = cb
+            any_added = True
+
+        if not any_added:
+            empty = QLabel("(no active bots)")
+            empty.setStyleSheet(f"color:{C['muted']};font-size:10px;")
+            layout.addWidget(empty)
+        layout.addStretch()
+
+    def _on_cloud_toggled(self, side: str, on: bool):
+        try:
+            if on:
+                D.add_cloud_bot(side)
+            else:
+                D.remove_cloud_bot(side)
+        except Exception as e:
+            print(f"[cloud] toggle {side}: {e}")
+        self._push_schedule_to_server()
+
+    def _push_schedule_to_server(self):
+        """Push (cloud ∩ scheduled) to the server's /schedule. Bots
+        that are cloud-only-no-schedule or scheduled-only-no-cloud
+        are NOT in the cloud scheduler — they're handled either by
+        manual ▶ (cloud only) or the desktop's _tick_schedule (local
+        scheduled). The intersection is what the server should
+        auto-manage."""
+        try:
+            cloud = set(D.get_cloud_bots())
+            sched = set(D.get_auto_schedule_active_bots())
+            payload = sorted(cloud & sched)
+        except Exception as e:
+            print(f"[cloud] push prep failed: {e}")
+            return
+
+        from PyQt6.QtCore import QThread, pyqtSignal as _Sig
+        try:
+            from ui.login import load_auth, load_server_url
+        except Exception:
+            return
+        token = (load_auth() or {}).get("token")
+        if not token:
+            return                # no auth, server push impossible
+        url = f"{load_server_url()}/schedule"
+
+        class _W(QThread):
+            done = _Sig(bool, str)
+            def __init__(self, u, t, body):
+                super().__init__()
+                self.u, self.t, self.body = u, t, body
+            def run(self):
+                import requests
+                try:
+                    r = requests.put(
+                        self.u, headers={"Authorization": f"Bearer {self.t}"},
+                        json={"bots": self.body}, timeout=10)
+                    self.done.emit(r.ok, r.text)
+                except Exception as e:
+                    self.done.emit(False, str(e))
+
+        worker = _W(url, token, payload)
+        worker.done.connect(
+            lambda ok, t: print(f"[cloud] push -> {payload} : ok={ok}"))
+        worker.start()
+        # Hold ref so it isn't GC'd before run completes
+        self._push_workers = getattr(self, "_push_workers", [])
+        self._push_workers.append(worker)
+        self._push_workers = [w for w in self._push_workers if w.isRunning()]
 
     # ── V7.1+ handlers ──────────────────────────────────────
 

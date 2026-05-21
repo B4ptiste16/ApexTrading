@@ -291,20 +291,44 @@ class BotProcessWidget(QWidget):
         self.run_btn.setEnabled(not running)
         self.stop_btn.setEnabled(running)
         self.restart_btn.setEnabled(running)
-        dot_color = C["green"] if running else C["muted"]
-        txt_color = C["green"] if running else C["muted"]
+        cloud = self._is_cloud_mode()
+        dot_color = (C["purple"] if running and cloud
+                     else C["green"] if running
+                     else C["muted"])
         self.status_dot.setStyleSheet(f"color:{dot_color};font-size:14px;")
-        self.status_lbl.setText("RUNNING" if running else "STOPPED")
+        if running:
+            label = "RUNNING ☁ ORACLE" if cloud else "RUNNING"
+        else:
+            label = "STOPPED  (cloud)" if cloud else "STOPPED"
+        self.status_lbl.setText(label)
         self.status_lbl.setStyleSheet(
-            f"font-size:10px;color:{txt_color};letter-spacing:2px;font-weight:600;"
+            f"font-size:10px;color:{dot_color};letter-spacing:2px;font-weight:600;"
         )
         self.status_changed.emit(self.side, running)
 
     def is_running(self) -> bool:
+        # V7.1.13: a bot running on the Oracle server has no local
+        # QProcess. Cloud running-state is tracked via _cloud_running
+        # (set by the success of /bots/{side}/start and cleared by
+        # /bots/{side}/stop or the 30s status poll).
+        if getattr(self, "_cloud_running", False):
+            return True
         return (self.process is not None
                 and self.process.state() == QProcess.ProcessState.Running)
 
+    def _is_cloud_mode(self) -> bool:
+        """True if the user has flagged this bot for cloud execution."""
+        try:
+            from core import data as _D
+            return _D.is_cloud_bot(self.side)
+        except Exception:
+            return False
+
     def start_bot(self):
+        # V7.1.13: route to the cloud path when this bot is in
+        # cloud_bots. Local QProcess code only runs for laptop bots.
+        if self._is_cloud_mode():
+            return self._cloud_start()
         frozen = getattr(sys, "frozen", False)
         # In a frozen build the bot code is bundled inside APEX.exe and
         # launched via `APEX.exe --run-bot SIDE`, so there is no .py on
@@ -340,12 +364,135 @@ class BotProcessWidget(QWidget):
             self._log("Failed to start process", C["red"])
 
     def stop_bot(self):
+        # V7.1.13: cloud bots get a /bots/{side}/stop call instead of
+        # a local QProcess.terminate.
+        if self._is_cloud_mode() or getattr(self, "_cloud_running", False):
+            return self._cloud_stop()
         if self.process and self.process.state() == QProcess.ProcessState.Running:
             self.process.terminate()
             if not self.process.waitForFinished(5000):
                 self.process.kill()
             self._log("Bot stopped", C["yellow"])
         self._set_running(False)
+
+    # ── V7.1.13: cloud-execution path ──────────────────────────────
+
+    def _cloud_call(self, method: str, path: str,
+                    on_done, payload: dict | None = None):
+        """Spawn a QThread that calls the APEX server with the
+        signed-in user's bearer token. on_done(ok: bool, data: dict)
+        runs on the main thread when finished."""
+        from PyQt6.QtCore import QThread, pyqtSignal as _Sig
+        from ui.login import load_auth, load_server_url
+        token = (load_auth() or {}).get("token")
+        if not token:
+            self._log("Cloud mode needs a signed-in APEX account. "
+                      "Open APEX and sign in.", C["red"])
+            on_done(False, {"detail": "not signed in"})
+            return
+        url = f"{load_server_url()}{path}"
+
+        class _W(QThread):
+            done = _Sig(bool, dict)
+            def __init__(self, m, u, t, p):
+                super().__init__()
+                self.m, self.u, self.t, self.p = m, u, t, p
+            def run(self):
+                import requests
+                try:
+                    fn = {"GET": requests.get, "POST": requests.post,
+                          "PUT": requests.put}.get(self.m, requests.get)
+                    r = fn(self.u, headers={"Authorization": f"Bearer {self.t}"},
+                           json=self.p, timeout=15)
+                    try:
+                        body = r.json()
+                    except Exception:
+                        body = {"text": r.text}
+                    self.done.emit(r.ok, body)
+                except Exception as e:
+                    self.done.emit(False, {"detail": str(e)})
+
+        worker = _W(method, url, token, payload)
+        worker.done.connect(on_done)
+        worker.start()
+        # Keep a reference so the worker isn't garbage-collected
+        self._http_workers = getattr(self, "_http_workers", [])
+        self._http_workers.append(worker)
+        # Trim finished workers
+        self._http_workers = [w for w in self._http_workers if w.isRunning()]
+
+    def _cloud_start(self):
+        self._log("☁  Asking Oracle to start bot…", C["muted"])
+        def _on(ok, body):
+            if ok:
+                self._cloud_running = True
+                self._log(f"☁  Running on Oracle  ·  pid {body.get('pid','?')}",
+                          C["green"])
+                self._set_running(True)
+                self._start_cloud_polling()
+            else:
+                detail = body.get("detail") or body.get("text") or "start failed"
+                self._log(f"Cloud start failed: {detail}", C["red"])
+                self._set_running(False)
+        self._cloud_call("POST", f"/bots/{self.side}/start", _on)
+
+    def _cloud_stop(self):
+        self._log("☁  Asking Oracle to stop bot…", C["muted"])
+        def _on(ok, body):
+            self._cloud_running = False
+            self._set_running(False)
+            self._stop_cloud_polling()
+            if ok:
+                self._log("☁  Stopped", C["yellow"])
+            else:
+                detail = body.get("detail") or body.get("text") or "stop failed"
+                self._log(f"Cloud stop failed: {detail}", C["red"])
+        self._cloud_call("POST", f"/bots/{self.side}/stop", _on)
+
+    def _start_cloud_polling(self):
+        """Every 30 s, ask the server for live status + tail the log
+        so the user sees real-time output in the bot tab even though
+        the bot is on Oracle."""
+        if getattr(self, "_cloud_poll_timer", None):
+            return
+        self._cloud_poll_timer = QTimer(self)
+        self._cloud_poll_timer.timeout.connect(self._cloud_poll_tick)
+        self._cloud_poll_timer.start(30_000)
+        self._cloud_last_log_len = 0
+        # Immediate first tick so the log starts populating fast
+        QTimer.singleShot(2000, self._cloud_poll_tick)
+
+    def _stop_cloud_polling(self):
+        t = getattr(self, "_cloud_poll_timer", None)
+        if t:
+            t.stop()
+        self._cloud_poll_timer = None
+
+    def _cloud_poll_tick(self):
+        # Status — keeps the dot/badge in sync with reality
+        def _on_status(ok, body):
+            if ok and not body.get("running", False):
+                # Server says the bot exited on its own (crash, scheduled
+                # stop, etc.). Reflect that in the UI.
+                if self._cloud_running:
+                    self._cloud_running = False
+                    self._set_running(False)
+                    self._stop_cloud_polling()
+                    self._log("☁  Bot exited on Oracle", C["yellow"])
+        self._cloud_call("GET", f"/bots/{self.side}/status", _on_status)
+
+        # Log tail — append the part we haven't seen yet
+        def _on_logs(ok, body):
+            if not ok: return
+            text = body.get("log", "") or ""
+            prev = getattr(self, "_cloud_last_log_len", 0)
+            if len(text) > prev:
+                new = text[prev:]
+                for line in new.splitlines():
+                    if line.strip():
+                        self._log(line)
+                self._cloud_last_log_len = len(text)
+        self._cloud_call("GET", f"/bots/{self.side}/logs?tail=8000", _on_logs)
 
     def restart_bot(self):
         self.stop_bot()

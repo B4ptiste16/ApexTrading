@@ -228,33 +228,47 @@ def get_history(side: str, period: str) -> pd.DataFrame:
     """
     Live portfolio history for one bot's Alpaca account.
 
-    V7.1+ change: extended_hours=True so the chart keeps updating outside
-    9:30-16:00 ET (Alpaca refreshes equity continuously, including pre/post
-    market and overnight). Previously the "1D" view sometimes showed only
-    yesterday's session because today's equity hadn't ticked over yet.
+    V7.1.14: chart no longer shrinks to 13:30-20:00 UTC (US market
+    hours). Two changes:
+      1. Use intraday_reporting=CONTINUOUS exclusively when available
+         — it asks Alpaca for 24/7 equity samples. extended_hours
+         is only used as a fallback for older SDKs that don't have
+         the enum.
+      2. NaN equity samples outside market hours (when Alpaca has
+         no fresh tick because no trades happened) are now
+         forward-filled with the last known equity instead of being
+         dropped. The plot now shows a flat line overnight rather
+         than auto-shrinking the X-axis to the market session.
     """
     c = get_client(side)
     if not c:
         return pd.DataFrame()
     try:
         ap, tf = ALPACA_PERIOD.get(period, ("1D","5Min"))
-        req_kwargs = dict(period=ap, timeframe=tf, extended_hours=True)
-        # Newer alpaca-py exposes intraday_reporting which is the proper
-        # toggle for continuous (24/7) equity sampling. Fall back silently
-        # on older SDKs that only have extended_hours.
+        req_kwargs = dict(period=ap, timeframe=tf)
+        # Prefer the proper enum-based switch on modern alpaca-py;
+        # fall back to the older boolean toggle.
         try:
             from alpaca.trading.enums import IntradayReporting  # type: ignore
             req_kwargs["intraday_reporting"] = IntradayReporting.CONTINUOUS
         except Exception:
-            pass
+            req_kwargs["extended_hours"] = True
+
         h = c.get_portfolio_history(GetPortfolioHistoryRequest(**req_kwargs))
         if not h or not h.timestamp or not h.equity:
             return pd.DataFrame()
+
         df = pd.DataFrame({
             "time":   pd.to_datetime(h.timestamp, unit="s", utc=True),
-            "equity": [float(v) if v is not None else float("nan") for v in h.equity],
+            "equity": [float(v) if v is not None else float("nan")
+                       for v in h.equity],
         })
-        return df[(df["equity"]>0)&df["equity"].notna()].reset_index(drop=True)
+        # Forward-fill so the chart spans the full requested period
+        # (overnight stretches inherit the last known equity value).
+        # Backfill takes care of any leading NaNs at the very start
+        # of the data window so we don't lose the early points.
+        df["equity"] = df["equity"].ffill().bfill()
+        return df[df["equity"] > 0].reset_index(drop=True)
     except Exception as e:
         print(f"[history] {side} {period}: {e}")
         return pd.DataFrame()
@@ -353,6 +367,36 @@ def get_auto_schedule_active_bots() -> list[str]:
         reg = s.get("bot_registry", {})
         return list(reg.get("active", ["LONG", "SHORT", "DAY"]))
     return []
+
+
+# ── V7.1.13: per-bot cloud-execution toggle ─────────────────────────
+
+def get_cloud_bots() -> list[str]:
+    """Sides set to run on the APEX Oracle server instead of locally."""
+    return list(load_settings().get("cloud_bots", []))
+
+
+def set_cloud_bots(sides: list[str]) -> None:
+    s = load_settings()
+    s["cloud_bots"] = sorted({str(x).upper() for x in sides})
+    with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
+        json.dump(s, f, indent=2)
+
+
+def is_cloud_bot(side: str) -> bool:
+    return side.upper() in {s.upper() for s in get_cloud_bots()}
+
+
+def add_cloud_bot(side: str) -> None:
+    cur = set(get_cloud_bots())
+    cur.add(side.upper())
+    set_cloud_bots(list(cur))
+
+
+def remove_cloud_bot(side: str) -> None:
+    cur = set(get_cloud_bots())
+    cur.discard(side.upper())
+    set_cloud_bots(list(cur))
 
 
 # ── V7.1+: force-update setting ─────────────────────────────────────

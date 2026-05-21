@@ -1,4 +1,4 @@
 {
-  "version": "1.1.12",
-  "notes": "V7.1.12: RISK METRICS & STATS finally populates (TOTAL RETURN, SHARPE, MAX DD, WIN RATE, VOLATILITY, AVG DAILY). The bots never wrote a separate *_snapshots.jsonl file — they only wrote the trade log with portfolio_value baked into each entry — so load_snapshots() always returned empty and every risk card stayed on '—'. The function now synthesises the time series from the existing trade log (supports both the LONG/SHORT schema with portfolio_before/after and DAY's portfolio.value schema). No bot-side changes needed; existing data populates immediately on first launch."
+  "version": "1.1.13",
+  "notes": "V7.1.13: Phase D of Step 5 — per-bot 'Run on Oracle 24/7' toggles in Tools → AUTOMATION. Tick a bot's cloud box and ▶ on its tab calls the APEX server instead of spawning a local subprocess. Cloud-running bots poll status + log tail every 30 s so the panel stays live. When a bot is both ticked for cloud AND ticked for auto-schedule, the server-side scheduler manages it via the US market clock. Plus chart fix: portfolio graphs no longer shrink to 13:30-20:00 UTC. NaN equity samples outside market hours are now forward-filled with the last known value so the X-axis spans the full requested period (flat line overnight)."
 }
