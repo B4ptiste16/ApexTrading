@@ -1,4 +1,4 @@
 {
   "version": "1.1.8",
-  "notes": "V7.1.8: explicit QUIT button in the header (one-click full exit, vs the X button which still minimises to tray). Critical updater fix: removed the /T flag from taskkill — with /T, taskkill was being asked to kill its own grandparent process tree (the cmd shell running it), which Windows refuses, so the batch stalled after Step 1 with the user seeing a frozen 'find /I APEX.exe' window. /F /IM APEX.exe alone kills every APEX.exe by image name (GUI + all bot subprocesses) without dragging cmd into the kill list."
+  "notes": "V7.1.8: explicit QUIT button in the header + fixed auto-update relauncher (taskkill without /T) + Overview crash fix (renamed _period_combo attribute that was shadowing the chart's combo method). Install this manually once and from then on use the in-app UPDATE AVAILABLE banner for everything else."
 }

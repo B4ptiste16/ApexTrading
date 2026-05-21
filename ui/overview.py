@@ -72,15 +72,18 @@ class OverviewTab(QWidget):
             pass
         self._sort_combo.currentIndexChanged.connect(self._on_sort_changed)
 
-        self._period_combo = QComboBox()
-        self._period_combo.addItems(["1D", "1W", "1M", "3M", "6M", "1Y"])
-        self._period_combo.setFixedWidth(56)
+        # V7.1.10: renamed from _period_combo to _pl_period_combo so it
+        # doesn't shadow the existing _period_combo() method that builds
+        # the PORTFOLIO VALUE chart's period selector below.
+        self._pl_period_combo = QComboBox()
+        self._pl_period_combo.addItems(["1D", "1W", "1M", "3M", "6M", "1Y"])
+        self._pl_period_combo.setFixedWidth(56)
         try:
             saved_period = D.load_settings().get("overview_period", "1D")
-            self._period_combo.setCurrentText(saved_period)
+            self._pl_period_combo.setCurrentText(saved_period)
         except Exception:
             pass
-        self._period_combo.currentTextChanged.connect(self._on_period_changed)
+        self._pl_period_combo.currentTextChanged.connect(self._on_period_changed)
 
         # Wrap both controls in a small row so the section header can
         # show them side-by-side.
@@ -91,7 +94,7 @@ class OverviewTab(QWidget):
         period_lbl = QLabel("Period:")
         period_lbl.setStyleSheet(f"color:{C['muted']};font-size:10px;")
         cl.addWidget(period_lbl)
-        cl.addWidget(self._period_combo)
+        cl.addWidget(self._pl_period_combo)
         cl.addSpacing(16)
         cl.addWidget(self._sort_combo)
         s.add(SectionHeader("ALL ACCOUNTS", C["text"], controls=controls_w))
@@ -237,7 +240,7 @@ class OverviewTab(QWidget):
 
     def _current_period(self) -> str:
         try:
-            return self._period_combo.currentText() or "1D"
+            return self._pl_period_combo.currentText() or "1D"
         except Exception:
             return "1D"
 
