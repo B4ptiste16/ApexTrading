@@ -260,6 +260,49 @@ def web_login_submit(identifier: str = Form(...),
     return resp
 
 
+@app.get("/web/signup", include_in_schema=False)
+def web_signup_form(request: Request):
+    return web.signup_page()
+
+
+@app.post("/web/signup", include_in_schema=False)
+def web_signup_submit(
+    email:        str = Form(...),
+    password:     str = Form(...),
+    password2:    str = Form(...),
+    display_name: str = Form(""),
+    username:     str = Form(""),
+):
+    """Mirror of POST /auth/signup, but renders HTML errors and sets a
+    session cookie on success so the user goes straight to the dashboard."""
+    pf = {"email": email, "display_name": display_name, "username": username}
+    email_l = email.strip().lower()
+    if not email_l or "@" not in email_l:
+        return web.signup_page(error="Invalid email address.", prefill=pf)
+    if len(password) < 8:
+        return web.signup_page(
+            error="Password must be at least 8 characters.", prefill=pf)
+    if password != password2:
+        return web.signup_page(error="Passwords do not match.", prefill=pf)
+    if database.get_user_by_email(email_l):
+        return web.signup_page(
+            error="An account with this email already exists.", prefill=pf)
+
+    base = (username or "").strip().lower() or email_l.split("@")[0]
+    uname = base
+    if database.get_user_by_username(uname):
+        uname = f"{base}{random.randint(100, 999)}"
+
+    dn = (display_name or "").strip() or uname
+    hashed = auth.hash_password(password)
+    user   = database.create_user(uname, email_l, hashed, dn)
+    token  = auth.create_token(user["id"], user["email"])
+    resp   = RedirectResponse(url="/web/dashboard", status_code=303)
+    resp.set_cookie("apex_token", token, max_age=60 * 60 * 24 * 30,
+                    httponly=True, samesite="lax")
+    return resp
+
+
 @app.get("/web/logout", include_in_schema=False)
 def web_logout():
     resp = RedirectResponse(url="/web/login")

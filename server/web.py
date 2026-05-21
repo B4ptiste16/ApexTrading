@@ -103,13 +103,57 @@ def login_page(error: str | None = None) -> HTMLResponse:
                autocomplete="current-password" required>
         <button type="submit">LOG IN</button>
       </form>
-      <p style="color:var(--muted);font-size:10px;margin-top:18px;">
-        No account? Use the desktop app to sign up — web signup coming soon.
+      <p style="color:var(--muted);font-size:11px;margin-top:18px;">
+        No account?  <a href="/web/signup">Create one →</a>
       </p>
     </div>
   </div>
 </body></html>"""
     return HTMLResponse(body, status_code=401 if error else 200)
+
+
+def signup_page(error: str | None = None,
+                prefill: dict | None = None) -> HTMLResponse:
+    err_html = f'<div class="err">{error}</div>' if error else ""
+    pf = prefill or {}
+    body = f"""<!doctype html>
+<html><head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>APEX — Create account</title>
+  <style>{_BASE_CSS}</style>
+</head><body>
+  <div class="wrap">
+    <div class="brand">◈  APEX</div>
+    <div class="sub">TRADING PLATFORM</div>
+    <div class="card">
+      <h2>CREATE ACCOUNT</h2>
+      {err_html}
+      <form method="post" action="/web/signup">
+        <label>Display name</label>
+        <input name="display_name" autocomplete="name"
+               value="{pf.get('display_name','')}">
+        <label>Email address</label>
+        <input name="email" type="email" autocomplete="email"
+               value="{pf.get('email','')}" required>
+        <label>Username  (optional)</label>
+        <input name="username" autocomplete="username"
+               value="{pf.get('username','')}">
+        <label>Password  (min. 8 characters)</label>
+        <input name="password" type="password"
+               autocomplete="new-password" required>
+        <label>Confirm password</label>
+        <input name="password2" type="password"
+               autocomplete="new-password" required>
+        <button type="submit">CREATE ACCOUNT</button>
+      </form>
+      <p style="color:var(--muted);font-size:11px;margin-top:18px;">
+        Already have an account?  <a href="/web/login">Log in →</a>
+      </p>
+    </div>
+  </div>
+</body></html>"""
+    return HTMLResponse(body, status_code=400 if error else 200)
 
 
 def dashboard_page(user: dict) -> HTMLResponse:
