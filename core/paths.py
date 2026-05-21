@@ -26,7 +26,14 @@ def _source_root() -> Path:
     return Path(__file__).resolve().parent.parent
 
 
-if is_frozen():
+# V7.1.11: APEX_DATA_DIR env var takes precedence over everything else.
+# Used by the APEX cloud bot runner (server/bot_runner.py) to isolate
+# each user's state files / trade logs / charts under
+# /opt/apex_users/<user_id>/ when a bot is run on the Oracle server.
+_env_dir = os.environ.get("APEX_DATA_DIR")
+if _env_dir:
+    DATA_DIR = Path(_env_dir)
+elif is_frozen():
     _base = (os.environ.get("LOCALAPPDATA")
              or os.environ.get("APPDATA")
              or str(Path.home()))

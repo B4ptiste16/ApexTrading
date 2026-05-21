@@ -15,7 +15,8 @@ from fastapi import FastAPI, Form, HTTPException, Header, Request, UploadFile, F
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 
-from . import auth, database, credentials as creds, bots as marketplace, web
+from . import (auth, database, credentials as creds,
+               bots as marketplace, web, bot_runner)
 from .schemas import SignupRequest, LoginRequest
 
 
@@ -27,6 +28,12 @@ async def _lifespan(app: FastAPI):
     creds.init_credentials_table()
     marketplace.init_marketplace_table()
     yield
+    # V7.1.11: stop tracked bots gracefully on uvicorn shutdown so a
+    # service restart doesn't leave them orphaned with stale keys.
+    try:
+        bot_runner.shutdown_all()
+    except Exception:
+        pass
 
 
 app = FastAPI(
@@ -389,22 +396,67 @@ def web_api_status(request: Request):
 
 @app.post("/web/api/bots/{side}/start", include_in_schema=False)
 def web_api_bot_start(side: str, request: Request):
-    user = _web_user(request)
-    # The actual bot launcher will be wired up in step 5 (cron+systemd).
-    # For now we acknowledge the request so the UI flow is testable —
-    # the JS handler will get a 200 back and refresh, and the dashboard
-    # will keep showing "STOPPED" until the bot service is in place.
-    return {"ok": True,
-            "detail": "Bot service not yet deployed to Oracle. "
-                      "Start/Stop will activate after step 5 finishes."}
+    user   = _web_user(request)
+    result = bot_runner.start_bot(user["id"], side)
+    if not result.get("ok"):
+        raise HTTPException(400, result.get("detail", "start failed"))
+    return result
 
 
 @app.post("/web/api/bots/{side}/stop", include_in_schema=False)
 def web_api_bot_stop(side: str, request: Request):
-    user = _web_user(request)
-    return {"ok": True,
-            "detail": "Bot service not yet deployed to Oracle. "
-                      "Start/Stop will activate after step 5 finishes."}
+    user   = _web_user(request)
+    result = bot_runner.stop_bot(user["id"], side)
+    if not result.get("ok"):
+        raise HTTPException(500, result.get("detail", "stop failed"))
+    return result
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# V7.1.11 — Cloud-bot start/stop/status/logs  (bearer-auth, JSON)
+# Same actions as /web/api/bots/{side}/* but for the desktop app and any
+# external client. The /web/ variants stay cookie-authed for the phone.
+# ──────────────────────────────────────────────────────────────────────────────
+
+@app.post("/bots/{side}/start")
+def api_bot_start(side: str,
+                  authorization: str | None = Header(default=None)):
+    user   = _current_user(authorization)
+    result = bot_runner.start_bot(user["id"], side)
+    if not result.get("ok"):
+        raise HTTPException(400, result.get("detail", "start failed"))
+    return result
+
+
+@app.post("/bots/{side}/stop")
+def api_bot_stop(side: str,
+                 authorization: str | None = Header(default=None)):
+    user   = _current_user(authorization)
+    result = bot_runner.stop_bot(user["id"], side)
+    if not result.get("ok"):
+        raise HTTPException(500, result.get("detail", "stop failed"))
+    return result
+
+
+@app.get("/bots/{side}/status")
+def api_bot_status(side: str,
+                   authorization: str | None = Header(default=None)):
+    user = _current_user(authorization)
+    return bot_runner.status(user["id"], side)
+
+
+@app.get("/bots/{side}/logs")
+def api_bot_logs(side: str, tail: int = 4000,
+                 authorization: str | None = Header(default=None)):
+    user = _current_user(authorization)
+    return {"side": side.upper(),
+            "log":  bot_runner.tail_log(user["id"], side, n_chars=min(tail, 50_000))}
+
+
+@app.get("/bots/running")
+def api_bots_running(authorization: str | None = Header(default=None)):
+    user = _current_user(authorization)
+    return {"bots": bot_runner.list_running(user["id"])}
 
 
 @app.post("/web/api/bots/{side}/liquidate", include_in_schema=False)
