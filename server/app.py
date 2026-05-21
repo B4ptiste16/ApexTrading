@@ -273,9 +273,12 @@ def delete_public_bot(slug: str,
 
 @app.get("/", include_in_schema=False)
 def web_root(request: Request):
-    """Land at the dashboard if signed in, otherwise the login form."""
+    """V7.1.14: render the public landing page instead of redirecting
+    to /web/login. New visitors see the download CTA + a short pitch;
+    signed-in visitors see their name + 'Open dashboard' in the top
+    right. /web/login and /web/dashboard remain reachable directly."""
     user = web.user_from_cookie(request)
-    return RedirectResponse(url=("/web/dashboard" if user else "/web/login"))
+    return web.landing_page(user)
 
 
 @app.get("/web/login", include_in_schema=False)
@@ -349,11 +352,11 @@ def web_logout():
 
 
 @app.get("/web/dashboard", include_in_schema=False)
-def web_dashboard(request: Request):
+def web_dashboard(request: Request, tab: str = "overview"):
     user = web.user_from_cookie(request)
     if not user:
         return RedirectResponse(url="/web/login")
-    return web.dashboard_page(user)
+    return web.dashboard_page(user, tab=tab)
 
 
 # ──────────────────────────────────────────────────────────────────────────────

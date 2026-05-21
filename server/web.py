@@ -80,6 +80,159 @@ a       { color: var(--purple); }
 """
 
 
+def landing_page(signed_in_user: dict | None = None) -> HTMLResponse:
+    """
+    V7.1.14: public marketing homepage at /. Pre-V7.1.14 the bare URL
+    redirected straight to /web/login, which dead-ended new visitors
+    who didn't already have credentials. Now hits land on this page,
+    which has:
+      - APEX branding + a short pitch
+      - a big DOWNLOAD button linking to the latest GitHub release's
+        APEX_Setup.exe (GitHub auto-redirects /releases/latest/...)
+      - SIGN IN / SIGN UP buttons in the top-right (or the user's
+        display name + 'Open dashboard' if they're already
+        authenticated via the apex_token cookie)
+    """
+    # Top-right CTA changes depending on session
+    if signed_in_user:
+        name = (signed_in_user.get("display_name")
+                or signed_in_user.get("username") or "you")
+        topright = f"""
+          <span style="color:var(--muted);font-size:11px;">
+            Signed in as <b style="color:var(--text);">{name}</b>
+          </span>
+          <a class="btn btn-sm primary" href="/web/dashboard">Open dashboard</a>
+        """
+    else:
+        topright = """
+          <a class="btn btn-sm ghost"   href="/web/login">Sign in</a>
+          <a class="btn btn-sm primary" href="/web/signup">Sign up</a>
+        """
+
+    body = f"""<!doctype html>
+<html><head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>APEX — Trading platform</title>
+  <style>{_BASE_CSS}
+    nav      {{ display:flex; align-items:center; gap:10px;
+                padding: 14px 20px; }}
+    nav .sp  {{ flex:1; }}
+    .btn-sm  {{ height: 34px; padding: 0 16px; font-size: 10px;
+                letter-spacing: 2px; font-weight: 600;
+                border-radius: 6px; cursor: pointer;
+                font-family: inherit; display:inline-flex;
+                align-items:center; text-decoration:none; }}
+    .ghost   {{ color: var(--muted); border: 1px solid var(--border);
+                background: transparent; }}
+    .ghost:hover   {{ color: var(--text); border-color: var(--muted); }}
+    .primary {{ color: var(--bg); background: var(--green);
+                border: 1px solid var(--green); }}
+    .primary:hover {{ background: #6db89e; }}
+
+    .hero    {{ max-width: 760px; margin: 60px auto 0;
+                padding: 0 16px; text-align: center; }}
+    .hero .brand {{ font-family: 'Syne', sans-serif; font-weight: 800;
+                    color: var(--green); letter-spacing: 8px;
+                    font-size: 44px; margin-bottom: 4px; }}
+    .hero .sub   {{ color: var(--muted); font-size: 11px;
+                    letter-spacing: 6px; margin-bottom: 30px; }}
+    .hero h1     {{ font-size: 28px; line-height: 1.3;
+                    margin: 0 0 14px; font-family: 'Syne', sans-serif; }}
+    .hero p      {{ color: var(--muted); font-size: 13px;
+                    line-height: 1.7; max-width: 540px;
+                    margin: 0 auto 36px; }}
+    .download {{ display: inline-block; height: 64px;
+                  padding: 0 36px; line-height: 64px;
+                  font-family: inherit; font-size: 13px;
+                  letter-spacing: 4px; font-weight: 700;
+                  color: var(--bg); background: var(--green);
+                  border: none; border-radius: 10px;
+                  cursor: pointer; text-decoration: none; }}
+    .download:hover {{ background: #6db89e; }}
+    .platform {{ color: var(--muted); font-size: 10px;
+                  letter-spacing: 2px; margin-top: 14px; }}
+
+    .features {{ max-width: 920px; margin: 80px auto 60px;
+                  padding: 0 16px; display: grid;
+                  grid-template-columns: repeat(3, 1fr); gap: 18px; }}
+    .feat    {{ background: var(--panel); border: 1px solid var(--border);
+                 border-radius: 10px; padding: 20px; }}
+    .feat h3 {{ font-size: 11px; letter-spacing: 3px;
+                 color: var(--green); margin: 0 0 10px;
+                 font-family: 'Syne', sans-serif; }}
+    .feat p  {{ font-size: 12px; color: var(--muted);
+                 line-height: 1.6; margin: 0; }}
+
+    footer   {{ text-align: center; padding: 30px 16px 50px;
+                 color: var(--muted); font-size: 10px;
+                 letter-spacing: 1px; }}
+    footer a {{ color: var(--purple); }}
+
+    @media (max-width: 640px) {{
+      .features {{ grid-template-columns: 1fr; }}
+      .hero h1  {{ font-size: 22px; }}
+      .hero .brand {{ font-size: 34px; }}
+    }}
+  </style>
+</head><body>
+  <nav>
+    <div style="font-family:'Syne',sans-serif;font-weight:800;
+                color:var(--green);letter-spacing:4px;font-size:14px;">
+      ◈ APEX
+    </div>
+    <div class="sp"></div>
+    {topright}
+  </nav>
+
+  <section class="hero">
+    <div class="brand">◈ APEX</div>
+    <div class="sub">TRADING PLATFORM</div>
+
+    <h1>AI-driven automated trading,<br>on your desktop and the cloud.</h1>
+    <p>APEX bundles Claude-powered long, short and day strategies
+       into one desktop app. Bots can run locally on your machine
+       or on the APEX cloud server — 24/7, even with your laptop off.
+       Bring your own Alpaca keys, your own AI keys, your own bots.</p>
+
+    <a class="download"
+       href="https://github.com/B4ptiste16/ApexTrading/releases/latest/download/APEX_Setup.exe">
+      ⬇  DOWNLOAD FOR WINDOWS
+    </a>
+    <div class="platform">Free · Windows 10/11 · ~186 MB</div>
+  </section>
+
+  <section class="features">
+    <div class="feat">
+      <h3>AI-DRIVEN</h3>
+      <p>Three built-in bots (LONG / SHORT / DAY) score candidates
+         with Claude Vision and execute through Alpaca's paper or
+         live API. Roll your own from a plain-English description
+         via the MAKE BOT tab.</p>
+    </div>
+    <div class="feat">
+      <h3>CLOUD OR LOCAL</h3>
+      <p>Tick "Run on Oracle 24/7" per bot. The APEX server runs
+         them with your encrypted broker credentials and keeps them
+         alive even when the desktop app is closed.</p>
+    </div>
+    <div class="feat">
+      <h3>FULL CONTROL</h3>
+      <p>Mobile-accessible dashboard, in-app updater, drag-and-drop
+         bot import, custom universes, automation toggles per bot,
+         emergency LIQUIDATE button from anywhere.</p>
+    </div>
+  </section>
+
+  <footer>
+    <a href="https://github.com/B4ptiste16/ApexTrading">GitHub</a>
+    · <a href="/web/login">Sign in</a>
+    · <a href="/web/signup">Sign up</a>
+  </footer>
+</body></html>"""
+    return HTMLResponse(body)
+
+
 def login_page(error: str | None = None) -> HTMLResponse:
     err_html = f'<div class="err">{error}</div>' if error else ""
     body = f"""<!doctype html>
@@ -156,19 +309,32 @@ def signup_page(error: str | None = None,
     return HTMLResponse(body, status_code=400 if error else 200)
 
 
-def dashboard_page(user: dict) -> HTMLResponse:
+def dashboard_page(user: dict, tab: str = "overview") -> HTMLResponse:
     name = user.get("display_name") or user.get("username") or "user"
-    # V7.1.1: ship a richer dashboard with per-bot stats, start/stop,
-    # and emergency liquidate. Numbers and actions are wired to
-    # /web/api/* endpoints; the JS polls every 30s. When no broker keys
-    # are linked yet, every stat shows "—" and actions show a friendly
-    # hint to head to the desktop app's Tools tab.
+    # V7.1.14: clickable Overview / Bots / Universe / Tools tabs so the
+    # phone view matches the conceptual map of the desktop app.
+    # /web/dashboard?tab=bots, ?tab=universe, ?tab=tools route here.
+    tab = (tab or "overview").lower()
+    if tab not in ("overview", "bots", "universe", "tools"):
+        tab = "overview"
     body = f"""<!doctype html>
 <html><head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>APEX — Dashboard</title>
   <style>{_BASE_CSS}
+    .tabbar  {{ display:flex; gap:0; overflow-x:auto;
+                 border-bottom: 1px solid var(--border);
+                 margin: 4px 0 18px;
+                 -webkit-overflow-scrolling: touch; }}
+    .tab     {{ padding: 12px 18px; color: var(--muted);
+                 font-size: 10px; letter-spacing: 2px; font-weight: 600;
+                 text-decoration: none;
+                 border-bottom: 2px solid transparent;
+                 white-space: nowrap; flex-shrink: 0; }}
+    .tab:hover  {{ color: var(--text); }}
+    .tab.active {{ color: var(--text);
+                    border-bottom-color: var(--green); }}
     .botcard {{ margin-bottom: 14px; }}
     .botcard .head {{ display:flex; align-items:center; gap:8px;
                        margin-bottom: 10px; }}
@@ -205,8 +371,12 @@ def dashboard_page(user: dict) -> HTMLResponse:
     <div class="brand">◈  APEX</div>
     <div class="sub">TRADING PLATFORM</div>
 
+    <div class="tabbar">{tabs_html}</div>
+
+    <!-- Summary header (visible on every tab, just like the desktop's
+         top-of-page strip that always shows portfolio value + day P/L). -->
     <div class="card">
-      <h2>WELCOME, {name.upper()}</h2>
+      <h2>{name.upper()}</h2>
       <div class="stat"><span class="k">TOTAL EQUITY</span>
         <span class="v" id="total">—</span></div>
       <div class="stat"><span class="k">TODAY'S P/L</span>
@@ -215,18 +385,47 @@ def dashboard_page(user: dict) -> HTMLResponse:
         <span class="v" id="srv">checking…</span></div>
     </div>
 
-    <div id="bots"></div>
+    {("<!-- OVERVIEW TAB -->"
+      "<div class=\"card\"><h2>BOTS SNAPSHOT</h2>"
+      "<div id=\"botsmini\"></div></div>"
+      "<div class=\"card\"><h2>QUICK ACTIONS</h2>"
+      "<p style=\"color:var(--muted);font-size:11px;line-height:1.7;\">"
+      "Use the <b>BOTS</b> tab to start, stop or liquidate per bot. "
+      "Use the desktop app to configure auto-schedule, cloud-execution "
+      "and broker keys.</p></div>") if tab == "overview" else ""}
 
-    <div class="card">
-      <h2>ACCOUNT</h2>
-      <div class="stat"><span class="k">USERNAME</span>
-        <span class="v">{user.get("username","")}</span></div>
-      <div class="stat"><span class="k">EMAIL</span>
-        <span class="v">{user.get("email","")}</span></div>
-      <p style="margin-top:18px;">
-        <a href="/web/logout">Sign out</a>
-      </p>
-    </div>
+    {("<!-- BOTS TAB -->"
+      "<div id=\"bots\"></div>") if tab == "bots" else ""}
+
+    {("<!-- UNIVERSE TAB -->"
+      "<div class=\"card\"><h2>UNIVERSE</h2>"
+      "<p class=\"hint\">The candidate tickers each bot considers. "
+      "Manage the lists from the desktop app's UNIVERSE tab — they "
+      "live in <code>longbot_universe.txt</code> / "
+      "<code>shortbot_universe.txt</code> / "
+      "<code>daybot_universe.txt</code> on the machine running the "
+      "bot. Mobile-side editing coming soon.</p>"
+      "</div>") if tab == "universe" else ""}
+
+    {("<!-- TOOLS TAB -->"
+      "<div class=\"card\"><h2>ACCOUNT</h2>"
+      "<div class=\"stat\"><span class=\"k\">USERNAME</span>"
+      f"<span class=\"v\">{user.get('username','')}</span></div>"
+      "<div class=\"stat\"><span class=\"k\">EMAIL</span>"
+      f"<span class=\"v\">{user.get('email','')}</span></div>"
+      "<div class=\"stat\"><span class=\"k\">DISPLAY NAME</span>"
+      f"<span class=\"v\">{user.get('display_name','')}</span></div>"
+      "<p style=\"margin-top:18px;\"><a href=\"/web/logout\">Sign out</a></p>"
+      "</div>"
+      "<div class=\"card\"><h2>API KEYS</h2>"
+      "<p class=\"hint\">Broker / Anthropic keys are stored encrypted "
+      "on the APEX server. Manage them from the desktop app's "
+      "<b>Tools → ACCOUNT LINKING</b> section (Sync keys to APEX "
+      "server). Web-side editing coming soon.</p></div>"
+      "<div class=\"card\"><h2>DOWNLOAD APP</h2>"
+      "<p class=\"hint\">For the full desktop experience: "
+      "<a href=\"/\">Download APEX for Windows →</a></p></div>"
+      ) if tab == "tools" else ""}
   </div>
 
   <script>
@@ -239,8 +438,48 @@ def dashboard_page(user: dict) -> HTMLResponse:
     const fmtPct = n => n == null ? "—" :
       (n >= 0 ? "+" : "") + n.toFixed(2) + "%";
 
+    function renderBotsMini(state) {{
+      const c = document.getElementById("botsmini");
+      if (!c) return;
+      c.innerHTML = "";
+      for (const side of SIDES) {{
+        const s = state.bots[side] || {{}};
+        const running = s.running === true;
+        const dotCls = running ? "dot run" : "dot stop";
+        c.insertAdjacentHTML("beforeend", `
+          <div class="stat">
+            <span class="k">
+              <span class="${{dotCls}}" style="vertical-align:middle;
+                margin-right:8px;"></span>${{side}}
+            </span>
+            <span class="v">${{fmt$(s.equity)}}
+              <span style="font-size:10px;color:var(--muted);">
+                · ${{fmtPct(s.today_pct)}}
+              </span>
+            </span>
+          </div>`);
+      }}
+    }}
+
+    function renderTotals(state) {{
+      let total = 0, today = 0, haveAny = false;
+      for (const side of SIDES) {{
+        const s = state.bots[side] || {{}};
+        if (s.equity != null) {{ total += s.equity; haveAny = true; }}
+        if (s.today_pl != null) {{ today += s.today_pl; }}
+      }}
+      const tot = document.getElementById("total");
+      if (tot) tot.textContent = haveAny ? fmt$(total) : "—";
+      const t = document.getElementById("today");
+      if (t) {{
+        t.textContent = haveAny ? fmt$(today) : "—";
+        t.className = "v " + (today >= 0 ? "pos" : "neg");
+      }}
+    }}
+
     function renderBots(state) {{
       const c = document.getElementById("bots");
+      if (!c) return;
       c.innerHTML = "";
       let total = 0, today = 0, haveAny = false;
       for (const side of SIDES) {{
@@ -296,7 +535,9 @@ def dashboard_page(user: dict) -> HTMLResponse:
         const j = await r.json();
         document.getElementById("srv").textContent = "OK";
         document.getElementById("srv").className = "v pos";
+        renderTotals(j);
         renderBots(j);
+        renderBotsMini(j);
       }} catch (e) {{
         document.getElementById("srv").textContent = "OFFLINE";
         document.getElementById("srv").className = "v neg";
