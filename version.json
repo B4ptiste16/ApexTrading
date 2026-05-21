@@ -1,4 +1,4 @@
 {
-  "version": "1.1.10",
-  "notes": "V7.1.10: per-bot auto-schedule. The single 'Auto-trade on US market schedule' checkbox is replaced by a row of per-bot checkboxes in Tools → AUTOMATION — tick only the bots you want APEX to auto-start at market open and auto-stop at the close. Existing users with the legacy global flag are migrated automatically. Silenced bots are excluded from the row until you un-silence them. Next on the roadmap: bots running 24/7 on the Oracle server with cloud-side scheduling, so laptops can be off."
+  "version": "1.1.11",
+  "notes": "V7.1.11: properly fix the refresh wobble — the V7.1.1 fix only wrapped the kickoff, but bot-tab data updates happen asynchronously in _on_data; that's now where setUpdatesEnabled brackets the card mutations so Qt only repaints once per refresh. Plus a critical bug: a failure in any _apply_* helper used to strand every later section blank (RISK METRICS, API COST, POSITION MANAGEMENT). Each helper is now isolated in its own try/except so one bad piece of data can't blank out the whole tab. Also includes the server-side bot runner from Phase A of Step 5 (deploy to Oracle complete)."
 }

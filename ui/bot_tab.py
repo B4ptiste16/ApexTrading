@@ -392,18 +392,39 @@ class BotTab(QWidget):
         self._worker.start()
 
     def _on_data(self, data: dict):
-        """Called on main thread when background fetch completes."""
+        """Called on main thread when the background fetch completes.
+
+        V7.1.11 fixes:
+          1. Wrap the whole sweep in setUpdatesEnabled(False/True) so
+             Qt only repaints once — kills the wobble that the v1.1.1
+             fix didn't catch (that fix wrapped the kickoff only;
+             this is where the actual card mutations happen).
+          2. Each _apply_* is now isolated in its own try/except so a
+             single failure (e.g., empty snapshots blowing up
+             _apply_risk) can't strand everything after it (API COST
+             row + POSITION MANAGEMENT table used to never load).
+        """
         self._cached = data
-        self._apply_account(data)
-        self._apply_closed_trades(data)
-        self._apply_signal(data)
-        self._apply_gauge(data)
-        self._apply_equity(data)
-        self._apply_trades(data)
-        self._apply_pl(data)
-        self._apply_risk(data)
-        self._apply_costs(data)
-        self._apply_positions(data)
+        self.setUpdatesEnabled(False)
+        try:
+            for name, fn in (
+                ("account",       self._apply_account),
+                ("closed_trades", self._apply_closed_trades),
+                ("signal",        self._apply_signal),
+                ("gauge",         self._apply_gauge),
+                ("equity",        self._apply_equity),
+                ("trades",        self._apply_trades),
+                ("pl",            self._apply_pl),
+                ("risk",          self._apply_risk),
+                ("costs",         self._apply_costs),
+                ("positions",     self._apply_positions),
+            ):
+                try:
+                    fn(data)
+                except Exception as e:
+                    print(f"[{self.side}] _apply_{name} failed: {e}")
+        finally:
+            self.setUpdatesEnabled(True)
 
     # ── APPLY ────────────────────────────────────────────────
 

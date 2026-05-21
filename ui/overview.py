@@ -410,22 +410,30 @@ class OverviewTab(QWidget):
         used to happen as each block recalculated its layout.
         V7.1.4: cache fresh metrics for every displayed bot so the sort
         dropdown can reorder without a re-fetch, and rebuild the row in
-        the active sort order."""
+        the active sort order.
+        V7.1.11: each per-block call is now wrapped in try/except so a
+        single broken bot can't strand the rest of the row half-blank."""
         self.setUpdatesEnabled(False)
         try:
             # Cache metrics so the sort dropdown has fresh numbers
             for meta in self._displayable_bots():
                 try:
                     self._last_metrics[meta["side"]] = D.get_bot_metrics(meta["side"])
-                except Exception:
-                    pass
+                except Exception as e:
+                    print(f"[overview] metrics {meta['side']}: {e}")
             # If a non-default sort is active, the block order in the
             # row may need to change; rebuilding is cheap so just do it.
             if self._current_sort_key() != "default":
-                self._rebuild_account_blocks()
+                try:
+                    self._rebuild_account_blocks()
+                except Exception as e:
+                    print(f"[overview] reorder: {e}")
 
             for side, block in self.blocks.items():
-                self._refresh_block(side, block)
+                try:
+                    self._refresh_block(side, block)
+                except Exception as e:
+                    print(f"[overview] block {side}: {e}")
         finally:
             self.setUpdatesEnabled(True)
 

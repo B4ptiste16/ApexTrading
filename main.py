@@ -1596,19 +1596,26 @@ class ApexWindow(QMainWindow):
     # ── REFRESH ──────────────────────────────────────────────
 
     def _refresh_all(self):
+        """V7.1.11: bot-tab refresh is async (returns immediately, the
+        worker emits done() later). The previous setUpdatesEnabled
+        wrap around tab.refresh() was a no-op for visual wobble
+        because the actual card mutations happen in _on_data, which
+        runs after this method has already re-enabled updates. The
+        wobble fix now lives in BotTab._on_data — here we just kick
+        off the fetch and refresh the market status."""
         self.statusBar().showMessage("Refreshing data...")
         try:
             idx = self.tabs.currentIndex()
             tab = self.tabs.widget(idx)
             if tab and hasattr(tab, "refresh"):
-                # V7.1.1: suppress paints across the refresh so the user
-                # doesn't see widgets briefly resize themselves.
-                tab.setUpdatesEnabled(False)
                 try:
                     tab.refresh()
-                finally:
-                    tab.setUpdatesEnabled(True)
-            self._refresh_market_status()
+                except Exception as e:
+                    print(f"[refresh] tab error: {e}")
+            try:
+                self._refresh_market_status()
+            except Exception as e:
+                print(f"[refresh] market status: {e}")
             self.statusBar().showMessage(
                 f"Last updated: "
                 f"{__import__('datetime').datetime.now().strftime('%H:%M:%S')}")
