@@ -1,4 +1,4 @@
 {
-  "version": "1.1.3",
-  "notes": "V7.1.3: updates are now notify-only. APEX no longer auto-applies an install — it just shows an UPDATE AVAILABLE banner in the top-right header when a new version exists, and you click to start the install. The installer's normal UI is shown (no silent install) so SmartScreen / Defender prompts are handled correctly. Also includes a Check for updates now button in Tools. This fixes the auto-update loop reported in v1.1.0 -> v1.1.2."
+  "version": "1.1.4",
+  "notes": "V7.1.4: drag-to-reorder bot tabs (Chrome-style; OVERVIEW and MORE BOTS stay pinned). Overview now has a sort dropdown — order bot blocks by portfolio, total profit, day P/L $, day P/L %, win rate, or # of positions. The choice persists across restarts. Tab reorder also persists to the bot registry, so the new order survives a restart. Also tests the new notify-only updater from v1.1.3."
 }

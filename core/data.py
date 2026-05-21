@@ -314,6 +314,80 @@ def set_auto_schedule(on: bool) -> None:
 
 # ── V7.1+: force-update setting ─────────────────────────────────────
 
+def get_bot_metrics(side: str) -> dict:
+    """V7.1.4 — one-stop summary of all the numbers the Overview sort
+    dropdown might key on. Each value falls back to 0.0 when the
+    underlying Alpaca call can't be made (no keys linked, etc.) so the
+    sort still has a stable order even with missing data.
+
+    Returns:
+        {
+          "portfolio":   total bot account value (float),
+          "day_pl":      $ change today (float),
+          "day_pct":     % change today (float),
+          "positions":   # of open positions (int),
+          "win_rate":    closed-trade win rate, 0..100 (float),
+          "lifetime_pl": realised P/L across all closed trades ($, float),
+        }
+    """
+    out = {"portfolio": 0.0, "day_pl": 0.0, "day_pct": 0.0,
+           "positions": 0, "win_rate": 0.0, "lifetime_pl": 0.0}
+    try:
+        a = get_account(side) or {}
+        out["portfolio"] = float(a.get("portfolio_value") or 0)
+        eq  = float(a.get("equity") or 0)
+        le  = float(a.get("last_equity") or eq)
+        out["day_pl"]  = eq - le
+        out["day_pct"] = ((eq - le) / le * 100) if le else 0.0
+    except Exception:
+        pass
+    try:
+        out["positions"] = len(get_positions(side) or [])
+    except Exception:
+        pass
+    # Lifetime P/L and win-rate from orders. We pair each SELL with the
+    # average BUY price seen so far for the same symbol (FIFO bucket).
+    # Not a proper portfolio attribution but a fair best-effort that
+    # matches the closed-trades feed on the bot tab.
+    try:
+        df = get_orders(side)
+        if df is not None and not df.empty:
+            df = df[df["Status"].str.lower() == "filled"]
+            wins = 0
+            total_closed = 0
+            pl = 0.0
+            avg_buy = {}   # ticker → (qty, total cost)
+            # Process oldest → newest so buys precede their sells.
+            for _, row in df.sort_values("Submitted").iterrows():
+                t = row["Ticker"]
+                q = float(row.get("Qty") or 0)
+                p = float(row.get("Avg Fill") or 0)
+                side_o = str(row.get("Side", "")).upper()
+                if q <= 0 or p <= 0:
+                    continue
+                if side_o == "BUY":
+                    qt, ct = avg_buy.get(t, (0.0, 0.0))
+                    avg_buy[t] = (qt + q, ct + q * p)
+                elif side_o == "SELL":
+                    qt, ct = avg_buy.get(t, (0.0, 0.0))
+                    if qt > 0:
+                        avg_p = ct / qt
+                        trade_pl = (p - avg_p) * q
+                        pl += trade_pl
+                        total_closed += 1
+                        if trade_pl > 0:
+                            wins += 1
+                        # consume the sold shares from the bucket
+                        new_qty = max(0.0, qt - q)
+                        new_cost = avg_p * new_qty
+                        avg_buy[t] = (new_qty, new_cost)
+            out["lifetime_pl"] = round(pl, 2)
+            out["win_rate"] = (wins / total_closed * 100) if total_closed else 0.0
+    except Exception:
+        pass
+    return out
+
+
 def get_force_update_now() -> bool:
     """If true, auto-update can apply at any time (not just overnight)."""
     return bool(load_settings().get("force_update_now", False))

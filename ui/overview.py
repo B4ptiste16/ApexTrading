@@ -31,6 +31,20 @@ C = COLORS
 
 class OverviewTab(QWidget):
 
+    # V7.1.4: how the Overview blocks can be ordered.
+    # (key, human label). The key is what we persist in settings.
+    # "default" → registry order (tab-bar order); everything else is a
+    # descending sort on the named metric.
+    _SORT_OPTIONS = [
+        ("default",     "Order: default"),
+        ("portfolio",   "Order: portfolio $"),
+        ("lifetime_pl", "Order: total profit $"),
+        ("day_pl",      "Order: day P/L $"),
+        ("day_pct",     "Order: day P/L %"),
+        ("win_rate",    "Order: win rate %"),
+        ("positions",   "Order: # positions"),
+    ]
+
     def __init__(self, parent=None):
         super().__init__(parent)
         root = QVBoxLayout(self)
@@ -42,11 +56,30 @@ class OverviewTab(QWidget):
     def _build(self):
         s = self.scroll
 
-        # ── Account blocks for ONLY active (non-silenced) bots  V7.1.2 ──
-        s.add(SectionHeader("ALL ACCOUNTS", C["text"]))
+        # ── Account blocks for ONLY active (non-silenced) bots ──
+        # V7.1.4: Sort dropdown drives the block order in the row.
+        # Persisted in apex_settings.json under overview_sort so the
+        # last choice sticks across restarts.
+        self._sort_combo = QComboBox()
+        for key, label in self._SORT_OPTIONS:
+            self._sort_combo.addItem(label, key)
+        try:
+            saved = D.load_settings().get("overview_sort", "default")
+            idx = next((i for i, (k, _) in enumerate(self._SORT_OPTIONS)
+                        if k == saved), 0)
+            self._sort_combo.setCurrentIndex(idx)
+        except Exception:
+            pass
+        self._sort_combo.currentIndexChanged.connect(self._on_sort_changed)
+        s.add(SectionHeader("ALL ACCOUNTS", C["text"],
+                            controls=self._sort_combo))
+
         self._blocks_row = QHBoxLayout()
         self._blocks_row.setSpacing(10)
         self.blocks = {}
+        # Cache of latest metrics per side — populated by refresh() and
+        # used by the sort dropdown to reorder without re-fetching.
+        self._last_metrics: dict[str, dict] = {}
         self._blocks_container = QWidget()
         self._blocks_container.setLayout(self._blocks_row)
         s.add(self._blocks_container)
@@ -99,8 +132,12 @@ class OverviewTab(QWidget):
         """Return [{side, label, color}, ...] for bots that should
         appear in the Overview: active and NOT silenced. Reads the
         registry fresh each call so changes propagate after add/remove.
-        Custom bots are included; built-in metadata wins when both
-        exist (so user can't override LONG's color, for example)."""
+
+        V7.1.4: When the sort dropdown is set to anything other than
+        "default", the list is reordered (descending) by the cached
+        metric for that key. Falls back to registry order whenever
+        metrics haven't been fetched yet (first render before
+        refresh() has run)."""
         try:
             reg = D.load_settings().get("bot_registry", {})
         except Exception:
@@ -126,7 +163,35 @@ class OverviewTab(QWidget):
             else:
                 label, color = sid.upper(), C["purple"]
             out.append({"side": sid, "label": label, "color": color})
+
+        # Apply sort
+        sort_key = self._current_sort_key()
+        if sort_key != "default" and self._last_metrics:
+            out.sort(
+                key=lambda b: self._last_metrics.get(b["side"], {})
+                                                .get(sort_key, 0),
+                reverse=True,
+            )
         return out
+
+    def _current_sort_key(self) -> str:
+        try:
+            return self._sort_combo.currentData() or "default"
+        except Exception:
+            return "default"
+
+    def _on_sort_changed(self, _idx: int):
+        """Persist + rebuild the row. No metric re-fetch — we already
+        have cached numbers from the most recent refresh()."""
+        try:
+            s = D.load_settings()
+            s["overview_sort"] = self._current_sort_key()
+            from json import dump
+            with open(D.SETTINGS_FILE, "w", encoding="utf-8") as f:
+                dump(s, f, indent=2)
+        except Exception:
+            pass
+        self._rebuild_account_blocks()
 
     def _rebuild_account_blocks(self):
         """Tear down and rebuild the row of bot blocks based on the
@@ -274,9 +339,23 @@ class OverviewTab(QWidget):
     def refresh(self):
         """V7.1.1: freeze repaints around the whole refresh sweep so Qt
         only paints once at the end — kills the brief wobble/flash that
-        used to happen as each block recalculated its layout."""
+        used to happen as each block recalculated its layout.
+        V7.1.4: cache fresh metrics for every displayed bot so the sort
+        dropdown can reorder without a re-fetch, and rebuild the row in
+        the active sort order."""
         self.setUpdatesEnabled(False)
         try:
+            # Cache metrics so the sort dropdown has fresh numbers
+            for meta in self._displayable_bots():
+                try:
+                    self._last_metrics[meta["side"]] = D.get_bot_metrics(meta["side"])
+                except Exception:
+                    pass
+            # If a non-default sort is active, the block order in the
+            # row may need to change; rebuilding is cheap so just do it.
+            if self._current_sort_key() != "default":
+                self._rebuild_account_blocks()
+
             for side, block in self.blocks.items():
                 self._refresh_block(side, block)
         finally:

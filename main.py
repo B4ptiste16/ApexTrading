@@ -890,6 +890,14 @@ class ApexWindow(QMainWindow):
         self.tabs.setTabPosition(QTabWidget.TabPosition.North)
         self.tabs.setDocumentMode(True)
         self.tabs.setObjectName("mainTabs")
+        # V7.1.4: Chrome-style tab reordering. We enable movable on the
+        # whole bar, then in _on_tab_moved we revert any move that
+        # touches OVERVIEW / MORE BOTS / UNIVERSE / TOOLS — only
+        # bot-tab ↔ bot-tab moves are accepted, and the new order is
+        # persisted to the bot registry.
+        self.tabs.setMovable(True)
+        self.tabs.tabBar().tabMoved.connect(self._on_tab_moved)
+        self._suppress_tab_move = False
         root_layout.addWidget(self.tabs)
 
         # ── STATIC TABS ─────────────────────────────────────
@@ -1240,6 +1248,56 @@ class ApexWindow(QMainWindow):
         self._bot_ctrls.pop(side, None)
         self._tab_indices.pop(side, None)
         tab.deleteLater()
+
+    # ── V7.1.4: drag-reorder bot tabs only ──────────────────
+
+    def _on_tab_moved(self, from_idx: int, to_idx: int):
+        """Called by QTabBar after a user drags a tab to a new slot.
+        We only allow moves whose source AND destination are bot tabs;
+        anything else gets reverted. On accepted moves, persist the new
+        ordering to the bot registry so it survives restarts."""
+        if self._suppress_tab_move:
+            return
+
+        # The valid bot-tab range is everything strictly between the
+        # Overview tab and the MORE BOTS tab. (Universe + Tools live
+        # past MORE BOTS but are hidden, so we don't need to guard
+        # against landing on them — drag won't visit invisible tabs.)
+        # After the move, _morebots_idx may have shifted by ±1 if the
+        # move crossed boundaries (it shouldn't, but be defensive).
+        bot_lo = self._overview_idx + 1
+        bot_hi = self._morebots_idx        # exclusive
+        in_range = lambda i: bot_lo <= i < bot_hi
+
+        if not (in_range(from_idx) and in_range(to_idx)):
+            # Move would have shuffled a static tab — undo it.
+            self._suppress_tab_move = True
+            try:
+                self.tabs.tabBar().moveTab(to_idx, from_idx)
+            finally:
+                self._suppress_tab_move = False
+            return
+
+        # Accepted — rebuild the registry's active-bot order from the
+        # current tab sequence.
+        reg = _load_registry()
+        old_order = list(reg.get("active", []))
+        new_order = []
+        for i in range(bot_lo, bot_hi):
+            w = self.tabs.widget(i)
+            for side, tab in self._bot_tabs.items():
+                if tab is w:
+                    new_order.append(side)
+                    break
+        # Preserve any active bots that aren't currently tabbed (e.g.
+        # the user silenced one — it's in `active` but not in the bar).
+        tabless = [s for s in old_order if s not in new_order]
+        reg["active"] = new_order + tabless
+        _save_registry(reg)
+
+        # Keep the Overview block ordering in sync so the cards row
+        # mirrors the tab order.
+        self._sync_overview_blocks()
 
     def _grey_tab(self, side: str, silenced: bool):
         tab = self._bot_tabs.get(side)
