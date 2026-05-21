@@ -32,10 +32,11 @@ from PyQt6.QtGui import (
 )
 from PyQt6.QtWebEngineWidgets import QWebEngineView
 
-from ui.overview   import OverviewTab
-from ui.bot_tab    import BotTab
-from ui.overview   import ToolsTab
-from ui.universe   import UniverseTab
+from ui.overview     import OverviewTab
+from ui.bot_tab      import BotTab
+from ui.overview     import ToolsTab
+from ui.universe     import UniverseTab
+from ui.make_bot_tab import MakeBotTab    # V7.1.9
 from ui.styles     import DARK_STYLESHEET, COLORS
 from core.updater  import (check_for_update, download_and_apply,
                             get_current_version, restart_app,
@@ -904,15 +905,20 @@ class ApexWindow(QMainWindow):
         self.overview_tab  = OverviewTab()
         self.more_bots_tab = MoreBotsTab()
         self.universe_tab  = UniverseTab()
+        self.make_bot_tab  = MakeBotTab()        # V7.1.9
         self.tools_tab     = ToolsTab()
 
         self._overview_idx  = self.tabs.addTab(self.overview_tab,  "◈  OVERVIEW")
         self._morebots_idx  = self.tabs.addTab(self.more_bots_tab, "⊕  MORE BOTS")
 
-        # Universe + Tools added as real tabs but hidden — corner buttons drive them
+        # Universe / Make Bot / Tools added as real tabs but hidden — corner
+        # buttons drive them. V7.1.9 puts MAKE BOT between UNIVERSE and TOOLS
+        # so the corner row reads:  UNIVERSE  ·  MAKE BOT  ·  TOOLS.
         self._universe_idx  = self.tabs.addTab(self.universe_tab, "")
+        self._makebot_idx   = self.tabs.addTab(self.make_bot_tab, "")
         self._tools_idx     = self.tabs.addTab(self.tools_tab,    "")
         self.tabs.tabBar().setTabVisible(self._universe_idx, False)
+        self.tabs.tabBar().setTabVisible(self._makebot_idx,  False)
         self.tabs.tabBar().setTabVisible(self._tools_idx, False)
 
         # ── CORNER WIDGET (Universe / Tools) ────────────────
@@ -1133,9 +1139,11 @@ class ApexWindow(QMainWindow):
         row.setSpacing(0)
 
         self._corner_universe = QPushButton("✦  UNIVERSE")
+        self._corner_makebot  = QPushButton("⚒  MAKE BOT")   # V7.1.9
         self._corner_tools    = QPushButton("⚙  TOOLS")
 
-        for btn in (self._corner_universe, self._corner_tools):
+        for btn in (self._corner_universe, self._corner_makebot,
+                    self._corner_tools):
             btn.setObjectName("cornerBtn")
             btn.setCheckable(True)
             btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
@@ -1143,6 +1151,8 @@ class ApexWindow(QMainWindow):
 
         self._corner_universe.clicked.connect(
             lambda: self._switch_corner(self._universe_idx, self._corner_universe))
+        self._corner_makebot.clicked.connect(
+            lambda: self._switch_corner(self._makebot_idx,  self._corner_makebot))
         self._corner_tools.clicked.connect(
             lambda: self._switch_corner(self._tools_idx, self._corner_tools))
         self.tabs.currentChanged.connect(self._on_tab_changed)
@@ -1150,16 +1160,20 @@ class ApexWindow(QMainWindow):
 
     def _switch_corner(self, idx: int, btn: QPushButton):
         self.tabs.setCurrentIndex(idx)
-        self._corner_universe.setProperty("active", str(btn is self._corner_universe).lower())
-        self._corner_tools.setProperty("active", str(btn is self._corner_tools).lower())
-        for b in (self._corner_universe, self._corner_tools):
+        # V7.1.9: include the new MAKE BOT button in the active-state cycle.
+        all_corners = (self._corner_universe, self._corner_makebot,
+                       self._corner_tools)
+        for b in all_corners:
+            b.setProperty("active", str(b is btn).lower())
             b.style().unpolish(b)
             b.style().polish(b)
 
     def _on_tab_changed(self, idx: int):
         # Deactivate corner buttons if we switched away from their tabs
-        if idx not in (self._universe_idx, self._tools_idx):
-            for b in (self._corner_universe, self._corner_tools):
+        if idx not in (self._universe_idx, self._makebot_idx,
+                       self._tools_idx):
+            for b in (self._corner_universe, self._corner_makebot,
+                      self._corner_tools):
                 b.setProperty("active", "false")
                 b.setChecked(False)
                 b.style().unpolish(b)
@@ -1202,13 +1216,15 @@ class ApexWindow(QMainWindow):
         insert_at = self._morebots_idx
         self.tabs.insertTab(insert_at, tab, label)
 
-        # Shift static indices
+        # Shift static indices  (V7.1.9 added _makebot_idx)
         self._morebots_idx += 1
         self._universe_idx += 1
+        self._makebot_idx  += 1
         self._tools_idx    += 1
 
-        # Update tab button visibility
+        # Update tab button visibility (V7.1.9 added makebot)
         self.tabs.tabBar().setTabVisible(self._universe_idx, False)
+        self.tabs.tabBar().setTabVisible(self._makebot_idx,  False)
         self.tabs.tabBar().setTabVisible(self._tools_idx, False)
 
         actual_idx = self.tabs.indexOf(tab)
@@ -1247,14 +1263,17 @@ class ApexWindow(QMainWindow):
         idx = self.tabs.indexOf(tab)
         if idx >= 0:
             self.tabs.removeTab(idx)
-            # Shift static indices back
+            # Shift static indices back  (V7.1.9 added _makebot_idx)
             if idx < self._morebots_idx:
                 self._morebots_idx -= 1
             if idx < self._universe_idx:
                 self._universe_idx -= 1
+            if idx < self._makebot_idx:
+                self._makebot_idx -= 1
             if idx < self._tools_idx:
                 self._tools_idx -= 1
             self.tabs.tabBar().setTabVisible(self._universe_idx, False)
+            self.tabs.tabBar().setTabVisible(self._makebot_idx,  False)
             self.tabs.tabBar().setTabVisible(self._tools_idx, False)
 
         self._bot_dots.pop(side, None)

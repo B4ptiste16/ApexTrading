@@ -458,6 +458,94 @@ def sync_brackets_with_alpaca(state: dict) -> dict:
     return state
 
 
+def rearm_orphaned_positions(state: dict) -> dict:
+    """
+    V7.1.10 safety net.
+
+    If any open position no longer has live take-profit / stop-loss
+    orders (which would happen on a v1.1.9-or-earlier bot whose
+    DAY-TIF bracket children expired at 16:00 ET), re-place the legs
+    so the position is protected again. Uses the original entry +
+    stored stop / tp levels from state["open_brackets"] if available;
+    otherwise computes a fresh ATR-based stop and a +2x ATR target
+    from the current price.
+
+    No-op for positions that already have an open SELL order alive.
+    """
+    try:
+        positions = trading_client.get_all_positions()
+    except Exception:
+        return state
+    if not positions:
+        return state
+
+    # Get all currently-open orders so we can tell which positions
+    # already have a live exit order.
+    try:
+        live = trading_client.get_orders(
+            filter=GetOrdersRequest(status=QueryOrderStatus.OPEN,
+                                    limit=200, nested=True)
+        ) or []
+    except Exception:
+        live = []
+    have_sell_for = {str(o.symbol) for o in live
+                     if hasattr(o, "side") and "SELL" in str(o.side).upper()}
+
+    for p in positions:
+        sym = str(p.symbol)
+        if sym in have_sell_for:
+            continue                       # already protected
+        try:
+            qty   = int(float(p.qty))
+            if qty <= 0:
+                continue
+            entry = float(p.avg_entry_price)
+            # Prefer the levels we recorded when we placed the bracket
+            saved = (state.get("open_brackets") or {}).get(sym, {})
+            stop  = float(saved.get("stop") or 0)
+            tp    = float(saved.get("tp")   or 0)
+            # Fallback: re-derive from a fresh ATR if we don't have them
+            if not (stop and tp):
+                try:
+                    data = collect_candidate_data(sym)
+                    atr  = data.get("atr") if data else None
+                    if atr:
+                        stop = round(entry - atr * live_stop_atr_mult(), 2)
+                        tp   = round(entry + atr * live_tp_atr_mult(),   2)
+                except Exception:
+                    pass
+            if not (stop and tp):
+                # Last resort: 1 % / 2 %
+                stop = round(entry * 0.99, 2)
+                tp   = round(entry * 1.02, 2)
+
+            # Place a STAND-ALONE OCO pair (one-cancels-other) so we
+            # don't have to re-buy. Alpaca exposes this via OrderClass.OCO
+            # with a take_profit + stop_loss leg on a SELL.
+            order = MarketOrderRequest(
+                symbol=sym,
+                qty=str(qty),
+                side=OrderSide.SELL,
+                time_in_force=TimeInForce.GTC,
+                order_class=OrderClass.OCO,
+                stop_loss=StopLossRequest(stop_price=stop),
+                take_profit=TakeProfitRequest(limit_price=tp),
+            )
+            trading_client.submit_order(order)
+            print(f"  [re-arm] {sym} qty={qty} stop=${stop} tp=${tp}",
+                  flush=True)
+            # Track in state so future syncs can update wins/losses
+            state.setdefault("open_brackets", {})[sym] = {
+                "qty":   qty, "entry": entry,
+                "stop":  stop, "tp":    tp,
+                "rearmed": True,
+            }
+        except Exception as e:
+            print(f"  [re-arm failed] {sym}: {e}", flush=True)
+
+    return state
+
+
 # =========================================================
 # LAYER 1  -  INDICATORS  (identical to longbot_v2)
 # =========================================================
@@ -919,13 +1007,26 @@ def place_bracket(ticker: str, entry_price: float, stop: float,
     """
     Place a bracket order on Alpaca.
     Returns True if successful.
+
+    V7.1.10 — time_in_force changed from DAY to GTC. Alpaca's bracket
+    children (the take-profit limit order and the stop-loss stop order)
+    inherit the parent's TIF. With DAY they were cancelled at 16:00 ET,
+    so any position not closed same-day became an unprotected open
+    position — next day the price could pass the take-profit threshold
+    and nothing would sell (the TP order no longer existed). GTC keeps
+    the TP and SL alive across sessions until either fills or the user
+    explicitly cancels.
+
+    Market entry still fills instantly (TIF on a market order doesn't
+    delay the fill), so the only behavioural change is that exit
+    orders now persist.
     """
     try:
         order = MarketOrderRequest(
             symbol=ticker,
             qty=str(int(qty)),          # whole shares (bracket requirement)
             side=OrderSide.BUY,
-            time_in_force=TimeInForce.DAY,
+            time_in_force=TimeInForce.GTC,
             order_class=OrderClass.BRACKET,
             stop_loss=StopLossRequest(
                 stop_price=round(stop, 2),
@@ -1011,6 +1112,9 @@ def run_once():
     state     = load_state()
     state     = reset_daily(state)
     state     = sync_brackets_with_alpaca(state)
+    # V7.1.10 — protect any position that lost its TP/SL legs (e.g.
+    # legacy DAY-TIF brackets that expired overnight)
+    state     = rearm_orphaned_positions(state)
     portfolio = get_portfolio()
     pv        = portfolio["portfolio_value"]
 

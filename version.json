@@ -1,4 +1,4 @@
 {
-  "version": "1.1.8",
-  "notes": "V7.1.8: explicit QUIT button in the header + fixed auto-update relauncher (taskkill without /T) + Overview crash fix (renamed _period_combo attribute that was shadowing the chart's combo method). Install this manually once and from then on use the in-app UPDATE AVAILABLE banner for everything else."
+  "version": "1.1.9",
+  "notes": "V7.1.9: NEW Make-Your-Own-Bot tab (corner button between UNIVERSE and TOOLS) — describe a strategy in plain English, pick Anthropic / OpenAI / OpenRouter, paste your API key, generate a bot.py the AI wrote. Save locally or publish to the APEX store. Plus daybot fix: bracket exit legs (take-profit + stop-loss) are now GTC instead of DAY, so Alpaca no longer cancels them at 16:00 ET. Includes a re-arm safety net: if any open position is found with no live exit orders (e.g. a legacy DAY bracket that already expired), the bot places fresh GTC TP/SL legs on startup."
 }
