@@ -1267,7 +1267,8 @@ class ApexWindow(QMainWindow):
         # complete before we mutate the tab bar (sibling buttons get
         # repositioned during insertTab, which could destabilise the
         # widget that fired the signal).
-        QTimer.singleShot(0, lambda s=side: self._add_bot_tab(s))
+        QTimer.singleShot(0, lambda s=side: (self._add_bot_tab(s),
+                                              self._sync_overview_blocks()))
 
     def _on_bot_removed(self, side: str):
         """V7.1.1: deferred so the originating click signal finishes
@@ -1300,6 +1301,8 @@ class ApexWindow(QMainWindow):
             pass
         self._remove_bot_tab(side)
         self.more_bots_tab.refresh()
+        # V7.1.2: Overview now mirrors active-bot list
+        self._sync_overview_blocks()
 
     def _on_bot_silenced(self, side: str):
         tab = self._bot_tabs.get(side)
@@ -1309,10 +1312,24 @@ class ApexWindow(QMainWindow):
                 bot_ctrl.stop_bot()
         self._grey_tab(side, True)
         self._update_overview_dot(side, "silenced")
+        # V7.1.2: silenced bots disappear from the Overview blocks row.
+        self._sync_overview_blocks()
 
     def _on_bot_unsilenced(self, side: str):
         self._grey_tab(side, False)
         self._update_overview_dot(side, "stopped")
+        # V7.1.2: unsilenced bots reappear in the Overview blocks row.
+        self._sync_overview_blocks()
+
+    def _sync_overview_blocks(self):
+        """Tell the Overview to rebuild its account-block row based on
+        the current bot registry. No-op if Overview hasn't built yet."""
+        try:
+            ov = getattr(self, "overview_tab", None)
+            if ov and hasattr(ov, "refresh_active_bots"):
+                ov.refresh_active_bots()
+        except Exception as e:
+            print(f"[overview sync] {e}")
 
     # ── QUICK CONTROLS ───────────────────────────────────────
 

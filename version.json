@@ -1,4 +1,4 @@
 {
-  "version": "1.1.0",
-  "notes": "V7+: FastAPI auth server, login/signup window, gradient UI, blinking status dots, more-bots tab, sold-trades feed, period P/L, tight chart y-axis, prev-close reference line, single-instance lock, fixed auto-updater. V7.1+: Continue-as-Guest login option, force-update toggle, encrypted-on-server broker credentials, public bot marketplace, phone-accessible web dashboard. Live chart now updates continuously (extended_hours)."
+  "version": "1.1.2",
+  "notes": "V7.1.1: tab buttons spaced + remove no longer closes the app, refresh no longer wobbles, web dashboard expanded with per-bot equity/P / L and START / STOP / LIQUIDATE controls, drag-and-drop a .py onto the APEX window to import or publish a bot, bundled BOT_SKELETON.md guide. V7.1.2: Overview only shows active (non-silenced) bots and rebuilds live when you add/remove/silence; AI API cost section now leads with TOTAL SPENT (lifetime) and hides the per-bot row for bots no longer in use."
 }

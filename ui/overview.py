@@ -42,17 +42,16 @@ class OverviewTab(QWidget):
     def _build(self):
         s = self.scroll
 
-        # ── Three account blocks side by side ──
+        # ── Account blocks for ONLY active (non-silenced) bots  V7.1.2 ──
         s.add(SectionHeader("ALL ACCOUNTS", C["text"]))
-        row = QHBoxLayout()
+        self._blocks_row = QHBoxLayout()
+        self._blocks_row.setSpacing(10)
         self.blocks = {}
-        for side in ["LONG","SHORT","DAY"]:
-            block = self._account_block(side)
-            self.blocks[side] = block
-            row.addWidget(block)
-        rw = QWidget()
-        rw.setLayout(row)
-        s.add(rw)
+        self._blocks_container = QWidget()
+        self._blocks_container.setLayout(self._blocks_row)
+        s.add(self._blocks_container)
+        # Populate based on current bot registry (skips silenced/removed)
+        self._rebuild_account_blocks()
 
         # ── Live total-portfolio chart (works 24/7) ──
         s.add(SectionHeader("PORTFOLIO VALUE  —  LIVE (updates even when market closed)",
@@ -62,23 +61,27 @@ class OverviewTab(QWidget):
         s.add(self.combined_chart)
 
         # ── Total API cost summary ──
-        s.add(SectionHeader("TOTAL RUNNING COSTS", C["yellow"]))
+        s.add(SectionHeader("AI API KEY COSTS", C["yellow"]))
         cost_grid = QGridLayout()
         cost_grid.setSpacing(8)
         self.cost_cards = {}
+        # V7.1.2: TOTAL SPENT (lifetime) replaces GRAND TOTAL (per-year
+        # estimate) as the prominent figure — what the user has actually
+        # paid Anthropic so far, summed across all bot logs.
         cost_metrics = [
-            ("PER DAY",    C["muted"]),
-            ("PER MONTH",  C["yellow"]),
-            ("PER YEAR",   C["orange"]),
-            ("GRAND TOTAL",C["text"]),
+            ("TOTAL SPENT", C["green"]),
+            ("PER DAY",     C["muted"]),
+            ("PER MONTH",   C["yellow"]),
+            ("PER YEAR",    C["orange"]),
         ]
         for i, (label, color) in enumerate(cost_metrics):
             card = MetricCard(label, "—", color)
             cost_grid.addWidget(card, 0, i)
             self.cost_cards[label] = card
 
-        # Per-bot cost row
-        for j, side in enumerate(["LONG","SHORT","DAY"]):
+        # Per-bot cost row — only built-in bots have a token-estimate
+        # model. Custom bots show "—" until they ship their own estimate.
+        for j, side in enumerate(["LONG", "SHORT", "DAY"]):
             label = f"{side} TOTAL"
             card  = MetricCard(label, "—", BOT_COLOR[side])
             cost_grid.addWidget(card, 1, j)
@@ -90,8 +93,94 @@ class OverviewTab(QWidget):
 
         s.add_stretch()
 
-    def _account_block(self, side: str) -> QFrame:
-        color = BOT_COLOR[side]
+    # ── Active-bot block management (V7.1.2) ────────────────
+
+    def _displayable_bots(self) -> list[dict]:
+        """Return [{side, label, color}, ...] for bots that should
+        appear in the Overview: active and NOT silenced. Reads the
+        registry fresh each call so changes propagate after add/remove.
+        Custom bots are included; built-in metadata wins when both
+        exist (so user can't override LONG's color, for example)."""
+        try:
+            reg = D.load_settings().get("bot_registry", {})
+        except Exception:
+            reg = {}
+        active   = reg.get("active",   ["LONG", "SHORT", "DAY"])
+        silenced = set(reg.get("silenced", []))
+        customs  = {c["id"]: c for c in reg.get("custom", []) if isinstance(c, dict)}
+
+        builtin_meta = {
+            "LONG":  ("▲ LONG BOT",  BOT_COLOR["LONG"]),
+            "SHORT": ("▼ SHORT BOT", BOT_COLOR["SHORT"]),
+            "DAY":   ("◆ DAY BOT",   BOT_COLOR["DAY"]),
+        }
+        out = []
+        for sid in active:
+            if sid in silenced:
+                continue
+            if sid in builtin_meta:
+                label, color = builtin_meta[sid]
+            elif sid in customs:
+                label = customs[sid].get("label", sid).upper()
+                color = customs[sid].get("color", C["purple"])
+            else:
+                label, color = sid.upper(), C["purple"]
+            out.append({"side": sid, "label": label, "color": color})
+        return out
+
+    def _rebuild_account_blocks(self):
+        """Tear down and rebuild the row of bot blocks based on the
+        current registry. Called by main.py whenever the registry
+        changes (bot added / removed / silenced / unsilenced) so the
+        Overview stays in sync without an app restart."""
+        # Clear any existing blocks
+        while self._blocks_row.count():
+            item = self._blocks_row.takeAt(0)
+            w = item.widget()
+            if w is not None:
+                w.deleteLater()
+        self.blocks = {}
+
+        bots = self._displayable_bots()
+        if not bots:
+            # No active bots — show a friendly empty state instead of a
+            # blank row so the user knows to add a bot from MORE BOTS.
+            empty = QLabel(
+                "  No active bots.  Open the MORE BOTS tab to add one.")
+            empty.setStyleSheet(
+                f"color:{C['muted']};font-size:11px;padding:14px;"
+                f"background:{C['panel']};border:1px dashed {C['border']};"
+                f"border-radius:8px;")
+            self._blocks_row.addWidget(empty)
+            return
+
+        for meta in bots:
+            block = self._account_block(meta["side"],
+                                        label_text=meta["label"],
+                                        color=meta["color"])
+            self.blocks[meta["side"]] = block
+            self._blocks_row.addWidget(block)
+
+    # Public alias for main.py to call after registry mutations.
+    def refresh_active_bots(self):
+        self._rebuild_account_blocks()
+        # Re-trigger a data refresh so the new blocks show real numbers.
+        try:
+            self.refresh()
+        except Exception:
+            pass
+
+    def _account_block(self, side: str,
+                       label_text: str | None = None,
+                       color: str | None = None) -> QFrame:
+        # V7.1.2: label + color are passed in by the registry-aware
+        # builder so custom bots get a sensible card. Defaults keep
+        # the old behaviour for any direct callers.
+        if color is None:
+            color = BOT_COLOR.get(side, C["purple"])
+        if label_text is None:
+            label_text = {"LONG": "▲ LONG BOT", "SHORT": "▼ SHORT BOT",
+                          "DAY":  "◆ DAY BOT"}.get(side, side.upper())
         block = QFrame()
         block.setStyleSheet(
             f"background:{C['panel']};border:1px solid {color}30;"
@@ -100,12 +189,6 @@ class OverviewTab(QWidget):
         layout = QVBoxLayout(block)
         layout.setContentsMargins(16, 14, 16, 14)
         layout.setSpacing(10)
-
-        labels = {
-            "LONG":  "▲ LONG BOT",
-            "SHORT": "▼ SHORT BOT",
-            "DAY":   "◆ DAY BOT",
-        }
 
         # Title row with status dot
         title_row = QHBoxLayout()
@@ -117,7 +200,7 @@ class OverviewTab(QWidget):
         status_dot.setFixedSize(14, 16)
         block._status_dot = status_dot
 
-        title = QLabel(labels[side])
+        title = QLabel(label_text)
         title.setStyleSheet(
             f"font-family:'Syne',sans-serif;font-size:11px;font-weight:800;"
             f"letter-spacing:3px;color:{color};"
@@ -202,20 +285,32 @@ class OverviewTab(QWidget):
         # Live total-portfolio chart (background fetch, 24/7)
         self._reload_combined()
 
-        # Costs
+        # Costs — V7.1.2: surface lifetime spend as TOTAL SPENT,
+        # demote the per-year projection.
         costs = D.estimate_total_costs()
+        total_spent = round(sum(c.get("total", 0.0)
+                                for c in costs.get("by_bot", {}).values()), 4)
+        if "TOTAL SPENT" in self.cost_cards:
+            self.cost_cards["TOTAL SPENT"].update_value(
+                f"${total_spent:.4f}", C["green"])
         self.cost_cards["PER DAY"].update_value(
             f"${costs['per_day']:.4f}", C["muted"])
         self.cost_cards["PER MONTH"].update_value(
             f"${costs['per_month']:.2f}", C["yellow"])
         self.cost_cards["PER YEAR"].update_value(
             f"${costs['per_year']:.2f}", C["orange"])
-        self.cost_cards["GRAND TOTAL"].update_value(
-            f"${costs['grand_year']:.2f}/yr", C["text"])
-        for side in ["LONG","SHORT","DAY"]:
-            bc = costs["by_bot"].get(side,{})
-            self.cost_cards[f"{side} TOTAL"].update_value(
-                f"${bc.get('total',0):.4f}", BOT_COLOR[side])
+        # Per-bot row — only update cards for currently-displayed
+        # built-in bots; silenced/removed bots leave their card blank.
+        active_sides = {b["side"] for b in self._displayable_bots()}
+        for side in ["LONG", "SHORT", "DAY"]:
+            card = self.cost_cards.get(f"{side} TOTAL")
+            if card is None:
+                continue
+            if side in active_sides:
+                bc = costs["by_bot"].get(side, {})
+                card.update_value(f"${bc.get('total',0):.4f}", BOT_COLOR[side])
+            else:
+                card.update_value("—", C["muted"])
 
     def _refresh_block(self, side, block):
         a    = D.get_account(side)
