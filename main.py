@@ -1098,6 +1098,19 @@ class ApexWindow(QMainWindow):
         self.update_btn.clicked.connect(self._show_update_dialog)
         layout.addWidget(self.update_btn)
 
+        # V7.1.7: explicit Quit button so the user doesn't have to
+        # dig into the system-tray menu to actually exit. The window
+        # X button still hides-to-tray (bots keep running) — this
+        # button does a real cleanup + QApplication.quit().
+        self.quit_btn = QPushButton("⏻  QUIT")
+        self.quit_btn.setObjectName("quitBtn")
+        self.quit_btn.setToolTip(
+            "Fully quit APEX (stops all running bots).\n"
+            "The window X button minimises to the tray instead — "
+            "your bots keep running headless.")
+        self.quit_btn.clicked.connect(self._quit_app)
+        layout.addWidget(self.quit_btn)
+
         # Logged-in user chip
         display = self._user.get("display_name") or self._user.get("username", "")
         if display:
@@ -1490,12 +1503,69 @@ class ApexWindow(QMainWindow):
         self.raise_()
 
     def closeEvent(self, event):
+        # V7.1.7: distinguish between the X button (minimise-to-tray
+        # so bots keep running) and an explicit Quit (full cleanup).
+        if getattr(self, "_user_requested_quit", False):
+            try:
+                self._teardown_for_quit()
+            except Exception:
+                pass
+            event.accept()
+            QApplication.quit()
+            return
         event.ignore()
         self.hide()
         if hasattr(self, "tray"):
             self.tray.showMessage(
-                "APEX", "Running in background.",
-                QSystemTrayIcon.MessageIcon.Information, 2000)
+                "APEX",
+                "Running in background — your bots keep trading.\n"
+                "Use the QUIT button in the header to fully exit.",
+                QSystemTrayIcon.MessageIcon.Information, 2500)
+
+    def _quit_app(self):
+        """V7.1.7: explicit quit. Confirms if bots are running, then
+        triggers closeEvent with _user_requested_quit=True so the
+        normal teardown path runs and the app fully exits."""
+        running = []
+        for side, tab in self._bot_tabs.items():
+            bc = getattr(tab, "bot_ctrl", None)
+            if bc and bc.is_running():
+                running.append(side)
+        if running:
+            msg = QMessageBox(self)
+            msg.setWindowTitle("Quit APEX?")
+            msg.setText(
+                f"<b>{len(running)} bot{'s' if len(running) > 1 else ''} "
+                f"still running:</b> {', '.join(running)}<br><br>"
+                "Quitting will stop them. They won't resume until you "
+                "open APEX again and start them (or until the auto-"
+                "schedule fires at the next market open).<br><br>"
+                "Quit anyway?")
+            msg.setStandardButtons(
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+            msg.setDefaultButton(QMessageBox.StandardButton.No)
+            msg.setStyleSheet(self.styleSheet())
+            if msg.exec() != QMessageBox.StandardButton.Yes:
+                return
+
+        self._user_requested_quit = True
+        self.close()
+
+    def _teardown_for_quit(self):
+        """Stop running bots, hide the tray icon, save state.
+        Called from closeEvent when _user_requested_quit is True."""
+        for side, tab in self._bot_tabs.items():
+            bc = getattr(tab, "bot_ctrl", None)
+            if bc and bc.is_running():
+                try:
+                    bc.stop_bot()
+                except Exception:
+                    pass
+        try:
+            if hasattr(self, "tray"):
+                self.tray.hide()
+        except Exception:
+            pass
 
     # ── CLOCK ────────────────────────────────────────────────
 

@@ -1,4 +1,4 @@
 {
-  "version": "1.1.6",
-  "notes": "V7.1.6: softer color palette (less neon green/red, lighter dark backgrounds), Period dropdown in the Overview ALL ACCOUNTS header so you can switch the PERIOD P/L timeframe (1D/1W/1M/3M/6M/1Y) and the choice persists, smoother bot-tab drag — the brief freeze after dropping a tab is gone (deferred reorder + no data refetch on move)."
+  "version": "1.1.8",
+  "notes": "V7.1.8: explicit QUIT button in the header (one-click full exit, vs the X button which still minimises to tray). Critical updater fix: removed the /T flag from taskkill — with /T, taskkill was being asked to kill its own grandparent process tree (the cmd shell running it), which Windows refuses, so the batch stalled after Step 1 with the user seeing a frozen 'find /I APEX.exe' window. /F /IM APEX.exe alone kills every APEX.exe by image name (GUI + all bot subprocesses) without dragging cmd into the kill list."
 }

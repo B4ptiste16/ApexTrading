@@ -189,13 +189,21 @@ def launch_downloaded_installer(local_path: str) -> None:
     #
     # Each step is logged separately so future failures are easy to
     # diagnose from %TEMP%\apex_update.log.
+    # V7.1.7 fix: drop the /T (tree) flag from taskkill. With /T, the
+    # process tree being killed *includes the cmd shell that's running
+    # taskkill*, which Windows correctly refuses ("The process cannot
+    # terminate itself") and leaves the batch in an undefined state —
+    # the user saw Step 1 logged with errors but Step 2 never reached.
+    # Plain `/F /IM APEX.exe` kills every APEX.exe by image name (GUI
+    # + all --run-bot subprocesses) without touching cmd / taskkill /
+    # this batch script.
     bat.write_text(
         "@echo off\r\n"
         "set LOG=%TEMP%\\apex_update.log\r\n"
         "echo. >> \"%LOG%\"\r\n"
         "echo === APEX Update %DATE% %TIME% === >> \"%LOG%\"\r\n"
-        "echo Step 1: taskkill APEX.exe and children >> \"%LOG%\"\r\n"
-        "taskkill /F /IM APEX.exe /T >> \"%LOG%\" 2>&1\r\n"
+        "echo Step 1: kill APEX.exe instances >> \"%LOG%\"\r\n"
+        "taskkill /F /IM APEX.exe >> \"%LOG%\" 2>&1\r\n"
         "echo Step 2: settle (2s) >> \"%LOG%\"\r\n"
         "timeout /t 2 /nobreak >nul\r\n"
         "echo Step 3: launch installer >> \"%LOG%\"\r\n"

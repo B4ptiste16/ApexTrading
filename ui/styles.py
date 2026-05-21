@@ -300,6 +300,25 @@ QPushButton#updateBtn {{
     padding: 6px 16px;
 }}
 
+/* V7.1.7: explicit Quit button in the header */
+QPushButton#quitBtn {{
+    background: transparent;
+    color: {C['muted']};
+    border: 1px solid {C['border']};
+    border-radius: 5px;
+    font-family: 'JetBrains Mono';
+    font-size: 10px;
+    letter-spacing: 2px;
+    padding: 6px 14px;
+    margin-left: 8px;
+}}
+
+QPushButton#quitBtn:hover {{
+    color: {C['red']};
+    border-color: rgba(182,111,122,0.55);
+    background: rgba(182,111,122,0.08);
+}}
+
 QPushButton#addBotBtn {{
     background: rgba(63,184,154,0.08);
     color: {C['green']};
