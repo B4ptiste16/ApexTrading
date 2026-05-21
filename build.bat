@@ -68,6 +68,7 @@ python -m PyInstaller ^
     --icon "assets\icon.ico" ^
     --paths . ^
     --add-data "version.json;." ^
+    --add-data "BOT_SKELETON.md;." ^
     --add-data "assets;assets" ^
     --hidden-import PyQt6.QtWebEngineWidgets ^
     --hidden-import PyQt6.QtWebEngineCore ^

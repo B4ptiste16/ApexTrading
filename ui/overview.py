@@ -189,8 +189,15 @@ class OverviewTab(QWidget):
         self.combined_chart.load_chart(CH.combined_history_chart(df, period))
 
     def refresh(self):
-        for side, block in self.blocks.items():
-            self._refresh_block(side, block)
+        """V7.1.1: freeze repaints around the whole refresh sweep so Qt
+        only paints once at the end — kills the brief wobble/flash that
+        used to happen as each block recalculated its layout."""
+        self.setUpdatesEnabled(False)
+        try:
+            for side, block in self.blocks.items():
+                self._refresh_block(side, block)
+        finally:
+            self.setUpdatesEnabled(True)
 
         # Live total-portfolio chart (background fetch, 24/7)
         self._reload_combined()

@@ -316,3 +316,110 @@ def web_dashboard(request: Request):
     if not user:
         return RedirectResponse(url="/web/login")
     return web.dashboard_page(user)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# V7.1.1 — Web dashboard live data + bot controls (JSON, cookie-authed)
+# ──────────────────────────────────────────────────────────────────────────────
+
+def _web_user(request: Request) -> dict:
+    user = web.user_from_cookie(request)
+    if not user:
+        raise HTTPException(401, "Not signed in.")
+    return user
+
+
+def _alpaca_client_for(user_id: int, side: str):
+    """Build an Alpaca TradingClient from the user's stored credentials,
+    or return None when keys aren't linked or alpaca-py isn't installed."""
+    try:
+        from alpaca.trading.client import TradingClient
+    except ImportError:
+        return None
+    data = creds.load_credentials(user_id) or {}
+    k = data.get(f"ALPACA_API_KEY_{side}")
+    s = data.get(f"ALPACA_SECRET_KEY_{side}")
+    if not k or not s:
+        return None
+    try:
+        return TradingClient(k, s, paper=True)
+    except Exception:
+        return None
+
+
+def _bot_state(user_id: int, side: str) -> dict:
+    """Returns equity / today's P/L / position count / running flag for
+    one bot. All fields are None when broker linking is missing or the
+    Alpaca call fails — the dashboard renders that as "—"."""
+    c = _alpaca_client_for(user_id, side)
+    if c is None:
+        return {"equity": None, "today_pl": None, "today_pct": None,
+                "positions": None, "running": False}
+    try:
+        acct = c.get_account()
+        equity = float(acct.equity)
+        last   = float(acct.last_equity)
+        pl     = equity - last
+        pct    = (pl / last * 100) if last else 0.0
+        positions = c.get_all_positions()
+        return {
+            "equity":    equity,
+            "today_pl":  pl,
+            "today_pct": pct,
+            "positions": len(positions),
+            # "running" requires a bot-process registry that lives on the
+            # Oracle server. Until step 5 (deploy bots to Oracle with
+            # systemd / cron), we report False here; once the bot service
+            # is up, we'll flip this to read the systemd unit state.
+            "running":   False,
+        }
+    except Exception:
+        return {"equity": None, "today_pl": None, "today_pct": None,
+                "positions": None, "running": False}
+
+
+@app.get("/web/api/status", include_in_schema=False)
+def web_api_status(request: Request):
+    user = _web_user(request)
+    linked = bool(creds.load_credentials(user["id"]))
+    bots = {side: _bot_state(user["id"], side)
+            for side in ("LONG", "SHORT", "DAY")}
+    return {"linked": linked, "bots": bots}
+
+
+@app.post("/web/api/bots/{side}/start", include_in_schema=False)
+def web_api_bot_start(side: str, request: Request):
+    user = _web_user(request)
+    # The actual bot launcher will be wired up in step 5 (cron+systemd).
+    # For now we acknowledge the request so the UI flow is testable —
+    # the JS handler will get a 200 back and refresh, and the dashboard
+    # will keep showing "STOPPED" until the bot service is in place.
+    return {"ok": True,
+            "detail": "Bot service not yet deployed to Oracle. "
+                      "Start/Stop will activate after step 5 finishes."}
+
+
+@app.post("/web/api/bots/{side}/stop", include_in_schema=False)
+def web_api_bot_stop(side: str, request: Request):
+    user = _web_user(request)
+    return {"ok": True,
+            "detail": "Bot service not yet deployed to Oracle. "
+                      "Start/Stop will activate after step 5 finishes."}
+
+
+@app.post("/web/api/bots/{side}/liquidate", include_in_schema=False)
+def web_api_bot_liquidate(side: str, request: Request):
+    """Emergency: close every open position on this bot's Alpaca account
+    at market. Works as long as the user has linked broker creds —
+    doesn't require the bot service to be running."""
+    user = _web_user(request)
+    c = _alpaca_client_for(user["id"], side)
+    if c is None:
+        raise HTTPException(
+            400, "No Alpaca keys linked for this bot. Sync them from "
+                 "the desktop app's Tools tab first.")
+    try:
+        c.close_all_positions(cancel_orders=True)
+        return {"ok": True, "detail": f"Liquidation order sent for {side}."}
+    except Exception as e:
+        raise HTTPException(500, f"Alpaca rejected the request: {e}")

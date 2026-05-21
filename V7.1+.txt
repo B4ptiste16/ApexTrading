@@ -19,3 +19,17 @@ V7.1+
 
 - Add a force update feature which updates the app during the day removing the necessity of having to wait after hours for the update. It would be a box to check which would automatically install updates if accepted by the  user and will asked when app launched.
 
+
+
+
+To Improve (V7.1.1)
+
+- The add bot/ remove bot functionality works. however, space the place button and the x and make so the app stays open when the cross is pressed and when a new bot is added
+
+- When the info is refreshed, the page wobbles or blinks a bit. Remove that effect.
+
+- The website is accessible through phone fine but i cant see each bots performance or data and i cant start/stop a bot or liquidate a stock
+
+- When i meant i want a drag and drop feature to download then publish a self-made bot, i meant drag and drop it wherever i want in the apex window and it will detect it and ask for confirmation before dowloading. 
+
+- To make your own bots i want an instructions file someone can read if want to code manually or that can be given to AI to help craft it perfectly.

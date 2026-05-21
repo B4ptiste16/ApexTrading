@@ -158,34 +158,65 @@ def signup_page(error: str | None = None,
 
 def dashboard_page(user: dict) -> HTMLResponse:
     name = user.get("display_name") or user.get("username") or "user"
+    # V7.1.1: ship a richer dashboard with per-bot stats, start/stop,
+    # and emergency liquidate. Numbers and actions are wired to
+    # /web/api/* endpoints; the JS polls every 30s. When no broker keys
+    # are linked yet, every stat shows "—" and actions show a friendly
+    # hint to head to the desktop app's Tools tab.
     body = f"""<!doctype html>
 <html><head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>APEX — Dashboard</title>
-  <style>{_BASE_CSS}</style>
+  <style>{_BASE_CSS}
+    .botcard {{ margin-bottom: 14px; }}
+    .botcard .head {{ display:flex; align-items:center; gap:8px;
+                       margin-bottom: 10px; }}
+    .botcard .dot {{ width:8px; height:8px; border-radius:4px;
+                      background: var(--muted); display:inline-block; }}
+    .dot.run    {{ background: var(--green); animation: pulse 1.4s ease-in-out infinite; }}
+    .dot.stop   {{ background: var(--muted); }}
+    .actions    {{ display: flex; gap: 8px; margin-top: 12px;
+                    flex-wrap: wrap; }}
+    .btn        {{ flex: 1; min-width: 110px; height: 38px;
+                    background: var(--panel2); color: var(--text);
+                    border: 1px solid var(--border); border-radius: 6px;
+                    font-family: inherit; font-size: 10px;
+                    letter-spacing: 2px; cursor: pointer; }}
+    .btn:hover  {{ border-color: var(--muted); }}
+    .btn.go     {{ color: var(--green);
+                    border-color: rgba(63,184,154,0.45); }}
+    .btn.stop   {{ color: var(--red);
+                    border-color: rgba(199,92,107,0.45); }}
+    .btn.liq    {{ color: var(--purple);
+                    border-color: rgba(138,147,201,0.45); }}
+    .btn:disabled {{ color: var(--muted); cursor: not-allowed;
+                      border-color: var(--border); }}
+    .hint       {{ color: var(--muted); font-size: 10px;
+                    margin-top: 10px; line-height: 1.5; }}
+    @keyframes pulse {{
+      0%   {{ opacity: 1; }}
+      50%  {{ opacity: 0.25; }}
+      100% {{ opacity: 1; }}
+    }}
+  </style>
 </head><body>
   <div class="wrap">
     <div class="brand">◈  APEX</div>
     <div class="sub">TRADING PLATFORM</div>
+
     <div class="card">
       <h2>WELCOME, {name.upper()}</h2>
-      <p style="color:var(--muted);font-size:11px;line-height:1.6;">
-        You're signed in to the APEX web dashboard. Portfolio data is
-        served from your linked Alpaca/IBKR accounts. Link your broker
-        credentials in the desktop app's <b>Tools → Account Linking</b>
-        tab to see live numbers here.
-      </p>
+      <div class="stat"><span class="k">TOTAL EQUITY</span>
+        <span class="v" id="total">—</span></div>
+      <div class="stat"><span class="k">TODAY'S P/L</span>
+        <span class="v" id="today">—</span></div>
+      <div class="stat"><span class="k">SERVER</span>
+        <span class="v" id="srv">checking…</span></div>
     </div>
-    <div class="card">
-      <h2>BOTS</h2>
-      <div class="stat"><span class="k">LONG</span>
-        <span class="v" id="long">—</span></div>
-      <div class="stat"><span class="k">SHORT</span>
-        <span class="v" id="short">—</span></div>
-      <div class="stat"><span class="k">DAY</span>
-        <span class="v" id="day">—</span></div>
-    </div>
+
+    <div id="bots"></div>
+
     <div class="card">
       <h2>ACCOUNT</h2>
       <div class="stat"><span class="k">USERNAME</span>
@@ -197,6 +228,110 @@ def dashboard_page(user: dict) -> HTMLResponse:
       </p>
     </div>
   </div>
+
+  <script>
+    const SIDES = ["LONG", "SHORT", "DAY"];
+    const fmt$ = n =>
+      n == null ? "—"
+        : (n >= 0 ? "+$" : "-$") +
+          Math.abs(n).toLocaleString(undefined,
+            {{minimumFractionDigits: 2, maximumFractionDigits: 2}});
+    const fmtPct = n => n == null ? "—" :
+      (n >= 0 ? "+" : "") + n.toFixed(2) + "%";
+
+    function renderBots(state) {{
+      const c = document.getElementById("bots");
+      c.innerHTML = "";
+      let total = 0, today = 0, haveAny = false;
+      for (const side of SIDES) {{
+        const s = state.bots[side] || {{}};
+        if (s.equity != null) {{ total += s.equity; haveAny = true; }}
+        if (s.today_pl != null) {{ today += s.today_pl; }}
+        const running = s.running === true;
+        const dotCls = running ? "dot run" : "dot stop";
+        const dis = (state.linked === false) ? "disabled" : "";
+        c.insertAdjacentHTML("beforeend", `
+          <div class="card botcard">
+            <div class="head">
+              <span class="${{dotCls}}"></span>
+              <h2 style="margin:0;flex:1;">${{side}}</h2>
+              <span class="v" style="font-size:12px;">${{fmt$(s.equity)}}</span>
+            </div>
+            <div class="stat"><span class="k">TODAY P/L</span>
+              <span class="v ${{(s.today_pl||0) >= 0 ? 'pos' : 'neg'}}">
+                ${{fmt$(s.today_pl)}} (${{fmtPct(s.today_pct)}})</span></div>
+            <div class="stat"><span class="k">POSITIONS</span>
+              <span class="v">${{s.positions == null ? '—' : s.positions}}</span></div>
+            <div class="stat"><span class="k">STATUS</span>
+              <span class="v">${{running ? 'RUNNING' : 'STOPPED'}}</span></div>
+            <div class="actions">
+              <button class="btn go" ${{running || dis ? 'disabled' : ''}}
+                      onclick="act('${{side}}','start')">▶  START</button>
+              <button class="btn stop" ${{!running || dis ? 'disabled' : ''}}
+                      onclick="act('${{side}}','stop')">■  STOP</button>
+              <button class="btn liq" ${{dis ? 'disabled' : ''}}
+                      onclick="liq('${{side}}')">⚠  LIQUIDATE</button>
+            </div>
+          </div>
+        `);
+      }}
+      document.getElementById("total").textContent = haveAny ? fmt$(total) : "—";
+      const t = document.getElementById("today");
+      t.textContent = haveAny ? fmt$(today) : "—";
+      t.className = "v " + (today >= 0 ? "pos" : "neg");
+      if (state.linked === false) {{
+        c.insertAdjacentHTML("afterbegin", `
+          <div class="card">
+            <h2>NO BROKER LINKED</h2>
+            <p class="hint">Open the desktop app → Tools → API Keys, fill
+            in your Alpaca keys, then click <b>Sync keys to APEX server</b>
+            under ACCOUNT LINKING. Refresh this page once that's done.</p>
+          </div>`);
+      }}
+    }}
+
+    async function refresh() {{
+      try {{
+        const r = await fetch("/web/api/status");
+        const j = await r.json();
+        document.getElementById("srv").textContent = "OK";
+        document.getElementById("srv").className = "v pos";
+        renderBots(j);
+      }} catch (e) {{
+        document.getElementById("srv").textContent = "OFFLINE";
+        document.getElementById("srv").className = "v neg";
+      }}
+    }}
+
+    async function act(side, cmd) {{
+      if (!confirm(`${{cmd.toUpperCase()}} ${{side}} bot?`)) return;
+      try {{
+        const r = await fetch(`/web/api/bots/${{side}}/${{cmd}}`,
+                              {{ method: "POST" }});
+        const j = await r.json();
+        if (!r.ok) alert(j.detail || "Action failed.");
+      }} catch (e) {{ alert(e.message); }}
+      refresh();
+    }}
+
+    async function liq(side) {{
+      if (!confirm(
+        `LIQUIDATE all positions held by ${{side}}?\\n\\n` +
+        `This sells every open position immediately at market. ` +
+        `It cannot be undone.`)) return;
+      try {{
+        const r = await fetch(`/web/api/bots/${{side}}/liquidate`,
+                              {{ method: "POST" }});
+        const j = await r.json();
+        alert(j.detail || (r.ok ? "Liquidate request sent."
+                                 : "Liquidate failed."));
+      }} catch (e) {{ alert(e.message); }}
+      refresh();
+    }}
+
+    refresh();
+    setInterval(refresh, 30000);
+  </script>
 </body></html>"""
     return HTMLResponse(body)
 

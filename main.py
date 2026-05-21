@@ -146,8 +146,8 @@ class TabQuickControls(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setFixedHeight(20)
         row = QHBoxLayout(self)
-        row.setContentsMargins(0, 0, 3, 0)
-        row.setSpacing(1)
+        row.setContentsMargins(0, 0, 4, 0)
+        row.setSpacing(2)
 
         self._play = QPushButton("▶")
         self._stop = QPushButton("■")
@@ -159,7 +159,14 @@ class TabQuickControls(QWidget):
 
         for btn in (self._play, self._stop, self._remove):
             btn.setFixedSize(16, 16)
-            row.addWidget(btn)
+
+        # Pack: play / stop (mutually exclusive), then breathing room,
+        # then the remove ✕. V7.1.1 — the ✕ used to sit flush against
+        # the play button which made mis-clicks easy.
+        row.addWidget(self._play)
+        row.addWidget(self._stop)
+        row.addSpacing(8)
+        row.addWidget(self._remove)
 
         self._stop.setVisible(False)
         self._play.clicked.connect(self.play_clicked)
@@ -297,10 +304,11 @@ class MoreBotsTab(QWidget):
         # ── UPLOAD CUSTOM BOT ────────────────────────────────
         s.add(SectionHeader("UPLOAD CUSTOM BOT", C["yellow"]))
         custom_info = QLabel(
-            "Upload a Python trading script (.py) to add it as a custom bot. "
-            "The script must expose a main() function. "
-            "Uploaded bots are stored in the data folder and can be added to tabs like built-in bots."
-        )
+            "Drag-and-drop a .py file anywhere on the APEX window, or "
+            "click Browse below. The script must expose a main() "
+            "function. Read the skeleton guide first if you're new to "
+            "writing bots — it explains every constraint and includes "
+            "a minimal working example.")
         custom_info.setStyleSheet(f"color:{C['muted']};font-size:11px;")
         custom_info.setWordWrap(True)
         s.add(custom_info)
@@ -309,9 +317,13 @@ class MoreBotsTab(QWidget):
         upload_btn = QPushButton("📂  Browse .py file...")
         upload_btn.setObjectName("toolBtn")
         upload_btn.clicked.connect(self._upload_bot)
+        skel_btn = QPushButton("📖  Open skeleton guide")
+        skel_btn.setObjectName("toolBtn")
+        skel_btn.clicked.connect(self._open_skeleton_guide)
         self._upload_msg = QLabel("")
         self._upload_msg.setStyleSheet(f"color:{C['green']};font-size:11px;")
         upload_row.addWidget(upload_btn)
+        upload_row.addWidget(skel_btn)
         upload_row.addWidget(self._upload_msg)
         upload_row.addStretch()
         uw = QWidget()
@@ -540,6 +552,34 @@ class MoreBotsTab(QWidget):
         self.bot_unsilenced.emit(side)
         self.refresh()
 
+    def _open_skeleton_guide(self):
+        """V7.1.1: open BOT_SKELETON.md so the user can read or paste
+        it into an AI chat for help crafting a bot. The file ships
+        inside the PyInstaller bundle, so we look there first; falls
+        back to the project root for dev runs."""
+        import subprocess
+        from pathlib import Path as _P
+        candidates = []
+        # PyInstaller --onedir build: data files land in sys._MEIPASS
+        meipass = getattr(sys, "_MEIPASS", None)
+        if meipass:
+            candidates.append(_P(meipass) / "BOT_SKELETON.md")
+        # source / dev run
+        candidates.append(_P(__file__).parent / "BOT_SKELETON.md")
+        for p in candidates:
+            if p.exists():
+                try:
+                    os.startfile(str(p))
+                except AttributeError:
+                    # non-Windows fallback
+                    subprocess.Popen(["xdg-open", str(p)])
+                return
+        QMessageBox.warning(
+            self, "Skeleton guide missing",
+            "BOT_SKELETON.md was not bundled in this build. You can "
+            "read it on GitHub: "
+            "https://github.com/B4ptiste16/ApexTrading/blob/main/BOT_SKELETON.md")
+
     def _upload_bot(self):
         path, _ = QFileDialog.getOpenFileName(
             self, "Select Bot Script", "", "Python Files (*.py)")
@@ -710,7 +750,16 @@ class MoreBotsTab(QWidget):
         self._dl_worker.start()
 
     def _publish_bot(self):
-        """Upload one of the local custom bots to the public marketplace."""
+        """Pick a .py via file dialog, then publish it."""
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Select bot script to publish",
+            str(DATA_DIR / "bots"), "Python Files (*.py)")
+        if path:
+            self._publish_bot_with_path(path)
+
+    def _publish_bot_with_path(self, path: str):
+        """Upload a known .py file to the public marketplace. Called
+        directly by the drag-and-drop handler in ApexWindow."""
         from PyQt6.QtWidgets import QInputDialog
         from ui.login import load_auth, load_server_url
 
@@ -723,11 +772,6 @@ class MoreBotsTab(QWidget):
                 "create one from the start screen.")
             return
 
-        path, _ = QFileDialog.getOpenFileName(
-            self, "Select bot script to publish",
-            str(DATA_DIR / "bots"), "Python Files (*.py)")
-        if not path:
-            return
         blob = Path(path).read_bytes()
         name, ok = QInputDialog.getText(
             self, "Bot name", "Display name:", text=Path(path).stem)
@@ -907,6 +951,92 @@ class ApexWindow(QMainWindow):
 
         self._setup_tray()
         QTimer.singleShot(600, self._refresh_all)
+
+        # V7.1.1: accept .py drops anywhere in the window so a user can
+        # drag a bot script in and we'll offer to install it locally or
+        # publish it to the public library.
+        self.setAcceptDrops(True)
+
+    # ── DRAG & DROP  (V7.1.1) ────────────────────────────────
+
+    def dragEnterEvent(self, event):
+        md = event.mimeData()
+        if md.hasUrls():
+            for u in md.urls():
+                p = u.toLocalFile()
+                if p.lower().endswith(".py"):
+                    event.acceptProposedAction()
+                    return
+        event.ignore()
+
+    def dragMoveEvent(self, event):
+        self.dragEnterEvent(event)
+
+    def dropEvent(self, event):
+        paths = [u.toLocalFile() for u in event.mimeData().urls()
+                 if u.toLocalFile().lower().endswith(".py")]
+        if not paths:
+            event.ignore()
+            return
+        event.acceptProposedAction()
+        # Defer so the drag operation in the OS finishes cleanly before
+        # we pop a modal dialog (avoids losing focus / orphaned drag).
+        QTimer.singleShot(0, lambda ps=paths: self._handle_dropped_files(ps))
+
+    def _handle_dropped_files(self, paths: list):
+        for path in paths:
+            self._prompt_dropped_bot(path)
+
+    def _prompt_dropped_bot(self, path: str):
+        """Ask: install locally, publish to library, or cancel."""
+        name = Path(path).name
+        box = QMessageBox(self)
+        box.setWindowTitle("Import bot")
+        box.setText(
+            f"<b>{name}</b><br><br>"
+            f"What would you like to do with this Python script?")
+        box.setStyleSheet(self.styleSheet())
+        local_btn = box.addButton(
+            "Add to my library",   QMessageBox.ButtonRole.AcceptRole)
+        pub_btn   = box.addButton(
+            "Publish publicly…",   QMessageBox.ButtonRole.ActionRole)
+        box.addButton("Cancel",    QMessageBox.ButtonRole.RejectRole)
+        box.exec()
+        clicked = box.clickedButton()
+        if clicked is local_btn:
+            self._import_bot_locally(path)
+        elif clicked is pub_btn:
+            self._import_then_publish(path)
+
+    def _import_bot_locally(self, path: str):
+        bots_dir = DATA_DIR / "bots"
+        bots_dir.mkdir(exist_ok=True)
+        dest = bots_dir / Path(path).name
+        shutil.copy2(path, dest)
+        reg = _load_registry()
+        bot_id = Path(path).stem
+        existing_ids = [c["id"] for c in reg.get("custom", [])]
+        if bot_id not in existing_ids:
+            reg.setdefault("custom", []).append({
+                "id":     bot_id,
+                "label":  bot_id,
+                "script": str(dest),
+                "color":  C["purple"],
+            })
+            _save_registry(reg)
+        self.more_bots_tab.refresh()
+        QMessageBox.information(
+            self, "Bot imported",
+            f"{Path(path).name} was added to your library. Open the "
+            f"MORE BOTS tab to activate it.")
+
+    def _import_then_publish(self, path: str):
+        """Reuse the existing MoreBotsTab publish flow but with the
+        dropped file pre-selected."""
+        self._dropped_path_for_publish = path
+        # MoreBotsTab._publish_bot prompts for the file with a dialog;
+        # we shortcut by writing a tiny shim that uses our pre-set path.
+        self.more_bots_tab._publish_bot_with_path(path)
 
     # ── HEADER ──────────────────────────────────────────────
 
@@ -1133,21 +1263,41 @@ class ApexWindow(QMainWindow):
     # ── REGISTRY SIGNALS ─────────────────────────────────────
 
     def _on_bot_added(self, side: str):
-        self._add_bot_tab(side)
+        # V7.1.1: deferred so the click that triggered the add can fully
+        # complete before we mutate the tab bar (sibling buttons get
+        # repositioned during insertTab, which could destabilise the
+        # widget that fired the signal).
+        QTimer.singleShot(0, lambda s=side: self._add_bot_tab(s))
 
     def _on_bot_removed(self, side: str):
+        """V7.1.1: deferred so the originating click signal finishes
+        before the source widget is destroyed. Removing the QPushButton
+        that fired the click from inside the click handler used to
+        occasionally tear down the whole window."""
+        QTimer.singleShot(0, lambda s=side: self._do_remove_bot(s))
+
+    def _do_remove_bot(self, side: str):
         # Stop bot if running
         tab = self._bot_tabs.get(side)
         if tab:
             bot_ctrl = getattr(tab, "bot_ctrl", None)
             if bot_ctrl and bot_ctrl.is_running():
-                bot_ctrl.stop_bot()
+                try:
+                    bot_ctrl.stop_bot()
+                except Exception:
+                    pass
         reg = _load_registry()
         if side in reg["active"]:
             reg["active"].remove(side)
         if side in reg["silenced"]:
             reg["silenced"].remove(side)
         _save_registry(reg)
+        # Move focus back to Overview before destroying the bot tab so
+        # QTabWidget doesn't briefly try to render a now-dead page.
+        try:
+            self.tabs.setCurrentIndex(self._overview_idx)
+        except Exception:
+            pass
         self._remove_bot_tab(side)
         self.more_bots_tab.refresh()
 
@@ -1282,7 +1432,13 @@ class ApexWindow(QMainWindow):
             idx = self.tabs.currentIndex()
             tab = self.tabs.widget(idx)
             if tab and hasattr(tab, "refresh"):
-                tab.refresh()
+                # V7.1.1: suppress paints across the refresh so the user
+                # doesn't see widgets briefly resize themselves.
+                tab.setUpdatesEnabled(False)
+                try:
+                    tab.refresh()
+                finally:
+                    tab.setUpdatesEnabled(True)
             self._refresh_market_status()
             self.statusBar().showMessage(
                 f"Last updated: "
