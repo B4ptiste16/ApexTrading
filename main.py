@@ -318,6 +318,49 @@ class MoreBotsTab(QWidget):
         uw.setLayout(upload_row)
         s.add(uw)
 
+        # ── PUBLIC BOT LIBRARY  (V7.1+) ──────────────────────
+        s.add(SectionHeader("BROWSE PUBLIC BOTS", C["purple"]))
+        lib_info = QLabel(
+            "Search bots shared by other APEX users. Click  ⬇  Install  "
+            "to copy a bot into your local library — it'll then show up "
+            "under  AVAILABLE TO ADD  above.")
+        lib_info.setStyleSheet(f"color:{C['muted']};font-size:11px;")
+        lib_info.setWordWrap(True)
+        s.add(lib_info)
+
+        from PyQt6.QtWidgets import QLineEdit as _QLineEdit
+        search_row = QHBoxLayout()
+        self._lib_search = _QLineEdit()
+        self._lib_search.setPlaceholderText("Search by name or description…")
+        self._lib_search.setFixedHeight(32)
+        self._lib_search.setStyleSheet(
+            f"background:{C['panel2']};color:{C['text']};"
+            f"border:1px solid {C['border']};border-radius:6px;"
+            f"padding:0 12px;font-size:11px;")
+        self._lib_search.returnPressed.connect(self._refresh_library)
+        search_row.addWidget(self._lib_search)
+        lib_btn = QPushButton("Search")
+        lib_btn.setObjectName("toolBtn")
+        lib_btn.clicked.connect(self._refresh_library)
+        search_row.addWidget(lib_btn)
+        upload_pub_btn = QPushButton("⬆  Publish own bot…")
+        upload_pub_btn.setObjectName("addBotBtn")
+        upload_pub_btn.clicked.connect(self._publish_bot)
+        search_row.addWidget(upload_pub_btn)
+        srw = QWidget()
+        srw.setLayout(search_row)
+        s.add(srw)
+
+        self._lib_results = QWidget()
+        self._lib_layout = QVBoxLayout(self._lib_results)
+        self._lib_layout.setSpacing(6)
+        self._lib_layout.setContentsMargins(0, 6, 0, 6)
+        self._lib_status = QLabel("Click Search to load public bots.")
+        self._lib_status.setStyleSheet(
+            f"color:{C['muted']};font-size:11px;padding:4px 0;")
+        self._lib_layout.addWidget(self._lib_status)
+        s.add(self._lib_results)
+
         # ── ACCOUNT LIMITS INFO ──────────────────────────────
         s.add(SectionHeader("ACCOUNT LIMITS", C["muted"]))
         limits = QLabel(
@@ -522,6 +565,221 @@ class MoreBotsTab(QWidget):
         self._upload_msg.setText(f"✓ {Path(path).name} uploaded — appears in Available")
         QTimer.singleShot(4000, lambda: self._upload_msg.setText(""))
         self.refresh()
+
+    # ── V7.1+ public bot library ────────────────────────────
+
+    def _refresh_library(self):
+        """Hit the server's GET /bots endpoint and render results."""
+        from PyQt6.QtCore import QThread, pyqtSignal as _Sig
+        from ui.login import load_server_url
+
+        q = self._lib_search.text().strip()
+        url = load_server_url()
+
+        # Clear current rows except the status label
+        for i in reversed(range(self._lib_layout.count())):
+            w = self._lib_layout.itemAt(i).widget()
+            if w and w is not self._lib_status:
+                w.deleteLater()
+        self._lib_status.setText("Loading…")
+        self._lib_status.setVisible(True)
+
+        class _ListWorker(QThread):
+            done = _Sig(bool, list, str)
+
+            def __init__(self, base, query):
+                super().__init__()
+                self.base, self.query = base, query
+
+            def run(self):
+                import requests
+                try:
+                    r = requests.get(
+                        f"{self.base}/bots",
+                        params={"q": self.query, "limit": 50},
+                        timeout=8,
+                    )
+                    if r.ok:
+                        self.done.emit(True, r.json().get("bots", []), "")
+                    else:
+                        self.done.emit(False, [], f"Server error ({r.status_code}).")
+                except Exception as e:
+                    self.done.emit(False, [], str(e))
+
+        self._lib_worker = _ListWorker(url, q)
+        self._lib_worker.done.connect(self._on_library_loaded)
+        self._lib_worker.start()
+
+    def _on_library_loaded(self, ok: bool, bots: list, err: str):
+        if not ok:
+            self._lib_status.setText(f"Could not load library: {err}")
+            self._lib_status.setStyleSheet(
+                f"color:{C['red']};font-size:11px;padding:4px 0;")
+            return
+        if not bots:
+            self._lib_status.setText("No public bots match your search.")
+            self._lib_status.setStyleSheet(
+                f"color:{C['muted']};font-size:11px;padding:4px 0;")
+            return
+        self._lib_status.setVisible(False)
+        for b in bots:
+            self._lib_layout.addWidget(self._make_library_row(b))
+
+    def _make_library_row(self, b: dict) -> QWidget:
+        row = QFrame()
+        row.setStyleSheet(
+            f"background:{C['panel2']};border:1px solid {C['border']};"
+            f"border-radius:8px;")
+        hl = QHBoxLayout(row)
+        hl.setContentsMargins(14, 10, 14, 10)
+        hl.setSpacing(10)
+
+        meta = QVBoxLayout()
+        title = QLabel(b.get("name", b.get("slug", "?")))
+        title.setStyleSheet(
+            f"color:{C['text']};font-weight:700;font-size:12px;")
+        sub = QLabel(
+            f"{b.get('description','—') or '—'}   ·   "
+            f"{b.get('downloads',0)}↓   ·   "
+            f"{b.get('size_bytes',0) // 1024} KB")
+        sub.setStyleSheet(f"color:{C['muted']};font-size:10px;")
+        sub.setWordWrap(True)
+        meta.addWidget(title)
+        meta.addWidget(sub)
+        mw = QWidget()
+        mw.setLayout(meta)
+        hl.addWidget(mw, 1)
+
+        install_btn = QPushButton("⬇  Install")
+        install_btn.setObjectName("addBotBtn")
+        install_btn.clicked.connect(lambda _, slug=b["slug"], name=b["name"]:
+                                    self._install_public_bot(slug, name))
+        hl.addWidget(install_btn)
+        return row
+
+    def _install_public_bot(self, slug: str, name: str):
+        """Download a public bot to DATA_DIR/bots and register it locally."""
+        from PyQt6.QtCore import QThread, pyqtSignal as _Sig
+        from ui.login import load_server_url
+
+        url = load_server_url()
+
+        class _DLWorker(QThread):
+            done = _Sig(bool, str, bytes)
+
+            def __init__(self, base, sl):
+                super().__init__()
+                self.base, self.sl = base, sl
+
+            def run(self):
+                import requests
+                try:
+                    r = requests.get(f"{self.base}/bots/{self.sl}/download",
+                                     timeout=20)
+                    if r.ok:
+                        self.done.emit(True, "", r.content)
+                    else:
+                        self.done.emit(False, f"HTTP {r.status_code}", b"")
+                except Exception as e:
+                    self.done.emit(False, str(e), b"")
+
+        def _on_dl(ok, err, blob):
+            if not ok:
+                QMessageBox.warning(self, "Install failed", err)
+                return
+            bots_dir = DATA_DIR / "bots"
+            bots_dir.mkdir(exist_ok=True)
+            dest = bots_dir / f"{slug}.py"
+            dest.write_bytes(blob)
+            reg = _load_registry()
+            existing_ids = [c["id"] for c in reg.get("custom", [])]
+            if slug not in existing_ids:
+                reg.setdefault("custom", []).append({
+                    "id": slug, "label": name, "script": str(dest),
+                    "color": C["purple"],
+                })
+                _save_registry(reg)
+            QMessageBox.information(
+                self, "Installed",
+                f"{name} is now in your local library and can be added "
+                f"from AVAILABLE TO ADD.")
+            self.refresh()
+
+        self._dl_worker = _DLWorker(url, slug)
+        self._dl_worker.done.connect(_on_dl)
+        self._dl_worker.start()
+
+    def _publish_bot(self):
+        """Upload one of the local custom bots to the public marketplace."""
+        from PyQt6.QtWidgets import QInputDialog
+        from ui.login import load_auth, load_server_url
+
+        stored = load_auth() or {}
+        token = stored.get("token")
+        if not token:
+            QMessageBox.warning(
+                self, "Sign in required",
+                "Publishing a bot requires an APEX account. Sign in or "
+                "create one from the start screen.")
+            return
+
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Select bot script to publish",
+            str(DATA_DIR / "bots"), "Python Files (*.py)")
+        if not path:
+            return
+        blob = Path(path).read_bytes()
+        name, ok = QInputDialog.getText(
+            self, "Bot name", "Display name:", text=Path(path).stem)
+        if not ok or not name.strip():
+            return
+        desc, _ = QInputDialog.getText(
+            self, "Description", "One-line description:")
+        tags, _ = QInputDialog.getText(
+            self, "Tags", "Comma-separated tags (optional):")
+
+        from PyQt6.QtCore import QThread, pyqtSignal as _Sig
+
+        class _UpWorker(QThread):
+            done = _Sig(bool, str)
+
+            def __init__(self, base, tok, n, d, t, b):
+                super().__init__()
+                self.base, self.tok, self.n, self.d, self.t, self.b = \
+                    base, tok, n, d, t, b
+
+            def run(self):
+                import requests
+                try:
+                    r = requests.post(
+                        f"{self.base}/bots",
+                        headers={"Authorization": f"Bearer {self.tok}"},
+                        data={"name": self.n, "description": self.d,
+                              "tags": self.t},
+                        files={"file": ("bot.py", self.b, "text/x-python")},
+                        timeout=20,
+                    )
+                    if r.ok:
+                        self.done.emit(
+                            True, f"Published as {r.json().get('slug','?')}")
+                    else:
+                        msg = r.json().get("detail", f"HTTP {r.status_code}") \
+                              if r.headers.get("content-type","").startswith("application/json") \
+                              else f"HTTP {r.status_code}"
+                        self.done.emit(False, msg)
+                except Exception as e:
+                    self.done.emit(False, str(e))
+
+        self._pub_worker = _UpWorker(
+            load_server_url(), token, name.strip(), desc.strip(),
+            tags.strip(), blob)
+        def _on_pub(ok, msg):
+            box = QMessageBox.information if ok else QMessageBox.warning
+            box(self, "Publish bot", msg)
+            if ok:
+                self._refresh_library()
+        self._pub_worker.done.connect(_on_pub)
+        self._pub_worker.start()
 
 
 # ─────────────────────────────────────────

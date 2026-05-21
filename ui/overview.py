@@ -340,6 +340,71 @@ class ToolsTab(QWidget):
         auto_note.setWordWrap(True)
         s.add(auto_note)
 
+        # V7.1+ — force-update during the day
+        self.force_chk = QCheckBox(
+            "Allow updates during the trading day  (override the overnight "
+            "window — installs immediately when an update is available)")
+        self.force_chk.setStyleSheet(f"color:{C['text']};font-size:11px;")
+        try:
+            self.force_chk.setChecked(D.get_force_update_now())
+        except Exception:
+            pass
+        self.force_chk.toggled.connect(self._toggle_force_update)
+        s.add(self.force_chk)
+        force_note = QLabel(
+            "Default behaviour waits until after close so an update never "
+            "interrupts an in-flight trade. Enable this only if you're OK "
+            "with APEX restarting mid-session as soon as a release lands.")
+        force_note.setStyleSheet(f"color:{C['muted']};font-size:10px;")
+        force_note.setWordWrap(True)
+        s.add(force_note)
+
+        # ── ACCOUNT LINKING (V7.1+) ─────────────────────────
+        s.add(SectionHeader("ACCOUNT LINKING", C["purple"]))
+        link_info = QLabel(
+            "Sync your broker credentials to the APEX server so the cloud "
+            "bots (running 24/7 on Oracle) can trade on your behalf even "
+            "with your laptop off. Credentials are encrypted at rest with "
+            "Fernet (AES-128) and only decrypted in-memory on the server.\n\n"
+            "Direct Alpaca / IBKR OAuth linking is coming in a future "
+            "release — for now, the keys above are pushed to the server "
+            "when you click Sync."
+        )
+        link_info.setStyleSheet(f"color:{C['muted']};font-size:11px;line-height:1.6;")
+        link_info.setWordWrap(True)
+        s.add(link_info)
+
+        link_row = QHBoxLayout()
+        self._link_alpaca_btn = QPushButton("◯  Link Alpaca account…")
+        self._link_alpaca_btn.setObjectName("toolBtn")
+        self._link_alpaca_btn.setEnabled(False)
+        self._link_alpaca_btn.setToolTip(
+            "OAuth account linking — coming soon. Use the manual sync "
+            "below for now.")
+        self._link_ibkr_btn = QPushButton("◯  Link IBKR account…")
+        self._link_ibkr_btn.setObjectName("toolBtn")
+        self._link_ibkr_btn.setEnabled(False)
+        self._link_ibkr_btn.setToolTip("Coming soon.")
+        link_row.addWidget(self._link_alpaca_btn)
+        link_row.addWidget(self._link_ibkr_btn)
+        link_row.addStretch()
+        lrw = QWidget()
+        lrw.setLayout(link_row)
+        s.add(lrw)
+
+        sync_row = QHBoxLayout()
+        self._sync_btn = QPushButton("⬆  Sync keys to APEX server")
+        self._sync_btn.setObjectName("toolBtn")
+        self._sync_btn.clicked.connect(self._sync_keys_to_server)
+        self._sync_msg = QLabel("")
+        self._sync_msg.setStyleSheet(f"color:{C['green']};font-size:10px;")
+        sync_row.addWidget(self._sync_btn)
+        sync_row.addWidget(self._sync_msg)
+        sync_row.addStretch()
+        srw = QWidget()
+        srw.setLayout(sync_row)
+        s.add(srw)
+
         # ── BROKER CONVERSION ────────────────────────────
         s.add(SectionHeader("BROKER CONVERSION — ALPACA → IBKR", C["purple"]))
 
@@ -497,6 +562,86 @@ class ToolsTab(QWidget):
             D.set_auto_schedule(bool(on))
         except Exception:
             pass
+
+    # ── V7.1+ handlers ──────────────────────────────────────
+
+    def _toggle_force_update(self, on: bool):
+        try:
+            D.set_force_update_now(bool(on))
+        except Exception:
+            pass
+
+    def _sync_keys_to_server(self):
+        """Push the current set of Alpaca/Anthropic keys to the APEX
+        auth server, where they're stored encrypted (Fernet) per user.
+        Requires a stored auth token (login or signup must have run on
+        this machine before)."""
+        from PyQt6.QtCore import QThread, pyqtSignal
+        import json as _json
+        try:
+            from ui.login import load_auth, load_server_url
+        except Exception:
+            self._sync_msg.setText("Server module unavailable.")
+            self._sync_msg.setStyleSheet(f"color:{C['red']};font-size:10px;")
+            return
+
+        stored = load_auth() or {}
+        token = stored.get("token")
+        if not token:
+            self._sync_msg.setText(
+                "Not signed in — sign in first (close the app and "
+                "log in on the start screen).")
+            self._sync_msg.setStyleSheet(f"color:{C['red']};font-size:10px;")
+            return
+
+        # Build the payload from the in-form edits (no need to round-trip
+        # through .env — keys may have been edited but not saved yet).
+        payload = {
+            k: e.text().strip()
+            for k, e in self._key_edits.items()
+            if e.text().strip()
+        }
+        if not payload:
+            self._sync_msg.setText("No keys entered.")
+            self._sync_msg.setStyleSheet(f"color:{C['muted']};font-size:10px;")
+            return
+
+        server_url = load_server_url()
+        self._sync_msg.setText("Uploading…")
+        self._sync_msg.setStyleSheet(f"color:{C['muted']};font-size:10px;")
+
+        class _UploadWorker(QThread):
+            done = pyqtSignal(bool, str)
+
+            def __init__(self, url, tok, body):
+                super().__init__()
+                self.url, self.tok, self.body = url, tok, body
+
+            def run(self):
+                import requests
+                try:
+                    r = requests.put(
+                        f"{self.url}/credentials",
+                        headers={"Authorization": f"Bearer {self.tok}"},
+                        json=self.body, timeout=12,
+                    )
+                    if r.ok:
+                        n = len(r.json().get("fields", []))
+                        self.done.emit(True, f"Synced ✓  {n} key(s) encrypted on server.")
+                    else:
+                        self.done.emit(False, f"Server error ({r.status_code}).")
+                except Exception as ex:
+                    self.done.emit(False, str(ex))
+
+        self._upload_worker = _UploadWorker(server_url, token, payload)
+        self._upload_worker.done.connect(self._on_sync_result)
+        self._upload_worker.start()
+
+    def _on_sync_result(self, ok: bool, msg: str):
+        self._sync_msg.setText(msg)
+        color = C["green"] if ok else C["red"]
+        self._sync_msg.setStyleSheet(f"color:{color};font-size:10px;")
+        QTimer.singleShot(5000, lambda: self._sync_msg.setText(""))
 
     def _save_keys(self):
         vals = {k: e.text().strip() for k, e in self._key_edits.items()}
