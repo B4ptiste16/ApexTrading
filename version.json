@@ -1,4 +1,4 @@
 {
-  "version": "1.0.7",
-  "notes": "Tolerant universe-file reader (auto-repairs legacy cp1252 bytes). Calmer, more spaced UI: muted palette, sober section headers, lighter tabs and tables."
+  "version": "1.1.0",
+  "notes": "V7+: FastAPI auth server, login/signup window, gradient UI, blinking status dots, more-bots tab, sold-trades feed, period P/L, tight chart y-axis, prev-close reference line, single-instance lock, fixed auto-updater. V7.1+: Continue-as-Guest login option, force-update toggle, encrypted-on-server broker credentials, public bot marketplace, phone-accessible web dashboard. Live chart now updates continuously (extended_hours)."
 }
