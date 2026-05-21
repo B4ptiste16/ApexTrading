@@ -16,7 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 
 from . import (auth, database, credentials as creds,
-               bots as marketplace, web, bot_runner)
+               bots as marketplace, web, bot_runner, scheduler)
 from .schemas import SignupRequest, LoginRequest
 
 
@@ -27,9 +27,16 @@ async def _lifespan(app: FastAPI):
     database.init_db()
     creds.init_credentials_table()
     marketplace.init_marketplace_table()
+    # V7.1.12: kick off the once-a-minute schedule reconciliation loop.
+    # Runs forever inside the FastAPI event loop until shutdown.
+    scheduler.start_loop()
     yield
     # V7.1.11: stop tracked bots gracefully on uvicorn shutdown so a
     # service restart doesn't leave them orphaned with stale keys.
+    try:
+        scheduler.stop_loop()
+    except Exception:
+        pass
     try:
         bot_runner.shutdown_all()
     except Exception:
@@ -169,6 +176,30 @@ def delete_credentials(authorization: str | None = Header(default=None)):
     user = _current_user(authorization)
     creds.delete_credentials(user["id"])
     return {"ok": True}
+
+
+# ── V7.1.12: per-user cloud schedule ───────────────────────────────
+
+@app.get("/schedule")
+def api_get_schedule(authorization: str | None = Header(default=None)):
+    """Returns the list of bot sides this user has scheduled to
+    auto-run on the cloud when the US market is open."""
+    user = _current_user(authorization)
+    return {"bots": scheduler.get_schedule(user["id"])}
+
+
+@app.put("/schedule")
+def api_set_schedule(payload: dict,
+                     authorization: str | None = Header(default=None)):
+    """Replace the scheduled-bot list. Body: {"bots": ["LONG","DAY",...]}.
+    Empty list disables the cloud schedule for this user — the
+    reconciliation loop will stop any bots it had started."""
+    user  = _current_user(authorization)
+    sides = payload.get("bots", []) if isinstance(payload, dict) else []
+    if not isinstance(sides, list):
+        raise HTTPException(400, "Body must be {'bots': [...]}")
+    scheduler.set_schedule(user["id"], [str(s) for s in sides])
+    return {"ok": True, "bots": scheduler.get_schedule(user["id"])}
 
 
 # ──────────────────────────────────────────────────────────────────────────────

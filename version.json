@@ -1,4 +1,4 @@
 {
-  "version": "1.1.11",
-  "notes": "V7.1.11: properly fix the refresh wobble — the V7.1.1 fix only wrapped the kickoff, but bot-tab data updates happen asynchronously in _on_data; that's now where setUpdatesEnabled brackets the card mutations so Qt only repaints once per refresh. Plus a critical bug: a failure in any _apply_* helper used to strand every later section blank (RISK METRICS, API COST, POSITION MANAGEMENT). Each helper is now isolated in its own try/except so one bad piece of data can't blank out the whole tab. Also includes the server-side bot runner from Phase A of Step 5 (deploy to Oracle complete)."
+  "version": "1.1.12",
+  "notes": "V7.1.12: RISK METRICS & STATS finally populates (TOTAL RETURN, SHARPE, MAX DD, WIN RATE, VOLATILITY, AVG DAILY). The bots never wrote a separate *_snapshots.jsonl file — they only wrote the trade log with portfolio_value baked into each entry — so load_snapshots() always returned empty and every risk card stayed on '—'. The function now synthesises the time series from the existing trade log (supports both the LONG/SHORT schema with portfolio_before/after and DAY's portfolio.value schema). No bot-side changes needed; existing data populates immediately on first launch."
 }

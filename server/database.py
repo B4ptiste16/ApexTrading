@@ -72,6 +72,14 @@ def get_user_by_username(username: str) -> Optional[dict]:
         )
 
 
+def list_user_ids() -> list[int]:
+    """V7.1.12: used by the server-side scheduler to iterate every
+    user once per minute and reconcile their scheduled bots."""
+    with _conn() as c:
+        return [r["id"] for r in
+                c.execute("SELECT id FROM users WHERE is_active=1").fetchall()]
+
+
 def create_user(username: str, email: str,
                 hashed_password: str, display_name: str) -> dict:
     now = datetime.now(timezone.utc).isoformat()

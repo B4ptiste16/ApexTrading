@@ -692,12 +692,62 @@ def close_position(side: str, ticker: str) -> str:
 # ─────────────────────────────────────────
 
 def load_snapshots(side: str) -> pd.DataFrame:
+    """Time series of portfolio_value samples used by the RISK METRICS
+    & STATS panel on each bot tab.
+
+    V7.1.12 — derive from the bot's trade log when no dedicated
+    snapshots file exists. The bots write portfolio_before / _after
+    into every trade-log entry, so we already have a sample every
+    time the bot ran. The old behaviour of reading a separate
+    *_snapshots.jsonl file is kept as the preferred source so a
+    future bot version that writes snapshots explicitly still works.
+    """
+    # Primary source: dedicated snapshots file (if it exists)
     rows = load_jsonl(SNAPSHOT_FILES.get(side, []))
-    if not rows:
+    if rows:
+        df = pd.DataFrame(rows)
+        df["time"] = pd.to_datetime(df["time"], utc=True, errors="coerce")
+        return (df.dropna(subset=["time"])
+                  .sort_values("time")
+                  .reset_index(drop=True))
+
+    # Fallback: synthesize from the trade log. Each entry carries the
+    # portfolio_value before AND after the run; we pick "after" since
+    # that's the latest state the bot saw.
+    log_rows = load_jsonl(LOG_FILES.get(side, []))
+    if not log_rows:
         return pd.DataFrame()
-    df = pd.DataFrame(rows)
+
+    samples = []
+    for r in log_rows:
+        t = r.get("time")
+        if not t:
+            continue
+        # LONG / SHORT use portfolio_before / portfolio_after.portfolio_value;
+        # DAY uses portfolio.value (different schema, single dict).
+        pa = r.get("portfolio_after")  or {}
+        pb = r.get("portfolio_before") or {}
+        pday = r.get("portfolio")      or {}
+        pv = (pa.get("portfolio_value")
+              or pb.get("portfolio_value")
+              or pday.get("value")
+              or pday.get("portfolio_value"))
+        if pv is None:
+            continue
+        try:
+            samples.append({"time": t, "portfolio_value": float(pv)})
+        except (TypeError, ValueError):
+            continue
+    if not samples:
+        return pd.DataFrame()
+
+    df = pd.DataFrame(samples)
     df["time"] = pd.to_datetime(df["time"], utc=True, errors="coerce")
-    return df.dropna(subset=["time"]).sort_values("time").reset_index(drop=True)
+    df = df.dropna(subset=["time"]).sort_values("time").reset_index(drop=True)
+    # Deduplicate runs at the same timestamp (bots sometimes log twice
+    # in the same second). Keep the last.
+    df = df.drop_duplicates(subset=["time"], keep="last").reset_index(drop=True)
+    return df
 
 
 def load_bot_log(side: str) -> pd.DataFrame:
