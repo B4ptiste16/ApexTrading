@@ -317,6 +317,66 @@ def dashboard_page(user: dict, tab: str = "overview") -> HTMLResponse:
     tab = (tab or "overview").lower()
     if tab not in ("overview", "bots", "universe", "tools"):
         tab = "overview"
+
+    # Tab bar HTML
+    tabs_html = ""
+    for key, label in (("overview", "OVERVIEW"), ("bots", "BOTS"),
+                       ("universe", "UNIVERSE"), ("tools", "TOOLS")):
+        active_cls = " active" if tab == key else ""
+        tabs_html += (f'<a class="tab{active_cls}" '
+                      f'href="/web/dashboard?tab={key}">{label}</a>')
+
+    # Per-tab HTML — built as plain strings outside the big f-string
+    # because Python 3.11 rejects backslash escapes inside f-string
+    # {...} expressions.
+    overview_html = (
+        '<div class="card"><h2>BOTS SNAPSHOT</h2>'
+        '<div id="botsmini"></div></div>'
+        '<div class="card"><h2>QUICK ACTIONS</h2>'
+        '<p style="color:var(--muted);font-size:11px;line-height:1.7;">'
+        'Use the <b>BOTS</b> tab to start, stop or liquidate per bot. '
+        'Use the desktop app to configure auto-schedule, '
+        'cloud-execution and broker keys.</p></div>'
+    )
+    bots_html = '<div id="bots"></div>'
+    universe_html = (
+        '<div class="card"><h2>UNIVERSE</h2>'
+        '<p class="hint">The candidate tickers each bot considers. '
+        "Manage the lists from the desktop app's UNIVERSE tab — they "
+        'live in <code>longbot_universe.txt</code> / '
+        '<code>shortbot_universe.txt</code> / '
+        '<code>daybot_universe.txt</code> on the machine running the '
+        'bot. Mobile-side editing coming soon.</p></div>'
+    )
+    uname  = user.get("username", "")
+    uemail = user.get("email", "")
+    udisp  = user.get("display_name", "")
+    tools_html = (
+        '<div class="card"><h2>ACCOUNT</h2>'
+        '<div class="stat"><span class="k">USERNAME</span>'
+        f'<span class="v">{uname}</span></div>'
+        '<div class="stat"><span class="k">EMAIL</span>'
+        f'<span class="v">{uemail}</span></div>'
+        '<div class="stat"><span class="k">DISPLAY NAME</span>'
+        f'<span class="v">{udisp}</span></div>'
+        '<p style="margin-top:18px;">'
+        '<a href="/web/logout">Sign out</a></p></div>'
+        '<div class="card"><h2>API KEYS</h2>'
+        '<p class="hint">Broker / Anthropic keys are stored encrypted '
+        "on the APEX server. Manage them from the desktop app's "
+        '<b>Tools → ACCOUNT LINKING</b> section (Sync keys to APEX '
+        'server). Web-side editing coming soon.</p></div>'
+        '<div class="card"><h2>DOWNLOAD APP</h2>'
+        '<p class="hint">For the full desktop experience: '
+        '<a href="/">Download APEX for Windows →</a></p></div>'
+    )
+    tab_html = {
+        "overview": overview_html,
+        "bots":     bots_html,
+        "universe": universe_html,
+        "tools":    tools_html,
+    }.get(tab, "")
+
     body = f"""<!doctype html>
 <html><head>
   <meta charset="utf-8">
@@ -385,47 +445,7 @@ def dashboard_page(user: dict, tab: str = "overview") -> HTMLResponse:
         <span class="v" id="srv">checking…</span></div>
     </div>
 
-    {("<!-- OVERVIEW TAB -->"
-      "<div class=\"card\"><h2>BOTS SNAPSHOT</h2>"
-      "<div id=\"botsmini\"></div></div>"
-      "<div class=\"card\"><h2>QUICK ACTIONS</h2>"
-      "<p style=\"color:var(--muted);font-size:11px;line-height:1.7;\">"
-      "Use the <b>BOTS</b> tab to start, stop or liquidate per bot. "
-      "Use the desktop app to configure auto-schedule, cloud-execution "
-      "and broker keys.</p></div>") if tab == "overview" else ""}
-
-    {("<!-- BOTS TAB -->"
-      "<div id=\"bots\"></div>") if tab == "bots" else ""}
-
-    {("<!-- UNIVERSE TAB -->"
-      "<div class=\"card\"><h2>UNIVERSE</h2>"
-      "<p class=\"hint\">The candidate tickers each bot considers. "
-      "Manage the lists from the desktop app's UNIVERSE tab — they "
-      "live in <code>longbot_universe.txt</code> / "
-      "<code>shortbot_universe.txt</code> / "
-      "<code>daybot_universe.txt</code> on the machine running the "
-      "bot. Mobile-side editing coming soon.</p>"
-      "</div>") if tab == "universe" else ""}
-
-    {("<!-- TOOLS TAB -->"
-      "<div class=\"card\"><h2>ACCOUNT</h2>"
-      "<div class=\"stat\"><span class=\"k\">USERNAME</span>"
-      f"<span class=\"v\">{user.get('username','')}</span></div>"
-      "<div class=\"stat\"><span class=\"k\">EMAIL</span>"
-      f"<span class=\"v\">{user.get('email','')}</span></div>"
-      "<div class=\"stat\"><span class=\"k\">DISPLAY NAME</span>"
-      f"<span class=\"v\">{user.get('display_name','')}</span></div>"
-      "<p style=\"margin-top:18px;\"><a href=\"/web/logout\">Sign out</a></p>"
-      "</div>"
-      "<div class=\"card\"><h2>API KEYS</h2>"
-      "<p class=\"hint\">Broker / Anthropic keys are stored encrypted "
-      "on the APEX server. Manage them from the desktop app's "
-      "<b>Tools → ACCOUNT LINKING</b> section (Sync keys to APEX "
-      "server). Web-side editing coming soon.</p></div>"
-      "<div class=\"card\"><h2>DOWNLOAD APP</h2>"
-      "<p class=\"hint\">For the full desktop experience: "
-      "<a href=\"/\">Download APEX for Windows →</a></p></div>"
-      ) if tab == "tools" else ""}
+    {tab_html}
   </div>
 
   <script>
