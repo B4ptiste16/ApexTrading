@@ -40,7 +40,20 @@ def update_allowed_now(is_open: bool | None) -> bool:
     Allowed only when the market is CLOSED and the Eastern wall clock is
     between 17:00 (close 16:00 + 1h) and 08:30 (open 09:30 - 1h). This
     covers weeknights and weekends, and never the trading day.
+
+    V7.1+: if the user has opted into "force update during day" in the
+    Tools tab (apex_settings.json → force_update_now=true), the window
+    check is bypassed and updates can apply any time. This is intended
+    for power users who'd rather restart mid-session than wait until
+    after close. The setting is read each call so a toggle takes
+    effect immediately, no restart needed.
     """
+    try:
+        from core import data as _D
+        if _D.load_settings().get("force_update_now"):
+            return True
+    except Exception:
+        pass
     if is_open:
         return False
     et = _et_now()

@@ -1,0 +1,21 @@
+V7.1+
+
+
+- Now for the next version i want to setup the accounts feature. when logging into the app, you will have the opportunity of continuing as guest or loging in (or signup) with space left under the choices for continue with google.
+
+- you will be able to continue as guest and trade using the api keys or IBKR gateway.
+
+- Have an alpaca (and ibkr) x Apex linking accounts features where it fetches api keys and ibkr gateway automatically if possible.
+
+- Make sure account info is securely stored ont the cloud server
+
+- fix the displayed charts as when live they dont show the instant data but the data from many hours ago. On the overview page, the graph shows yesterdays portfolio value but doesnt show it during the entire market hours. As  alpaca updates portfolio even outside of market hours (confirm that) have the graph go from close to close or from time stock starts updating to close with still  the grey line showing last close as it is already great. 
+
+- Have bots and app run on the oracle server so the bots can keep running while my computer is off.
+
+- Have an online website version accessible through phone too so app is accessible remotely.
+
+- Start an upload bot part where you can either add a bot to your own library or upload it onto the oracle server where other people can do filter searches, like described in previous update file, and download then install new bot.
+
+- Add a force update feature which updates the app during the day removing the necessity of having to wait after hours for the update. It would be a box to check which would automatically install updates if accepted by the  user and will asked when app launched.
+

@@ -6,3 +6,5 @@ bcrypt>=4.1.2
 PyJWT>=2.8.0
 pydantic>=2.6.0
 python-multipart>=0.0.9
+# V7.1+ — Fernet symmetric encryption for at-rest broker credentials
+cryptography>=42.0.0

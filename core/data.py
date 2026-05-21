@@ -225,13 +225,29 @@ def get_orders(side: str) -> pd.DataFrame:
 
 
 def get_history(side: str, period: str) -> pd.DataFrame:
+    """
+    Live portfolio history for one bot's Alpaca account.
+
+    V7.1+ change: extended_hours=True so the chart keeps updating outside
+    9:30-16:00 ET (Alpaca refreshes equity continuously, including pre/post
+    market and overnight). Previously the "1D" view sometimes showed only
+    yesterday's session because today's equity hadn't ticked over yet.
+    """
     c = get_client(side)
     if not c:
         return pd.DataFrame()
     try:
         ap, tf = ALPACA_PERIOD.get(period, ("1D","5Min"))
-        h = c.get_portfolio_history(GetPortfolioHistoryRequest(
-            period=ap, timeframe=tf, extended_hours=False))
+        req_kwargs = dict(period=ap, timeframe=tf, extended_hours=True)
+        # Newer alpaca-py exposes intraday_reporting which is the proper
+        # toggle for continuous (24/7) equity sampling. Fall back silently
+        # on older SDKs that only have extended_hours.
+        try:
+            from alpaca.trading.enums import IntradayReporting  # type: ignore
+            req_kwargs["intraday_reporting"] = IntradayReporting.CONTINUOUS
+        except Exception:
+            pass
+        h = c.get_portfolio_history(GetPortfolioHistoryRequest(**req_kwargs))
         if not h or not h.timestamp or not h.equity:
             return pd.DataFrame()
         df = pd.DataFrame({
@@ -292,6 +308,20 @@ def get_auto_schedule() -> bool:
 def set_auto_schedule(on: bool) -> None:
     s = load_settings()
     s["auto_schedule"] = bool(on)
+    with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
+        json.dump(s, f, indent=2)
+
+
+# ── V7.1+: force-update setting ─────────────────────────────────────
+
+def get_force_update_now() -> bool:
+    """If true, auto-update can apply at any time (not just overnight)."""
+    return bool(load_settings().get("force_update_now", False))
+
+
+def set_force_update_now(on: bool) -> None:
+    s = load_settings()
+    s["force_update_now"] = bool(on)
     with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
         json.dump(s, f, indent=2)
 

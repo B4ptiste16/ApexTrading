@@ -468,11 +468,16 @@ class LoginWindow(_GradWidget):
     Shown at startup when no valid token exists.
     Emits:
       auth_success(token, user)  → main.py creates ApexWindow
-      offline_mode()             → user chose to skip auth
+      guest_mode()               → user chose to continue without an account
+                                   (uses local API keys, no cloud sync)
+    Back-compat alias:
+      offline_mode               → same as guest_mode
     """
 
     auth_success = pyqtSignal(str, dict)
-    offline_mode = pyqtSignal()
+    guest_mode   = pyqtSignal()
+    # alias kept so older main.py wiring still works
+    offline_mode = guest_mode
 
     def __init__(self):
         super().__init__()
@@ -610,6 +615,88 @@ class LoginWindow(_GradWidget):
         self._stack.addWidget(self._sv)   # 1
         vl.addWidget(self._stack)
 
+        # ── V7.1+: "or" separator + Google + Guest buttons ─────────
+        # These appear under both Login and Signup forms, giving the user
+        # alternatives to the email/password flow without burying them in
+        # the footer.
+        vl.addSpacing(14)
+
+        sep_row = QHBoxLayout()
+        sep_row.setContentsMargins(0, 0, 0, 0)
+        for _ in range(2):
+            ln = QFrame()
+            ln.setFrameShape(QFrame.Shape.HLine)
+            ln.setStyleSheet(f"border:none;border-top:1px solid {C['border']};")
+            sep_row.addWidget(ln, 1)
+            if _ == 0:
+                or_lbl = QLabel("  or  ")
+                or_lbl.setStyleSheet(
+                    f"color:{C['muted']};font-size:9px;letter-spacing:2px;"
+                    f"background:transparent;")
+                sep_row.addWidget(or_lbl)
+        sep_w = QWidget()
+        sep_w.setStyleSheet("background:transparent;")
+        sep_w.setLayout(sep_row)
+        vl.addWidget(sep_w)
+        vl.addSpacing(12)
+
+        # Google button (disabled — wired in a future release)
+        self._google_btn = QPushButton("◯  Continue with Google")
+        self._google_btn.setFixedHeight(40)
+        self._google_btn.setEnabled(False)
+        self._google_btn.setCursor(QCursor(Qt.CursorShape.ForbiddenCursor))
+        self._google_btn.setToolTip("Coming soon")
+        self._google_btn.setStyleSheet(f"""
+            QPushButton {{
+                background    : {C['panel2']};
+                color         : {C['muted']};
+                border        : 1px solid {C['border']};
+                border-radius : 7px;
+                font-family   : 'JetBrains Mono';
+                font-size     : 10px;
+                letter-spacing: 2px;
+                text-align    : center;
+            }}
+            QPushButton:disabled {{
+                color         : {C['muted']};
+                background    : {C['panel2']};
+            }}
+        """)
+        vl.addWidget(self._google_btn)
+        vl.addSpacing(8)
+
+        # Guest button (active — emits guest_mode)
+        self._guest_btn = QPushButton("→  Continue as Guest")
+        self._guest_btn.setFixedHeight(40)
+        self._guest_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        self._guest_btn.setStyleSheet(f"""
+            QPushButton {{
+                background    : transparent;
+                color         : {C['purple']};
+                border        : 1px solid rgba(138,147,201,0.45);
+                border-radius : 7px;
+                font-family   : 'JetBrains Mono';
+                font-size     : 10px;
+                letter-spacing: 2px;
+                text-align    : center;
+            }}
+            QPushButton:hover {{
+                background    : rgba(138,147,201,0.12);
+                border-color  : {C['purple']};
+            }}
+        """)
+        self._guest_btn.clicked.connect(self.guest_mode)
+        vl.addWidget(self._guest_btn)
+
+        guest_hint = QLabel(
+            "Guest mode: trade with your own Alpaca/IBKR keys, "
+            "no cloud sync.")
+        guest_hint.setWordWrap(True)
+        guest_hint.setStyleSheet(
+            f"color:{C['muted']};font-size:9px;background:transparent;"
+            f"padding-top:4px;")
+        vl.addWidget(guest_hint)
+
         # Wire view-switch links
         self._lv.go_signup.connect(self._show_signup)
         self._sv.go_login.connect(self._show_login)
@@ -649,15 +736,10 @@ class LoginWindow(_GradWidget):
 
         hl.addStretch()
 
-        skip = QPushButton("Continue offline  →")
-        skip.setStyleSheet(
-            f"QPushButton{{color:{C['muted']};background:transparent;border:none;"
-            f"font-size:10px;padding:0;}}"
-            f"QPushButton:hover{{color:{C['text']};}}"
-        )
-        skip.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
-        skip.clicked.connect(self.offline_mode)
-        hl.addWidget(skip)
+        # V7.1+: Continue-offline link removed from the footer —
+        # the prominent "Continue as Guest" button in the card now
+        # serves that purpose, keeping the footer focused on server
+        # connection diagnostics.
 
         return w
 

@@ -9,11 +9,13 @@ Endpoints:
 
 import random
 from contextlib import asynccontextmanager
+from typing import Optional
 
-from fastapi import FastAPI, HTTPException, Header
+from fastapi import FastAPI, Form, HTTPException, Header, Request, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 
-from . import auth, database
+from . import auth, database, credentials as creds, bots as marketplace, web
 from .schemas import SignupRequest, LoginRequest
 
 
@@ -22,6 +24,8 @@ from .schemas import SignupRequest, LoginRequest
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
     database.init_db()
+    creds.init_credentials_table()
+    marketplace.init_marketplace_table()
     yield
 
 
@@ -115,3 +119,157 @@ def get_me(authorization: str | None = Header(default=None)):
         raise HTTPException(401, "User not found.")
 
     return _public(user)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# V7.1+ — Encrypted credential storage (broker keys per user)
+# ──────────────────────────────────────────────────────────────────────────────
+
+def _current_user(authorization: str | None) -> dict:
+    """Resolve the bearer token → user row, or raise 401."""
+    token = _require_bearer(authorization)
+    payload = auth.verify_token(token)
+    if not payload:
+        raise HTTPException(401, "Token expired or invalid.")
+    user = database.get_user_by_id(int(payload["sub"]))
+    if not user:
+        raise HTTPException(401, "User not found.")
+    return user
+
+
+@app.put("/credentials")
+def save_credentials(payload: dict,
+                     authorization: str | None = Header(default=None)):
+    """Encrypt+store the caller's broker credentials. Body is freeform JSON
+    so future fields (IBKR clientId, Anthropic key, etc.) can be added
+    without server schema changes."""
+    user = _current_user(authorization)
+    if not isinstance(payload, dict):
+        raise HTTPException(400, "Body must be a JSON object.")
+    creds.save_credentials(user["id"], payload)
+    return {"ok": True, "fields": list(payload.keys())}
+
+
+@app.get("/credentials")
+def get_credentials(authorization: str | None = Header(default=None)):
+    user = _current_user(authorization)
+    data = creds.load_credentials(user["id"])
+    return data or {}
+
+
+@app.delete("/credentials")
+def delete_credentials(authorization: str | None = Header(default=None)):
+    user = _current_user(authorization)
+    creds.delete_credentials(user["id"])
+    return {"ok": True}
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# V7.1+ — Public bot marketplace
+# ──────────────────────────────────────────────────────────────────────────────
+
+@app.get("/bots")
+def list_public_bots(q: str = "", tag: str = "",
+                     limit: int = 50, offset: int = 0):
+    """Browse the public bot library (no auth required to view)."""
+    return {"bots": marketplace.list_bots(
+        q=q, tag=tag, limit=min(limit, 100), offset=offset
+    )}
+
+
+@app.get("/bots/{slug}")
+def get_public_bot(slug: str):
+    row = marketplace.get_bot(slug)
+    if not row:
+        raise HTTPException(404, "Bot not found.")
+    return row
+
+
+@app.get("/bots/{slug}/download")
+def download_public_bot(slug: str):
+    data = marketplace.read_bot_file(slug)
+    if data is None:
+        raise HTTPException(404, "Bot file not found.")
+    marketplace.increment_downloads(slug)
+    return Response(
+        content=data, media_type="text/x-python",
+        headers={"Content-Disposition": f'attachment; filename="{slug}.py"'},
+    )
+
+
+@app.post("/bots")
+async def upload_public_bot(
+    name:        str = Form(...),
+    description: str = Form(""),
+    tags:        str = Form(""),     # comma-separated
+    file:        UploadFile = File(...),
+    authorization: str | None = Header(default=None),
+):
+    user = _current_user(authorization)
+    blob = await file.read()
+    try:
+        row = marketplace.upload_bot(
+            owner_id=user["id"],
+            name=name.strip(),
+            description=description.strip(),
+            tags=[t for t in tags.split(",") if t.strip()],
+            file_bytes=blob,
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return row
+
+
+@app.delete("/bots/{slug}")
+def delete_public_bot(slug: str,
+                      authorization: str | None = Header(default=None)):
+    user = _current_user(authorization)
+    if not marketplace.delete_bot(slug=slug, owner_id=user["id"]):
+        raise HTTPException(404, "Bot not found or not yours.")
+    return {"ok": True}
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# V7.1+ — Web dashboard (phone-accessible)
+# ──────────────────────────────────────────────────────────────────────────────
+
+@app.get("/", include_in_schema=False)
+def web_root(request: Request):
+    """Land at the dashboard if signed in, otherwise the login form."""
+    user = web.user_from_cookie(request)
+    return RedirectResponse(url=("/web/dashboard" if user else "/web/login"))
+
+
+@app.get("/web/login", include_in_schema=False)
+def web_login_form(request: Request):
+    return web.login_page()
+
+
+@app.post("/web/login", include_in_schema=False)
+def web_login_submit(identifier: str = Form(...),
+                     password:   str = Form(...)):
+    ident = identifier.strip().lower()
+    user = database.get_user_by_email(ident) or database.get_user_by_username(ident)
+    if not user or not auth.verify_password(password, user["hashed_password"]):
+        return web.login_page(error="Invalid email/username or password.")
+    token = auth.create_token(user["id"], user["email"])
+    resp = RedirectResponse(url="/web/dashboard", status_code=303)
+    # 30-day cookie (matches JWT expiry). HttpOnly so JS can't steal it.
+    resp.set_cookie("apex_token", token, max_age=60 * 60 * 24 * 30,
+                    httponly=True, samesite="lax")
+    return resp
+
+
+@app.get("/web/logout", include_in_schema=False)
+def web_logout():
+    resp = RedirectResponse(url="/web/login")
+    resp.delete_cookie("apex_token")
+    return resp
+
+
+@app.get("/web/dashboard", include_in_schema=False)
+def web_dashboard(request: Request):
+    user = web.user_from_cookie(request)
+    if not user:
+        return RedirectResponse(url="/web/login")
+    return web.dashboard_page(user)
