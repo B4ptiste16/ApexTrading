@@ -442,24 +442,39 @@ class ToolsTab(QWidget):
         auto_note.setWordWrap(True)
         s.add(auto_note)
 
-        # V7.1+ — force-update during the day
-        self.force_chk = QCheckBox(
-            "Allow updates during the trading day  (override the overnight "
-            "window — installs immediately when an update is available)")
-        self.force_chk.setStyleSheet(f"color:{C['text']};font-size:11px;")
-        try:
-            self.force_chk.setChecked(D.get_force_update_now())
-        except Exception:
-            pass
-        self.force_chk.toggled.connect(self._toggle_force_update)
-        s.add(self.force_chk)
-        force_note = QLabel(
-            "Default behaviour waits until after close so an update never "
-            "interrupts an in-flight trade. Enable this only if you're OK "
-            "with APEX restarting mid-session as soon as a release lands.")
-        force_note.setStyleSheet(f"color:{C['muted']};font-size:10px;")
-        force_note.setWordWrap(True)
-        s.add(force_note)
+        # ── UPDATES  (V7.1.3) ────────────────────────────
+        # The old "allow updates during the trading day" toggle is gone:
+        # updates are now notify-only, so no time gating applies. APEX
+        # checks on startup and every hour; when a new version exists,
+        # an UPDATE AVAILABLE button appears in the top-right header.
+        # Nothing installs without the user clicking that banner.
+        s.add(SectionHeader("UPDATES", C["purple"]))
+        upd_info = QLabel(
+            "APEX checks GitHub for a new version on startup and once "
+            "an hour. When one is available, an <b>UPDATE AVAILABLE</b> "
+            "button appears in the top-right header — click it to see "
+            "release notes and confirm the install. The installer's "
+            "normal UI is shown (no silent install), so SmartScreen / "
+            "Defender prompts are handled correctly and you always know "
+            "exactly what's happening.")
+        upd_info.setStyleSheet(f"color:{C['muted']};font-size:11px;")
+        upd_info.setWordWrap(True)
+        upd_info.setTextFormat(Qt.TextFormat.RichText)
+        s.add(upd_info)
+
+        upd_row = QHBoxLayout()
+        self._check_now_btn = QPushButton("⟳  Check for updates now")
+        self._check_now_btn.setObjectName("toolBtn")
+        self._check_now_btn.clicked.connect(self._check_updates_now)
+        self._check_now_msg = QLabel("")
+        self._check_now_msg.setStyleSheet(
+            f"color:{C['muted']};font-size:10px;")
+        upd_row.addWidget(self._check_now_btn)
+        upd_row.addWidget(self._check_now_msg)
+        upd_row.addStretch()
+        urw = QWidget()
+        urw.setLayout(upd_row)
+        s.add(urw)
 
         # ── ACCOUNT LINKING (V7.1+) ─────────────────────────
         s.add(SectionHeader("ACCOUNT LINKING", C["purple"]))
@@ -668,10 +683,67 @@ class ToolsTab(QWidget):
     # ── V7.1+ handlers ──────────────────────────────────────
 
     def _toggle_force_update(self, on: bool):
+        # Kept as a no-op for back-compat with any older signals; the
+        # force_update flag itself is unused since V7.1.3 went to a
+        # notify-only update model.
         try:
             D.set_force_update_now(bool(on))
         except Exception:
             pass
+
+    def _check_updates_now(self):
+        """V7.1.3: walk up the parent chain to find the ApexWindow and
+        invoke its update checker. If nothing's available, briefly
+        show 'You're on the latest version.' next to the button."""
+        from PyQt6.QtWidgets import QApplication
+        # Find the top-level ApexWindow (we don't import it directly to
+        # avoid a circular import — main.py already imports ToolsTab).
+        win = self.window()
+        if not win or not hasattr(win, "_check_updates"):
+            self._check_now_msg.setText("Update checker unavailable.")
+            self._check_now_msg.setStyleSheet(
+                f"color:{C['red']};font-size:10px;")
+            return
+        self._check_now_msg.setText("Checking…")
+        self._check_now_msg.setStyleSheet(
+            f"color:{C['muted']};font-size:10px;")
+
+        # Wrap the existing _check_updates so we can show a status line
+        # whether an update was found or not. The original signal flow:
+        #   UpdateChecker.update_available  ->  _on_update_found
+        # If no update is found, the signal never fires. We listen to
+        # UpdateChecker.finished as a fallback to report "all good".
+        from core.updater import check_for_update
+
+        from PyQt6.QtCore import QThread, pyqtSignal as _Sig
+
+        class _OneShotChecker(QThread):
+            done = _Sig(object)  # update info dict or None
+
+            def run(self):
+                self.done.emit(check_for_update())
+
+        def _on_done(info):
+            if info:
+                self._check_now_msg.setText(
+                    f"v{info.get('latest','?')} available — see header.")
+                self._check_now_msg.setStyleSheet(
+                    f"color:{C['green']};font-size:10px;")
+                # Trigger the main-window banner via its public hook
+                try:
+                    win._on_update_found(info)
+                except Exception:
+                    pass
+            else:
+                self._check_now_msg.setText("You're on the latest version. ✓")
+                self._check_now_msg.setStyleSheet(
+                    f"color:{C['green']};font-size:10px;")
+            QTimer.singleShot(
+                6000, lambda: self._check_now_msg.setText(""))
+
+        self._one_shot = _OneShotChecker()
+        self._one_shot.done.connect(_on_done)
+        self._one_shot.start()
 
     def _sync_keys_to_server(self):
         """Push the current set of Alpaca/Anthropic keys to the APEX

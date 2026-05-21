@@ -1,4 +1,4 @@
 {
-  "version": "1.1.0",
-  "notes": "V7+ baseline. v1.1.2 features (Overview active-bot filter, lifetime AI cost card, drag-drop bot import, etc.) are available as a manual install from the v1.1.2 GitHub release. Auto-update from v1.1.0 is temporarily disabled while the install-reliability issue is being diagnosed."
+  "version": "1.1.3",
+  "notes": "V7.1.3: updates are now notify-only. APEX no longer auto-applies an install — it just shows an UPDATE AVAILABLE banner in the top-right header when a new version exists, and you click to start the install. The installer's normal UI is shown (no silent install) so SmartScreen / Defender prompts are handled correctly. Also includes a Check for updates now button in Tools. This fixes the auto-update loop reported in v1.1.0 -> v1.1.2."
 }

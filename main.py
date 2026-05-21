@@ -1527,27 +1527,19 @@ class ApexWindow(QMainWindow):
     # ── AUTO-UPDATE ──────────────────────────────────────────
 
     def _maybe_auto_update(self):
+        """V7.1.3: notification-only. The check runs in the background
+        and surfaces an "UPDATE AVAILABLE" banner in the header — the
+        actual download and install only happens when the user clicks
+        that banner. No more silent-install races, no more loops, no
+        more market-hours gating: the user is in control.
+
+        The dev (non-frozen) build still skips the check entirely so
+        run.bat sessions never get the banner."""
         if not getattr(sys, "frozen", False):
             return
-        try:
-            from core.schedule import market_is_open, update_allowed_now
-            if not update_allowed_now(market_is_open()):
-                return
-        except Exception:
-            return
         self._auto_checker = UpdateChecker()
-        self._auto_checker.update_available.connect(self._auto_apply_update)
+        self._auto_checker.update_available.connect(self._on_update_found)
         self._auto_checker.start()
-
-    def _auto_apply_update(self, info: dict):
-        try:
-            from core.schedule import market_is_open, update_allowed_now
-            if not update_allowed_now(market_is_open()):
-                self._on_update_found(info)
-                return
-        except Exception:
-            return
-        self._do_update(info)
 
     def _check_updates(self):
         self._update_checker = UpdateChecker()

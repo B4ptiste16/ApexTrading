@@ -172,9 +172,18 @@ def launch_downloaded_installer(local_path: str) -> None:
     exe = sys.executable
     bat = Path(tempfile.gettempdir()) / "apex_update_relaunch.bat"
     # Use CRLF + cp1252 — Windows cmd's preferred batch format.
+    # V7.1.3: visible install — drop /SILENT and /SUPPRESSMSGBOXES.
+    # The previous silent-install combo was being blocked by Windows
+    # Defender / SmartScreen on freshly-downloaded unsigned binaries,
+    # causing the install to silently no-op and the auto-updater to
+    # loop. With the full Inno UI visible, the user explicitly clicks
+    # through (Next → Install → Finish) and SmartScreen prompts get
+    # presented properly. Keep /SP- so Inno doesn't ask "this will
+    # install, are you sure?" at the very start — the user already
+    # confirmed by clicking Install in APEX.
     bat.write_text(
         "@echo off\r\n"
-        "rem APEX auto-update relauncher\r\n"
+        "rem APEX update relauncher\r\n"
         "set LOG=%TEMP%\\apex_update.log\r\n"
         "echo === APEX Update %DATE% %TIME% === > \"%LOG%\"\r\n"
         "rem Wait up to 30s for old APEX.exe to fully exit\r\n"
@@ -189,7 +198,7 @@ def launch_downloaded_installer(local_path: str) -> None:
         ":run\r\n"
         "echo Waited %tries% seconds for old process. >> \"%LOG%\"\r\n"
         f"echo Installer: \"{local_path}\" >> \"%LOG%\"\r\n"
-        f"\"{local_path}\" /SILENT /SUPPRESSMSGBOXES /NORESTART\r\n"
+        f"\"{local_path}\" /SP- /NORESTART\r\n"
         "echo Installer exit code: %ERRORLEVEL% >> \"%LOG%\"\r\n"
         "rem Let Windows release file handles before relaunching\r\n"
         "timeout /t 3 /nobreak >nul\r\n"
