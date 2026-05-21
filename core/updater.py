@@ -172,46 +172,53 @@ def launch_downloaded_installer(local_path: str) -> None:
     exe = sys.executable
     bat = Path(tempfile.gettempdir()) / "apex_update_relaunch.bat"
     # Use CRLF + cp1252 — Windows cmd's preferred batch format.
-    # V7.1.3: visible install — drop /SILENT and /SUPPRESSMSGBOXES.
-    # The previous silent-install combo was being blocked by Windows
-    # Defender / SmartScreen on freshly-downloaded unsigned binaries,
-    # causing the install to silently no-op and the auto-updater to
-    # loop. With the full Inno UI visible, the user explicitly clicks
-    # through (Next → Install → Finish) and SmartScreen prompts get
-    # presented properly. Keep /SP- so Inno doesn't ask "this will
-    # install, are you sure?" at the very start — the user already
-    # confirmed by clicking Install in APEX.
+    # V7.1.5: replace the wait-for-exit loop with taskkill /F /T.
+    # The wait loop was getting stuck because a running bot is its
+    # own APEX.exe subprocess (main.py spawns APEX.exe --run-bot for
+    # each bot via QProcess), and those subprocesses don't die when
+    # the GUI exits — so tasklist always found at least one APEX.exe
+    # and the loop never reached :run. taskkill /F /IM APEX.exe /T
+    # force-kills the GUI plus all child bot processes in one shot.
+    #
+    # We also drop the explicit `start "" "{exe}"` relaunch — Inno's
+    # [Run] section in installer.iss handles relaunch when the user
+    # leaves the "Launch APEX" checkbox ticked at the end of the
+    # wizard. Trying to do it from the batch as well risked spawning
+    # two instances and triggering the single-instance mutex check
+    # to silently exit one of them.
+    #
+    # Each step is logged separately so future failures are easy to
+    # diagnose from %TEMP%\apex_update.log.
     bat.write_text(
         "@echo off\r\n"
-        "rem APEX update relauncher\r\n"
         "set LOG=%TEMP%\\apex_update.log\r\n"
-        "echo === APEX Update %DATE% %TIME% === > \"%LOG%\"\r\n"
-        "rem Wait up to 30s for old APEX.exe to fully exit\r\n"
-        "set /a tries=0\r\n"
-        ":wait\r\n"
-        "set /a tries+=1\r\n"
-        "if %tries% GTR 30 goto run\r\n"
-        "tasklist /FI \"IMAGENAME eq APEX.exe\" 2>nul | find /I \"APEX.exe\" >nul\r\n"
-        "if errorlevel 1 goto run\r\n"
-        "timeout /t 1 /nobreak >nul\r\n"
-        "goto wait\r\n"
-        ":run\r\n"
-        "echo Waited %tries% seconds for old process. >> \"%LOG%\"\r\n"
+        "echo. >> \"%LOG%\"\r\n"
+        "echo === APEX Update %DATE% %TIME% === >> \"%LOG%\"\r\n"
+        "echo Step 1: taskkill APEX.exe and children >> \"%LOG%\"\r\n"
+        "taskkill /F /IM APEX.exe /T >> \"%LOG%\" 2>&1\r\n"
+        "echo Step 2: settle (2s) >> \"%LOG%\"\r\n"
+        "timeout /t 2 /nobreak >nul\r\n"
+        "echo Step 3: launch installer >> \"%LOG%\"\r\n"
         f"echo Installer: \"{local_path}\" >> \"%LOG%\"\r\n"
         f"\"{local_path}\" /SP- /NORESTART\r\n"
-        "echo Installer exit code: %ERRORLEVEL% >> \"%LOG%\"\r\n"
-        "rem Let Windows release file handles before relaunching\r\n"
-        "timeout /t 3 /nobreak >nul\r\n"
-        f"echo Launching: \"{exe}\" >> \"%LOG%\"\r\n"
-        f"start \"\" \"{exe}\"\r\n"
-        "echo Done. >> \"%LOG%\"\r\n"
-        "rem Self-delete this script\r\n"
-        "(goto) 2>nul & del \"%~f0\"\r\n",
+        "echo Step 4: installer exit code: %ERRORLEVEL% >> \"%LOG%\"\r\n"
+        "echo Step 5: done >> \"%LOG%\"\r\n"
+        "del \"%~f0\" >nul 2>&1\r\n",
         encoding="cp1252",
     )
+    # V7.1.5: CREATE_NO_WINDOW (0x08000000) instead of DETACHED_PROCESS.
+    # The previous DETACHED_PROCESS flag left a visible cmd console
+    # because Windows spawns its own console for the new cmd /c shell
+    # — DETACHED only detaches from the *parent's* console, it doesn't
+    # suppress a new one. CREATE_NO_WINDOW actually hides the cmd shell,
+    # so the user only sees the Inno installer UI (which is a separate
+    # process and stays visible by design).
+    # CREATE_NO_WINDOW and DETACHED_PROCESS can't be combined per MSDN.
+    CREATE_NO_WINDOW         = 0x08000000
+    CREATE_NEW_PROCESS_GROUP = 0x00000200
     subprocess.Popen(
         ["cmd", "/c", str(bat)],
-        creationflags=0x00000008 | 0x00000200,  # DETACHED | NEW_GROUP
+        creationflags=CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP,
     )
     os._exit(0)
 
