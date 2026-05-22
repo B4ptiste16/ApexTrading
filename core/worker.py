@@ -44,15 +44,22 @@ class RefreshWorker(QThread):
     def run(self):
         try:
             import core.data as D
+            positions = D.get_positions(self.side)
+            # Per-stock ATR/TP only matters for the long/short gauges;
+            # DAY uses its own bracket state (already has per-ticker TP).
+            meta = (D.position_meta(positions, self.side)
+                    if self.side in ("LONG", "SHORT") and positions
+                    else {})
             result = {
-                "account":   D.get_account(self.side),
-                "positions": D.get_positions(self.side),
-                "history":   D.get_history(self.side, self.period),
-                "orders":    D.get_orders(self.side),
-                "snapshots": D.load_snapshots(self.side),
-                "log":       D.load_bot_log(self.side),
-                "costs":     D.estimate_api_costs(self.side),
-                "day_state": D.load_day_state() if self.side == "DAY" else {},
+                "account":       D.get_account(self.side),
+                "positions":     positions,
+                "position_meta": meta,
+                "history":       D.get_history(self.side, self.period),
+                "orders":        D.get_orders(self.side),
+                "snapshots":     D.load_snapshots(self.side),
+                "log":           D.load_bot_log(self.side),
+                "costs":         D.estimate_api_costs(self.side),
+                "day_state":     D.load_day_state() if self.side == "DAY" else {},
             }
             self.done.emit(result)
         except Exception as e:

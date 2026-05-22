@@ -126,6 +126,19 @@ def empty_chart(msg="No data", height=280) -> str:
     return _make_html([], layout)
 
 
+def _market_hours_rangebreaks(period: str) -> list:
+    """Plotly x-axis rangebreaks that hide hours / days when no broker
+    quote is published, so the equity line draws close-to-close with no
+    flat overnight gaps. Skips weekends, plus the 16:00-09:30 ET overnight
+    band (= 20:00-13:30 UTC) for intraday-resolution periods.
+    The DAILY-resolution periods (3M/6M/1Y) only need the weekend hide."""
+    breaks = [{"bounds": ["sat", "mon"]}]
+    if period in {"1D", "1W", "1M"}:
+        # Hide non-market hours (UTC). Approximate; covers both EDT/EST.
+        breaks.append({"bounds": [20, 13.5], "pattern": "hour"})
+    return breaks
+
+
 def equity_curve(equity_df: pd.DataFrame, side: str, period: str) -> str:
     if equity_df.empty:
         return empty_chart(f"No equity data — {period}")
@@ -158,6 +171,9 @@ def equity_curve(equity_df: pd.DataFrame, side: str, period: str) -> str:
             "hovermode": "x unified",
             "shapes": shapes,
             "annotations": annots,
+            "xaxis": {"gridcolor": BORDER, "zeroline": False,
+                      "automargin": False,
+                      "rangebreaks": _market_hours_rangebreaks(period)},
             "yaxis": {"gridcolor": BORDER, "zeroline": False,
                       "automargin": False, "tickprefix": "$",
                       **({"range": yr} if yr else {})},
@@ -197,6 +213,9 @@ def combined_history_chart(df: pd.DataFrame, period: str) -> str:
             "hovermode": "x unified",
             "shapes": shapes,
             "annotations": annots,
+            "xaxis": {"gridcolor": BORDER, "zeroline": False,
+                      "automargin": False,
+                      "rangebreaks": _market_hours_rangebreaks(period)},
             "yaxis": {"gridcolor": BORDER, "zeroline": False,
                       "automargin": False, "tickprefix": "$",
                       **({"range": yr} if yr else {})},
@@ -374,10 +393,16 @@ def bracket_gauge(brackets: dict, positions: list) -> str:
     return _make_html(data, layout)
 
 
-def position_gauge(positions: list, side: str) -> str:
+def position_gauge(positions: list, side: str,
+                   meta: dict | None = None) -> str:
     """
     Long/Short bots: shows entry → current → estimated stop/target
     as a horizontal gauge per position.
+
+    `meta` (optional) is {symbol: {stop_pct, tp_pct, atr_pct, ...}} from
+    data.position_meta(). When provided, the chart shows per-stock
+    targets sized by each ticker's real ATR (so AAPL's target ≠ TSLA's).
+    Without it, falls back to a flat 2.5 % ATR estimate.
     """
     if not positions:
         return empty_chart("No open positions", 240)
@@ -385,6 +410,7 @@ def position_gauge(positions: list, side: str) -> str:
     color = BOT_COLOR[side]
     data  = []
     n     = len(positions)
+    meta  = meta or {}
 
     for i, p in enumerate(sorted(positions, key=lambda x: x["symbol"])):
         ticker  = p["symbol"]
@@ -393,18 +419,24 @@ def position_gauge(positions: list, side: str) -> str:
         unr     = float(p["unrealized_pl"])
         unr_pct = float(p.get("unrealized_plpc", 0)) * 100
 
-        # ATR estimate (2% of price as fallback)
-        atr = entry * 0.025
-
-        if side == "SHORT":
-            stop_price = entry + atr * 2.5
-            tp_price   = entry - atr * 5.0
+        per_tkr = meta.get(ticker)
+        if per_tkr:
+            stop_pct = float(per_tkr["stop_pct"])
+            tp_pct   = float(per_tkr["tp_pct"])
+            stop_price = float(per_tkr.get("stop_price", entry * (1 + stop_pct/100)))
+            tp_price   = float(per_tkr.get("tp_price",   entry * (1 + tp_pct/100)))
         else:
-            stop_price = entry - atr * 2.5
-            tp_price   = entry + atr * 5.0
+            # Flat 2.5% ATR fallback if per-ticker meta wasn't supplied
+            atr = entry * 0.025
+            if side == "SHORT":
+                stop_price = entry + atr * 2.5
+                tp_price   = entry - atr * 5.0
+            else:
+                stop_price = entry - atr * 2.5
+                tp_price   = entry + atr * 5.0
+            stop_pct = (stop_price - entry) / entry * 100
+            tp_pct   = (tp_price   - entry) / entry * 100
 
-        stop_pct = (stop_price - entry) / entry * 100
-        tp_pct   = (tp_price   - entry) / entry * 100
         cur_pct  = (current    - entry) / entry * 100
 
         # Stop zone

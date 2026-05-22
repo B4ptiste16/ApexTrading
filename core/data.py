@@ -171,6 +171,72 @@ def get_account(side: str) -> dict:
         return {"connected": False, "error": str(e)}
 
 
+_ATR_CACHE: dict = {}            # ticker -> (timestamp, atr_pct)
+_ATR_CACHE_TTL = 3600            # one hour
+
+
+def _ticker_atr_pct(symbol: str) -> float:
+    """Fetch this ticker's 14-day ATR as a % of price.
+    Cached for an hour so the chart doesn't hit yfinance every refresh."""
+    import time as _time
+    now = _time.time()
+    cached = _ATR_CACHE.get(symbol)
+    if cached and (now - cached[0]) < _ATR_CACHE_TTL:
+        return cached[1]
+    try:
+        import yfinance as yf
+        hist = yf.Ticker(symbol).history(period="30d", auto_adjust=True)
+        if hist.empty or len(hist) < 14:
+            _ATR_CACHE[symbol] = (now, 0.025)
+            return 0.025
+        h = hist["High"].values.astype(float)
+        l = hist["Low"].values.astype(float)
+        c = hist["Close"].values.astype(float)
+        tr = np.maximum(h[1:] - l[1:],
+                        np.maximum(np.abs(h[1:] - c[:-1]),
+                                   np.abs(l[1:] - c[:-1])))
+        atr = float(tr[-14:].mean())
+        price = float(c[-1])
+        atr_pct = atr / price if price > 0 else 0.025
+        _ATR_CACHE[symbol] = (now, atr_pct)
+        return atr_pct
+    except Exception:
+        _ATR_CACHE[symbol] = (now, 0.025)
+        return 0.025
+
+
+def position_meta(positions: list, side: str,
+                  stop_mult: float = 2.5,
+                  tp_mult:   float = 5.0) -> dict:
+    """For each open position, return per-stock ATR-based stop/target
+    levels so the position-gauge chart shows DIFFERENT objectives per
+    ticker instead of a flat 2.5% fallback for all of them.
+
+    Returns {symbol: {atr_pct, stop_pct, tp_pct, stop_price, tp_price}}.
+    """
+    meta: dict = {}
+    for p in positions:
+        sym = p.get("symbol")
+        entry = float(p.get("avg_entry_price", 0))
+        if not sym or entry <= 0:
+            continue
+        atr_pct = _ticker_atr_pct(sym)
+        if side == "SHORT":
+            stop_pct = +atr_pct * stop_mult
+            tp_pct   = -atr_pct * tp_mult
+        else:
+            stop_pct = -atr_pct * stop_mult
+            tp_pct   = +atr_pct * tp_mult
+        meta[sym] = {
+            "atr_pct":    atr_pct,
+            "stop_pct":   stop_pct * 100,
+            "tp_pct":     tp_pct   * 100,
+            "stop_price": round(entry * (1 + stop_pct), 2),
+            "tp_price":   round(entry * (1 + tp_pct),   2),
+        }
+    return meta
+
+
 def get_positions(side: str) -> list:
     c = get_client(side)
     if not c:

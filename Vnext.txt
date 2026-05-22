@@ -1,0 +1,27 @@
+Vnext
+
+- have an exclamations mark in a circle next to each info (like sharpe, win rate etc... explaing how info is computed and what time frame is used)
+
+- Graphs musn't show just between 13:30 and 20:00 but from market close to market close skipping hours where stock values arent updated  (up to you to define when each broker software updates during which hours)
+
+- the tabs on the right of the screen are somehow lower than the ones on the right of the screen. level the right tabs to the level of the  left ones
+
+- for the longbot, i see it sets a target, however the target is the same for each stocks or positions so ajust the target depending on the stock. (AI might prefer a stock thinking it might go higher than the other ones so show it in the graph by having different value objectives for each chosen stocks)
+
+- In addition to the make bot tab, I would like it to be able to update a previously made bot to possibly improve it
+
+- Is there a way to have use of AI in the make bot section without having API key and to  use an AI model for free. If possible have people be able to link an ai account or subscription to be able to use this tab so they dont have to go through the process of getting an API key or paying to make them (The not paying part is important to me). Have a free use icon next to the free usage ai models if possible to  use them for free and have them in a different colour, maybe a fade from purple to neon green or something modern.
+
+- On the website once you go in the bot tab, I want to be able to click on the bot to see more details with graphs etc... (It offers to liquidate but no info is given so im scared it might liquidate everything in the bots portfolio. Also have a confirmation request message when liquidating.)
+
+- I want the overview tab in the website to have the drop down menu timestamp and percentage increase in portfolio
+
+- the website on the phone isn't entirely the same colour. The top part which appears to be outside the page of the website on both side of my iPhone camera appear in white which creates an ugly separation between 2 opposite colours.
+
+- Make sure the blinking button near the bots are a little bit bigger and have
+
+- Have the app have a lighter tone of green less neon please and dame for the red and orange
+
+- Make sure the market closed sign is red and has a sort of white breeze animation from right to left like when you are running a prompt and the text  on the bottom has a white faded patch moving left to right.
+
+- There sitll seems to be a problem with the bracket's auto selling as the targets were surpassed but stock wasn't sold

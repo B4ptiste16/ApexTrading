@@ -87,7 +87,8 @@ class MetricCard(QFrame):
     """
 
     def __init__(self, label: str, value: str = "—",
-                 color: str = C["text"], sub: str = "", parent=None):
+                 color: str = C["text"], sub: str = "",
+                 tooltip: str = "", parent=None):
         super().__init__(parent)
         self.setObjectName("card")
         self.setFixedHeight(80)
@@ -98,11 +99,15 @@ class MetricCard(QFrame):
         layout.setContentsMargins(12, 10, 12, 8)
         layout.setSpacing(2)
 
-        self._label = QLabel(label.upper())
+        label_text = f"{label.upper()}  ⓘ" if tooltip else label.upper()
+        self._label = QLabel(label_text)
         self._label.setStyleSheet(
             f"font-size:8px;color:{C['muted']};letter-spacing:3px;"
             f"font-family:'JetBrains Mono';"
         )
+        if tooltip:
+            self._label.setToolTip(tooltip)
+            self.setToolTip(tooltip)
 
         self._value = QLabel(value)
         self._value.setStyleSheet(

@@ -86,9 +86,10 @@ QPushButton#cornerBtn {{
     font-size: 10px;
     font-weight: 500;
     letter-spacing: 1px;
-    padding: 7px 14px;
+    padding: 13px 14px;
     border-radius: 0;
     min-width: 0;
+    margin: 0;
 }}
 
 QPushButton#cornerBtn:hover {{

@@ -447,6 +447,72 @@ def web_api_bot_stop(side: str, request: Request):
 
 
 # ──────────────────────────────────────────────────────────────────────────────
+# v1.2.0 — Free AI generation for the MAKE BOT tab. Uses APEX's own
+# pooled Anthropic key (server env: APEX_ANTHROPIC_KEY) with Haiku to
+# keep cost low. Rate-limited per user.
+# ──────────────────────────────────────────────────────────────────────────────
+
+import os as _os
+import time as _time
+import threading as _threading
+
+_MAKEBOT_RATE: dict = {}                # user_id -> [timestamps]
+_MAKEBOT_RATE_LOCK = _threading.Lock()
+_MAKEBOT_RATE_WINDOW = 3600             # 1 hour
+_MAKEBOT_RATE_LIMIT  = 5                # 5 calls per hour per user
+
+
+def _check_makebot_rate(user_id: int) -> int:
+    """Return remaining calls in the window (>=0). 0 = rate-limited."""
+    now = _time.time()
+    with _MAKEBOT_RATE_LOCK:
+        hits = [t for t in _MAKEBOT_RATE.get(user_id, [])
+                if (now - t) < _MAKEBOT_RATE_WINDOW]
+        _MAKEBOT_RATE[user_id] = hits
+        if len(hits) >= _MAKEBOT_RATE_LIMIT:
+            return 0
+        hits.append(now)
+        return _MAKEBOT_RATE_LIMIT - len(hits)
+
+
+@app.post("/api/makebot/generate")
+def api_makebot_generate(payload: dict,
+                         authorization: str | None = Header(default=None)):
+    """Pooled Anthropic Haiku call. Bearer-auth, rate-limited."""
+    user = _current_user(authorization)
+    if _check_makebot_rate(user["id"]) <= 0:
+        raise HTTPException(
+            429,
+            f"Free-AI rate limit reached: {_MAKEBOT_RATE_LIMIT} calls "
+            f"per hour per user. Wait a bit or paste your own API key.")
+    server_key = _os.environ.get("APEX_ANTHROPIC_KEY") or _os.environ.get("ANTHROPIC_API_KEY")
+    if not server_key:
+        raise HTTPException(503,
+            "Free AI not configured on this server. Use your own key.")
+    prompt = (payload or {}).get("prompt", "").strip()
+    system = (payload or {}).get("system", "").strip()
+    if not prompt or not system:
+        raise HTTPException(400, "Missing 'prompt' or 'system' field.")
+    try:
+        import anthropic
+    except ImportError:
+        raise HTTPException(503,
+            "Server missing 'anthropic' package. Run: pip install anthropic.")
+    try:
+        client = anthropic.Anthropic(api_key=server_key)
+        resp = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=4096,
+            system=system,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        text = "".join(getattr(p, "text", "") for p in resp.content)
+        return {"text": text}
+    except Exception as e:
+        raise HTTPException(500, f"Anthropic call failed: {e}")
+
+
+# ──────────────────────────────────────────────────────────────────────────────
 # V7.1.11 — Cloud-bot start/stop/status/logs  (bearer-auth, JSON)
 # Same actions as /web/api/bots/{side}/* but for the desktop app and any
 # external client. The /web/ variants stay cookie-authed for the phone.

@@ -22,6 +22,40 @@ import core.charts as CH
 C = COLORS
 
 
+# Tooltip text for each risk-metric card. Hovering on the ⓘ icon
+# explains how the number is computed + the time-frame used.
+_METRIC_TOOLTIPS = {
+    "TOTAL RETURN": "Cumulative % change from the first portfolio snapshot to the latest.\n"
+                    "Time frame: full snapshot history (since bot first ran).",
+    "SHARPE":       "Annualised risk-adjusted return: mean(daily return) / std(daily return) × √252.\n"
+                    "Above 1 is good, above 2 excellent.\n"
+                    "Time frame: full daily-snapshot history.",
+    "MAX DD":       "Largest peak-to-trough decline in portfolio value, as a percentage.\n"
+                    "More negative = worse drawdown.\n"
+                    "Time frame: full snapshot history.",
+    "WIN RATE":     "Percentage of trading days where the portfolio finished higher than the day before.\n"
+                    "Time frame: full daily-snapshot history.",
+    "VOLATILITY":   "Annualised standard deviation of daily returns × 100.\n"
+                    "Higher = more variable performance.\n"
+                    "Time frame: full daily-snapshot history.",
+    "AVG DAILY":    "Total return divided by the number of calendar days covered.\n"
+                    "Time frame: first snapshot → latest snapshot.",
+    "PORTFOLIO":    "Equity reported by Alpaca (cash + market value of all open positions).",
+    "DAY P/L":      "Equity today minus equity at yesterday's close, also shown as %.\n"
+                    "Source: Alpaca account today_equity vs last_equity.",
+    "PERIOD P/L":   "Equity change over the period selected by the dropdown above.\n"
+                    "Computed from the equity-history time series.",
+    "CASH":         "Buying power available on the Alpaca paper account.",
+    "INVESTED":     "Portfolio value minus cash — % of equity actually deployed.",
+    "POSITIONS":    "Number of open positions currently held.",
+    "W/L":          "Wins / Losses across all closed bracket trades (DAY bot).\n"
+                    "Tracked in daybot_state.json.",
+    "WIN RATE_DAY": "Win rate across all closed bracket trades (DAY bot).",
+    "BRACKET P/L":  "Cumulative realised profit / loss across closed bracket trades.",
+    "BRACKETS":     "Number of bracket orders currently active.",
+}
+
+
 class BotTab(QWidget):
 
     def __init__(self, side: str, parent=None):
@@ -47,20 +81,30 @@ class BotTab(QWidget):
         s.add(SectionHeader("ACCOUNT SUMMARY", self.color))
         row = QHBoxLayout()
         row.setSpacing(10)
-        self.card_portfolio  = MetricCard("PORTFOLIO",  "—", self.color)
-        self.card_day_pl     = MetricCard("DAY P/L",    "—")
-        self.card_period_pl  = MetricCard("PERIOD P/L", "—")
-        self.card_cash       = MetricCard("CASH",       "—")
-        self.card_invested   = MetricCard("INVESTED",   "—")
-        self.card_positions  = MetricCard("POSITIONS",  "—")
+        self.card_portfolio  = MetricCard("PORTFOLIO",  "—", self.color,
+                                          tooltip=_METRIC_TOOLTIPS["PORTFOLIO"])
+        self.card_day_pl     = MetricCard("DAY P/L",    "—",
+                                          tooltip=_METRIC_TOOLTIPS["DAY P/L"])
+        self.card_period_pl  = MetricCard("PERIOD P/L", "—",
+                                          tooltip=_METRIC_TOOLTIPS["PERIOD P/L"])
+        self.card_cash       = MetricCard("CASH",       "—",
+                                          tooltip=_METRIC_TOOLTIPS["CASH"])
+        self.card_invested   = MetricCard("INVESTED",   "—",
+                                          tooltip=_METRIC_TOOLTIPS["INVESTED"])
+        self.card_positions  = MetricCard("POSITIONS",  "—",
+                                          tooltip=_METRIC_TOOLTIPS["POSITIONS"])
         for c in [self.card_portfolio, self.card_day_pl, self.card_period_pl,
                   self.card_cash, self.card_invested, self.card_positions]:
             row.addWidget(c)
         if self.side == "DAY":
-            self.card_wl       = MetricCard("W/L",        "—")
-            self.card_wr       = MetricCard("WIN RATE",   "—")
-            self.card_bpl      = MetricCard("BRACKET P/L","—")
-            self.card_brackets = MetricCard("BRACKETS",   "—")
+            self.card_wl       = MetricCard("W/L",         "—",
+                                            tooltip=_METRIC_TOOLTIPS["W/L"])
+            self.card_wr       = MetricCard("WIN RATE",    "—",
+                                            tooltip=_METRIC_TOOLTIPS["WIN RATE_DAY"])
+            self.card_bpl      = MetricCard("BRACKET P/L", "—",
+                                            tooltip=_METRIC_TOOLTIPS["BRACKET P/L"])
+            self.card_brackets = MetricCard("BRACKETS",    "—",
+                                            tooltip=_METRIC_TOOLTIPS["BRACKETS"])
             for c in [self.card_wl, self.card_wr, self.card_bpl, self.card_brackets]:
                 row.addWidget(c)
         row.addStretch()
@@ -267,7 +311,7 @@ class BotTab(QWidget):
         self.risk_cards = {}
         for i, m in enumerate(["TOTAL RETURN","SHARPE","MAX DD",
                                 "WIN RATE","VOLATILITY","AVG DAILY"]):
-            card = MetricCard(m, "—")
+            card = MetricCard(m, "—", tooltip=_METRIC_TOOLTIPS.get(m, ""))
             rcl.addWidget(card, i//2, i%2)
             self.risk_cards[m] = card
         rr.addWidget(self.risk_cards_frame)
@@ -566,7 +610,8 @@ class BotTab(QWidget):
             st   = data.get("day_state", {})
             html = CH.bracket_gauge(st.get("open_brackets",{}), pos)
         else:
-            html = CH.position_gauge(pos, self.side)
+            meta = data.get("position_meta", {})
+            html = CH.position_gauge(pos, self.side, meta=meta)
         self.gauge_chart.load_chart(html)
 
     def _apply_equity(self, data):

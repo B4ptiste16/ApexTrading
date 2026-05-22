@@ -83,7 +83,36 @@ def _openai_extract(j: dict) -> str:
         return ""
 
 
+def _apex_free_build(prompt: str, system: str, key: str, model: str) -> tuple[dict, dict]:
+    """The 'Free (via APEX)' option doesn't need an API key — it routes
+    through the APEX server which uses APEX's own pooled Anthropic key.
+    Rate-limited to 5 calls / hour / signed-in user."""
+    from ui.login import load_auth, load_server_url
+    tok = (load_auth() or {}).get("token") or ""
+    return (
+        {"Authorization": f"Bearer {tok}",
+         "Content-Type":  "application/json",
+         "X-Apex-Endpoint": f"{load_server_url()}/api/makebot/generate"},
+        {"prompt": prompt, "system": system},
+    )
+
+
+def _apex_free_extract(j: dict) -> str:
+    return j.get("text", "") or ""
+
+
 PROVIDERS = {
+    "✨  Free  (via APEX, no key)": {
+        # Sentinel URL — the worker replaces it with the X-Apex-Endpoint
+        # header value at request time (so the server URL is dynamic).
+        "url":     "__apex_dynamic__",
+        "models":  [
+            ("Claude Haiku  (APEX-hosted, free)", "apex-haiku"),
+        ],
+        "build":   _apex_free_build,
+        "extract": _apex_free_extract,
+        "free":    True,
+    },
     "Anthropic (Claude)": {
         "url":     "https://api.anthropic.com/v1/messages",
         "models":  [
@@ -195,8 +224,17 @@ class _GenerateWorker(QThread):
         self.progress.emit(f"Calling {self.provider}…")
         headers, body = cfg["build"](
             self.prompt, _make_system_prompt(), self.key, self.model)
+        url = cfg["url"]
+        # Free-via-APEX: the build hook stuffs the real endpoint into a
+        # custom header (server URL is user-configurable, not constant).
+        if url == "__apex_dynamic__":
+            url = headers.pop("X-Apex-Endpoint", "")
+            if not url:
+                self.done.emit(False,
+                    "APEX server URL not configured. Sign in first.")
+                return
         try:
-            r = requests.post(cfg["url"], headers=headers,
+            r = requests.post(url, headers=headers,
                               json=body, timeout=120)
         except requests.RequestException as e:
             self.done.emit(False, f"Network error: {e}")
@@ -260,6 +298,32 @@ class MakeBotTab(QWidget):
         intro.setWordWrap(True)
         s.add(intro)
 
+        # ── Mode toggle: Create new vs Improve existing ────────────
+        mode_row = QHBoxLayout()
+        mode_lbl = QLabel("Mode:")
+        mode_lbl.setStyleSheet(f"color:{C['text']};font-size:11px;")
+        self._mode_combo = QComboBox()
+        self._mode_combo.addItem("✨  Create a new bot", "create")
+        self._mode_combo.addItem("🔧  Improve an existing bot", "improve")
+        self._mode_combo.currentIndexChanged.connect(self._on_mode_changed)
+
+        self._existing_lbl = QLabel("Existing bot:")
+        self._existing_lbl.setStyleSheet(f"color:{C['text']};font-size:11px;")
+        self._existing_combo = QComboBox()
+        self._existing_combo.setMinimumWidth(220)
+        self._refresh_existing_bots()
+
+        mode_row.addWidget(mode_lbl)
+        mode_row.addWidget(self._mode_combo)
+        mode_row.addSpacing(20)
+        mode_row.addWidget(self._existing_lbl)
+        mode_row.addWidget(self._existing_combo)
+        mode_row.addStretch()
+        mw = QWidget(); mw.setLayout(mode_row)
+        s.add(mw)
+        self._existing_lbl.setVisible(False)
+        self._existing_combo.setVisible(False)
+
         # ── Provider + Model + Key form ─────────────────────────────
         form = QFrame()
         form.setStyleSheet(
@@ -277,6 +341,17 @@ class MakeBotTab(QWidget):
             self._provider_combo.addItem(name)
         self._provider_combo.currentTextChanged.connect(self._on_provider_changed)
         fg.addWidget(self._provider_combo, 0, 1)
+
+        # FREE badge — purple → green gradient, only shown when "Free" provider is picked
+        self._free_badge = QLabel("FREE  ✨")
+        self._free_badge.setStyleSheet(
+            "background: qlineargradient(x1:0, y1:0, x2:1, y2:0,"
+            f"  stop:0 {C['purple']}, stop:1 #2eea88);"
+            f"color:#0c1018;font-weight:800;font-size:10px;"
+            "letter-spacing:2px;padding:4px 10px;border-radius:6px;"
+        )
+        self._free_badge.setVisible(False)
+        fg.addWidget(self._free_badge, 0, 2)
 
         # Model
         fg.addWidget(self._lbl("Model"), 1, 0)
@@ -417,6 +492,59 @@ class MakeBotTab(QWidget):
         # option is selected
         self._model_combo.currentIndexChanged.connect(self._refresh_custom_visibility)
         self._refresh_custom_visibility()
+        # Free-via-APEX: no key needed, hide the field. Badge appears.
+        is_free = bool(cfg.get("free"))
+        self._free_badge.setVisible(is_free)
+        # _key_edit and _show_key may not exist yet during _build (this
+        # method is called once for the initial provider after they're
+        # created — protect with hasattr just in case).
+        if hasattr(self, "_key_edit"):
+            self._key_edit.setEnabled(not is_free)
+            if is_free:
+                self._key_edit.setPlaceholderText("Not required for Free provider")
+            else:
+                self._key_edit.setPlaceholderText("")
+
+    def _on_mode_changed(self, _idx: int):
+        mode = self._mode_combo.currentData()
+        is_improve = (mode == "improve")
+        self._existing_lbl.setVisible(is_improve)
+        self._existing_combo.setVisible(is_improve)
+        if is_improve:
+            self._refresh_existing_bots()
+            self._desc.setPlaceholderText(
+                "Describe what you want IMPROVED. E.g. 'Add a 2 % "
+                "trailing stop. Skip Mondays. Use Haiku instead of "
+                "Sonnet to cut costs.'")
+        else:
+            self._desc.setPlaceholderText(
+                "Buy SPY at market open if the S&P futures gapped up "
+                "more than 0.3 %. Sell at 15:45 ET. Use 50 % of "
+                "available cash. Skip if VIX > 25.")
+
+    def _refresh_existing_bots(self):
+        """Populate the 'existing bot' dropdown from local custom bots
+        + built-in bots, so users can hand any of them to the AI for
+        improvement."""
+        if not hasattr(self, "_existing_combo"):
+            return
+        self._existing_combo.clear()
+        # Built-ins (read from the bundled .py files via D.BOT_SCRIPTS)
+        try:
+            for side, path in D.BOT_SCRIPTS.items():
+                self._existing_combo.addItem(
+                    f"⟦built-in⟧  {side}", str(path))
+        except Exception:
+            pass
+        # Custom user bots
+        try:
+            reg = D.load_settings().get("bot_registry", {})
+            for c in reg.get("custom", []):
+                self._existing_combo.addItem(
+                    f"⟦custom⟧  {c.get('label', c['id'])}",
+                    c.get("script", ""))
+        except Exception:
+            pass
 
     def _refresh_custom_visibility(self, *_):
         slug = self._model_combo.currentData()
@@ -432,6 +560,8 @@ class MakeBotTab(QWidget):
 
     def _on_generate(self):
         prov = self._provider_combo.currentText()
+        cfg = PROVIDERS.get(prov) or {}
+        is_free = bool(cfg.get("free"))
         model = self._resolved_model_slug()
         key   = self._key_edit.text().strip()
         prompt = self._desc.toPlainText().strip()
@@ -440,15 +570,46 @@ class MakeBotTab(QWidget):
             QMessageBox.warning(self, "Missing model",
                 "Pick (or type) a model first.")
             return
-        if not key:
+        if not is_free and not key:
             QMessageBox.warning(self, "Missing key",
-                "Paste your API key for the chosen provider.")
+                "Paste your API key for the chosen provider, "
+                "or switch to the Free (via APEX) provider.")
             return
         if len(prompt) < 20:
             QMessageBox.warning(self, "Description too short",
                 "Describe the bot in at least a couple of sentences "
                 "so the model has something to work with.")
             return
+
+        # If we're in "Improve" mode, prepend the chosen bot's source
+        # so the model has full context.
+        if self._mode_combo.currentData() == "improve":
+            src_path = self._existing_combo.currentData()
+            if not src_path or not Path(src_path).exists():
+                QMessageBox.warning(self, "Pick an existing bot",
+                    "Choose a bot from the dropdown to improve.")
+                return
+            try:
+                existing = Path(src_path).read_text(encoding="utf-8")
+            except Exception as e:
+                QMessageBox.warning(self, "Read failed",
+                    f"Could not read {src_path}: {e}")
+                return
+            prompt = (
+                "Here is the existing bot's full source. Improve it per "
+                "the instructions below, but KEEP the APEX bot contract "
+                "(main() entry-point, env-var keys, print-flush logs, "
+                "single file).\n\n"
+                "=== EXISTING SOURCE ===\n"
+                f"{existing}\n"
+                "=== END EXISTING SOURCE ===\n\n"
+                "=== REQUESTED CHANGES ===\n"
+                f"{prompt}\n"
+                "=== END REQUESTED CHANGES ===\n\n"
+                "Output the full improved file. Do not output prose, "
+                "markdown fences, or partial diffs — only the complete "
+                "new Python source."
+            )
 
         self._gen_btn.setEnabled(False)
         self._gen_btn.setText("Generating…")
