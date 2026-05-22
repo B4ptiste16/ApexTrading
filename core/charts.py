@@ -186,34 +186,123 @@ def _market_hours_rangebreaks(period: str) -> list:
     return breaks
 
 
-def equity_curve(equity_df: pd.DataFrame, side: str, period: str) -> str:
+def equity_curve(equity_df: pd.DataFrame, side: str, period: str,
+                  events: list | None = None) -> str:
+    """v3.1.2 — line shows PERFORMANCE (profit/loss) rather than raw
+    equity, so cash deposits don't fake jumps. The full equity number
+    still appears in the hover tooltip.
+
+    `events` is an optional list of (timestamp, kind, label) tuples
+    where kind ∈ {"buy", "win", "loss"}. Each is drawn as a thin vertical
+    line on the chart so the user can see at a glance when trades fired."""
     if equity_df.empty:
         return empty_chart(f"No equity data — {period}")
     color = BOT_COLOR[side]
-    y = equity_df["equity"].tolist()
-    fv, lv = y[0], y[-1]
-    c = color if lv >= fv else R
-    delta = lv - fv
-    pct   = (lv / fv - 1) * 100 if fv else 0
+    has_pl = "profit_loss" in equity_df.columns
+
+    # PERFORMANCE line: use Alpaca's deposit-adjusted profit_loss if we
+    # have it; otherwise fall back to (equity - first-equity).
+    eq = equity_df["equity"].tolist()
+    if has_pl:
+        pl = equity_df["profit_loss"].tolist()
+    else:
+        first = eq[0] if eq else 0
+        pl = [v - first for v in eq]
+
+    fv_pl, lv_pl = pl[0], pl[-1]
+    fv_eq        = eq[0] if eq else 0
+    delta        = lv_pl - fv_pl
+    base         = fv_eq if fv_eq else 1
+    pct          = (delta / base) * 100
+
+    line_color = color if lv_pl >= fv_pl else R
+    x_local    = _utc_to_local_strings(equity_df["time"])
+
+    # Customdata holds (equity, profit_loss) for the unified hover tooltip
+    custom = list(zip(eq, pl))
 
     data = [{
         "type": "scatter",
-        "x":    _utc_to_local_strings(equity_df["time"]),
-        "y":    y,
+        "x":    x_local,
+        "y":    pl,
         "mode": "lines",
-        "name": "Equity",
-        "line": {"width": 2.5, "color": c},
+        "name": "Performance",
+        "line": {"width": 2.5, "color": line_color},
         "fill": "tozeroy",
-        "fillcolor": f"rgba({_rgb(c)},0.07)",
-        "hovertemplate": "<b>$%{y:,.2f}</b><br>%{x}<extra></extra>",
+        "fillcolor": f"rgba({_rgb(line_color)},0.07)",
+        "customdata": custom,
+        "hovertemplate": (
+            "<b>P/L: $%{customdata[1]:+,.2f}</b><br>"
+            "Equity: $%{customdata[0]:,.2f}<br>"
+            "%{x}<extra></extra>"
+        ),
     }]
 
-    yr = _tight_yrange(y)
-    shapes, annots = _prev_close_annotation(fv, equity_df["time"].iloc[-1])
+    yr     = _tight_yrange(pl) if any(p != 0 for p in pl) else None
+    # Reference line at y=0 (= deposits baseline)
+    shapes = [{
+        "type": "line", "x0": 0, "x1": 1, "y0": 0, "y1": 0,
+        "xref": "paper", "yref": "y",
+        "line": {"color": MUTED, "width": 1, "dash": "dot"},
+    }]
+    annots = [{
+        "x": 0, "y": 0, "xref": "paper", "yref": "y",
+        "text": "even", "showarrow": False,
+        "font": {"size": 8, "color": MUTED},
+        "xanchor": "left", "yanchor": "bottom",
+    }]
+
+    # v3.1.2 — vertical event markers (one shape per trade)
+    if events:
+        for ts, kind, label in events:
+            if hasattr(ts, "tz_convert"):
+                ts_local = ts.tz_convert(_LOCAL_TZ).tz_localize(None)
+            else:
+                ts_local = pd.to_datetime(ts, utc=True).tz_convert(
+                    _LOCAL_TZ).tz_localize(None)
+            evt_color = {"buy": OR2, "win": G, "loss": R}.get(kind, MUTED)
+            shapes.append({
+                "type": "line",
+                "x0": str(ts_local), "x1": str(ts_local),
+                "y0": 0, "y1": 1, "yref": "paper",
+                "line": {"color": evt_color, "width": 1.2, "dash": "dot"},
+                "opacity": 0.55,
+            })
+        # Add an invisible scatter trace at the bottom of the chart so the
+        # user can hover near each event line and see what it was.
+        ev_x = []
+        ev_lbl = []
+        ev_colors = []
+        for ts, kind, label in events:
+            if hasattr(ts, "tz_convert"):
+                ev_x.append(str(ts.tz_convert(_LOCAL_TZ).tz_localize(None)))
+            else:
+                ev_x.append(str(pd.to_datetime(ts, utc=True).tz_convert(
+                    _LOCAL_TZ).tz_localize(None)))
+            ev_lbl.append(label)
+            ev_colors.append({"buy": OR2, "win": G, "loss": R}.get(kind, MUTED))
+        if yr:
+            ev_y = [yr[0] + (yr[1] - yr[0]) * 0.03] * len(ev_x)
+        else:
+            mn = min(pl) if pl else 0
+            ev_y = [mn] * len(ev_x)
+        data.append({
+            "type": "scatter",
+            "x": ev_x, "y": ev_y,
+            "mode": "markers",
+            "marker": {"size": 7, "color": ev_colors, "symbol": "triangle-up",
+                       "line": {"color": "white", "width": 0.5}},
+            "text": ev_lbl,
+            "hovertemplate": "%{text}<br>%{x}<extra></extra>",
+            "showlegend": False,
+        })
+
+    title = (f"Performance — {period}   "
+             f"${lv_pl:+,.2f}   ({pct:+.2f}%)   "
+             f"·  Equity ${eq[-1]:,.2f}")
+
     layout = _base_layout(
-        280,
-        f"Equity — {period}   ${lv:,.2f}   ({delta:+,.2f} / {pct:+.2f}%)",
-        c, {
+        280, title, line_color, {
             "showlegend": False,
             "hovermode": "x unified",
             "shapes": shapes,
@@ -221,7 +310,8 @@ def equity_curve(equity_df: pd.DataFrame, side: str, period: str) -> str:
             "xaxis": {"gridcolor": BORDER, "zeroline": False,
                       "automargin": False,
                       "rangebreaks": _market_hours_rangebreaks(period)},
-            "yaxis": {"gridcolor": BORDER, "zeroline": False,
+            "yaxis": {"gridcolor": BORDER, "zeroline": True,
+                      "zerolinecolor": MUTED, "zerolinewidth": 1,
                       "automargin": False, "tickprefix": "$",
                       **({"range": yr} if yr else {})},
         })
@@ -229,41 +319,63 @@ def equity_curve(equity_df: pd.DataFrame, side: str, period: str) -> str:
 
 
 def combined_history_chart(df: pd.DataFrame, period: str) -> str:
-    """Total portfolio value (all 3 accounts) over the selected period."""
+    """Total portfolio PERFORMANCE (deposit-adjusted profit/loss across
+    all 3 accounts) over the selected period.
+
+    v3.1.2 — switched from raw equity to profit_loss so the line doesn't
+    spike when a new broker account is linked (adding cash adjusts the
+    baseline but does not show as growth). The actual equity value still
+    appears in the hover tooltip."""
     if df is None or df.empty:
         return empty_chart(f"No portfolio data — {period}")
-    y     = df["equity"].tolist()
-    fv    = float(y[0])
-    lv    = float(y[-1])
-    delta = lv - fv
-    pct   = (lv / fv - 1) * 100 if fv else 0.0
-    c     = G if lv >= fv else R
+    has_pl = "profit_loss" in df.columns
+    eq     = df["equity"].tolist()
+    pl     = df["profit_loss"].tolist() if has_pl else [v - eq[0] for v in eq]
+    fv_pl  = float(pl[0])
+    lv_pl  = float(pl[-1])
+    delta  = lv_pl - fv_pl
+    base   = eq[0] if eq else 1
+    pct    = (delta / base) * 100 if base else 0.0
+    c      = G if lv_pl >= fv_pl else R
+
+    custom = list(zip(eq, pl))
 
     data = [{
         "type": "scatter",
         "x":    _utc_to_local_strings(df["time"]),
-        "y":    y,
+        "y":    pl,
         "mode": "lines",
-        "name": "Total",
+        "name": "Total P/L",
         "line": {"width": 2.5, "color": c},
         "fill": "tozeroy",
         "fillcolor": f"rgba({_rgb(c)},0.07)",
-        "hovertemplate": "<b>$%{y:,.2f}</b><br>%{x}<extra></extra>",
+        "customdata": custom,
+        "hovertemplate": (
+            "<b>P/L: $%{customdata[1]:+,.2f}</b><br>"
+            "Equity: $%{customdata[0]:,.2f}<br>"
+            "%{x}<extra></extra>"
+        ),
     }]
-    yr = _tight_yrange(y)
-    shapes, annots = _prev_close_annotation(fv, df["time"].iloc[-1])
+    yr = _tight_yrange(pl) if any(p != 0 for p in pl) else None
+    shapes = [{
+        "type": "line", "x0": 0, "x1": 1, "y0": 0, "y1": 0,
+        "xref": "paper", "yref": "y",
+        "line": {"color": MUTED, "width": 1, "dash": "dot"},
+    }]
     layout = _base_layout(
         300,
-        f"Total Portfolio — {period}   ${lv:,.2f}   ({delta:+,.2f} / {pct:+.2f}%)",
+        f"Total Portfolio — {period}   "
+        f"${lv_pl:+,.2f}   ({pct:+.2f}%)   "
+        f"·  Equity ${eq[-1]:,.2f}",
         c, {
             "showlegend": False,
             "hovermode": "x unified",
             "shapes": shapes,
-            "annotations": annots,
             "xaxis": {"gridcolor": BORDER, "zeroline": False,
                       "automargin": False,
                       "rangebreaks": _market_hours_rangebreaks(period)},
-            "yaxis": {"gridcolor": BORDER, "zeroline": False,
+            "yaxis": {"gridcolor": BORDER, "zeroline": True,
+                      "zerolinecolor": MUTED, "zerolinewidth": 1,
                       "automargin": False, "tickprefix": "$",
                       **({"range": yr} if yr else {})},
         })

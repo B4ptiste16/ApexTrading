@@ -623,10 +623,12 @@ class BotTab(QWidget):
         period = self.period_combo.currentText()
         eq     = data.get("history")
         snaps  = data.get("snapshots")
+        events = data.get("trade_events") or []
         import pandas as pd
         if eq is None:    eq    = pd.DataFrame()
         if snaps is None: snaps = pd.DataFrame()
-        self.equity_chart.load_chart(CH.equity_curve(eq, self.side, period))
+        self.equity_chart.load_chart(
+            CH.equity_curve(eq, self.side, period, events=events))
         self.lifetime_chart.load_chart(CH.lifetime_chart(snaps, self.side))
 
     def _apply_trades(self, data):

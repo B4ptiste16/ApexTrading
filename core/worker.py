@@ -58,12 +58,14 @@ class RefreshWorker(QThread):
                                         stop_mult=sm, tp_mult=tm)
             else:
                 meta = D.position_meta(positions, self.side)
+            orders = D.get_orders(self.side)
             result = {
                 "account":       D.get_account(self.side),
                 "positions":     positions,
                 "position_meta": meta,
                 "history":       D.get_history(self.side, self.period),
-                "orders":        D.get_orders(self.side),
+                "orders":        orders,
+                "trade_events":  D.compute_trade_events(orders, self.side),
                 "snapshots":     D.load_snapshots(self.side),
                 "log":           D.load_bot_log(self.side),
                 "costs":         D.estimate_api_costs(self.side),

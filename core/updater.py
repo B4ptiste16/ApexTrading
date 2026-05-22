@@ -38,12 +38,29 @@ except ImportError:
 # Set to your GitHub repo: "username/repo-name"
 GITHUB_REPO    = "B4ptiste16/ApexTrading"
 CURRENT_VERSION = "1.0.0"
-VERSION_FILE   = Path(__file__).parent.parent / "version.json"
+
+
+def _bundled_version_file() -> Path:
+    """v3.1.2 — in a PyInstaller --onedir build the project source lives
+    inside an archive, so Path(__file__).parent.parent doesn't reach the
+    data directory. Data files (version.json, BOT_SKELETON.md, assets/)
+    land under sys._MEIPASS instead.
+
+    In source / dev mode, fall back to the project-root version.json so
+    `python main.py` still picks up the right version."""
+    if getattr(sys, "frozen", False):
+        meipass = getattr(sys, "_MEIPASS", None)
+        if meipass:
+            return Path(meipass) / "version.json"
+    return Path(__file__).parent.parent / "version.json"
+
+
+VERSION_FILE = _bundled_version_file()
 # ─────────────────────────────────────────────────────────
 
 
 def get_current_version() -> str:
-    """Read version from local version.json if it exists."""
+    """Read version from the bundled (or dev) version.json."""
     if VERSION_FILE.exists():
         try:
             with open(VERSION_FILE) as f:

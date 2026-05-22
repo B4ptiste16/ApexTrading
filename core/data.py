@@ -328,12 +328,16 @@ def get_history(side: str, period: str) -> pd.DataFrame:
             "time":   pd.to_datetime(h.timestamp, unit="s", utc=True),
             "equity": [float(v) if v is not None else float("nan")
                        for v in h.equity],
+            # v3.1.2 — Alpaca's profit_loss is the equity series MINUS
+            # deposits / withdrawals at each tick. Lets the chart show a
+            # "Trade Republic style" performance line where adding cash
+            # doesn't fake a sudden jump.
+            "profit_loss": [float(v) if v is not None else float("nan")
+                            for v in (getattr(h, "profit_loss", None)
+                                       or [None] * len(h.timestamp))],
         })
-        # Forward-fill so the chart spans the full requested period
-        # (overnight stretches inherit the last known equity value).
-        # Backfill takes care of any leading NaNs at the very start
-        # of the data window so we don't lose the early points.
-        df["equity"] = df["equity"].ffill().bfill()
+        df["equity"]      = df["equity"].ffill().bfill()
+        df["profit_loss"] = df["profit_loss"].fillna(0.0)
         return df[df["equity"] > 0].reset_index(drop=True)
     except Exception as e:
         print(f"[history] {side} {period}: {e}")
@@ -346,20 +350,88 @@ def get_combined_history(period: str) -> pd.DataFrame:
     Alpaca's portfolio-history timestamps. Works 24/7 (Alpaca returns the
     equity series whether or not the market is open), independent of whether
     any bot is running.
+
+    v3.1.2 — also sums profit_loss across all sides so the overview chart
+    can show deposit-adjusted performance.
     """
     frames = []
     for side in ("LONG", "SHORT", "DAY"):
         df = get_history(side, period)
         if df is not None and not df.empty:
-            frames.append(
-                df.rename(columns={"equity": side}).set_index("time"))
+            frames.append(df.rename(columns={
+                "equity":      f"eq_{side}",
+                "profit_loss": f"pl_{side}",
+            }).set_index("time"))
     if not frames:
         return pd.DataFrame()
     merged = pd.concat(frames, axis=1).sort_index().ffill().fillna(0.0)
+    eq_cols = [c for c in merged.columns if c.startswith("eq_")]
+    pl_cols = [c for c in merged.columns if c.startswith("pl_")]
     return pd.DataFrame({
-        "time":   merged.index,
-        "equity": merged.sum(axis=1).values,
+        "time":        merged.index,
+        "equity":      merged[eq_cols].sum(axis=1).values if eq_cols else 0,
+        "profit_loss": merged[pl_cols].sum(axis=1).values if pl_cols else 0,
     }).reset_index(drop=True)
+
+
+def compute_trade_events(orders_df, side: str) -> list:
+    """v3.1.2 — extract per-order events for the equity-chart vertical
+    markers. Returns a list of (timestamp, kind, label) where:
+      kind = "buy"  → orange vertical line  (opening a position)
+      kind = "win"  → green                 (closing at profit)
+      kind = "loss" → red                   (closing at loss)
+    Uses a running average cost basis per ticker to classify each closing
+    order. For SHORT bots the BUY/SELL semantics are swapped so the
+    colours stay consistent (orange = enter, green/red = close)."""
+    if orders_df is None or orders_df.empty:
+        return []
+    df = orders_df[orders_df["Filled"].notna()].copy()
+    if df.empty:
+        return []
+    df = df.sort_values("Filled")
+    events = []
+    basis: dict = {}      # ticker → (qty, avg_price)
+
+    for _, row in df.iterrows():
+        t     = row["Ticker"]
+        s     = str(row["Side"]).upper()
+        price = float(row.get("Avg Fill") or 0)
+        qty   = float(row.get("Qty") or 0)
+        ts    = row["Filled"]
+        if not ts or price <= 0 or qty <= 0:
+            continue
+
+        old_qty, old_avg = basis.get(t, (0.0, 0.0))
+
+        if side == "SHORT":
+            if s == "SELL":            # opening short
+                kind = "buy"
+                new_qty = old_qty + qty
+                new_avg = ((old_qty * old_avg + qty * price) / new_qty
+                           if new_qty else 0)
+                basis[t] = (new_qty, new_avg)
+                label = f"SHORT {t} @${price:.2f}"
+            else:                       # BUY = cover
+                kind = ("win" if (old_avg > 0 and price < old_avg)
+                        else "loss" if old_avg > 0 else "buy")
+                basis[t] = (max(0.0, old_qty - qty), old_avg)
+                label = f"COVER {t} @${price:.2f}"
+        else:                           # LONG / DAY
+            if s == "BUY":
+                kind = "buy"
+                new_qty = old_qty + qty
+                new_avg = ((old_qty * old_avg + qty * price) / new_qty
+                           if new_qty else 0)
+                basis[t] = (new_qty, new_avg)
+                label = f"BUY {t} @${price:.2f}"
+            else:                       # SELL = close
+                kind = ("win" if (old_avg > 0 and price >= old_avg)
+                        else "loss" if old_avg > 0 else "buy")
+                basis[t] = (max(0.0, old_qty - qty), old_avg)
+                label = f"SELL {t} @${price:.2f}"
+
+        events.append((ts, kind, label))
+    return events
 
 
 # ─────────────────────────────────────────
