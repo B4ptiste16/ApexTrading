@@ -507,7 +507,7 @@ def rearm_orphaned_positions(state: dict) -> dict:
             # Fallback: re-derive from a fresh ATR if we don't have them
             if not (stop and tp):
                 try:
-                    data = collect_candidate_data(sym)
+                    data = analyse_stock(sym)
                     atr  = data.get("atr") if data else None
                     if atr:
                         stop = round(entry - atr * live_stop_atr_mult(), 2)
@@ -543,6 +543,88 @@ def rearm_orphaned_positions(state: dict) -> dict:
         except Exception as e:
             print(f"  [re-arm failed] {sym}: {e}", flush=True)
 
+    return state
+
+
+def force_close_stale_brackets(state: dict) -> dict:
+    """
+    Safety net: if a position's current price has already moved past the
+    take-profit or stop-loss level but Alpaca's bracket order didn't
+    auto-fill (paper-trading gap fills, data delays, etc.), send a manual
+    market close. Called every run cycle after sync_brackets_with_alpaca.
+    """
+    if not state.get("open_brackets"):
+        return state
+
+    try:
+        positions = {str(p.symbol): p for p in trading_client.get_all_positions()}
+    except Exception:
+        return state
+
+    to_remove = []
+    for ticker, bracket in list(state["open_brackets"].items()):
+        pos = positions.get(ticker)
+        if pos is None:
+            continue
+
+        try:
+            current = float(pos.current_price or 0)
+        except Exception:
+            continue
+
+        tp  = float(bracket.get("tp",   0))
+        sl  = float(bracket.get("stop", 0))
+        qty = float(bracket.get("qty",  0))
+
+        hit_tp = tp > 0 and current >= tp
+        hit_sl = sl > 0 and current <= sl
+        if not (hit_tp or hit_sl):
+            continue
+
+        reason = (f"price ${current:.2f} >= TP ${tp:.2f}"
+                  if hit_tp else
+                  f"price ${current:.2f} <= SL ${sl:.2f}")
+        print(f"  [force-close] {ticker}: {reason} — bracket "
+              f"didn't auto-fill, sending manual market SELL", flush=True)
+
+        # Cancel any open exit orders first so the manual sell isn't blocked
+        try:
+            live = trading_client.get_orders(
+                filter=GetOrdersRequest(status=QueryOrderStatus.OPEN,
+                                       limit=50, nested=False)
+            ) or []
+            for o in live:
+                if str(getattr(o, "symbol", "")) == ticker:
+                    try:
+                        trading_client.cancel_order_by_id(str(o.id))
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
+        try:
+            sell = MarketOrderRequest(
+                symbol=ticker,
+                qty=str(int(qty)) if qty == int(qty) else str(qty),
+                side=OrderSide.SELL,
+                time_in_force=TimeInForce.DAY,
+            )
+            trading_client.submit_order(sell)
+            entry = float(bracket.get("entry", current))
+            pnl   = (current - entry) * qty
+            state["total_pnl"] = round(state.get("total_pnl", 0) + pnl, 4)
+            if pnl >= 0:
+                state["wins"]   = state.get("wins",   0) + 1
+            else:
+                state["losses"] = state.get("losses", 0) + 1
+            print(f"  [force-close] {ticker}: market sell submitted "
+                  f"qty={int(qty)}, P/L≈${pnl:+.2f}", flush=True)
+            to_remove.append(ticker)
+        except Exception as e:
+            print(f"  [force-close failed] {ticker}: {e}", flush=True)
+
+    for t in to_remove:
+        state["open_brackets"].pop(t, None)
     return state
 
 
@@ -1112,6 +1194,7 @@ def run_once():
     state     = load_state()
     state     = reset_daily(state)
     state     = sync_brackets_with_alpaca(state)
+    state     = force_close_stale_brackets(state)
     # V7.1.10 — protect any position that lost its TP/SL legs (e.g.
     # legacy DAY-TIF brackets that expired overnight)
     state     = rearm_orphaned_positions(state)

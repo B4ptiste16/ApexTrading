@@ -493,6 +493,63 @@ def api_bots_running(authorization: str | None = Header(default=None)):
     return {"bots": bot_runner.list_running(user["id"])}
 
 
+@app.get("/web/api/bots/{side}/positions", include_in_schema=False)
+def web_api_bot_positions(side: str, request: Request):
+    """Return open positions for one bot's Alpaca account."""
+    user = _web_user(request)
+    c = _alpaca_client_for(user["id"], side.upper())
+    if c is None:
+        return {"positions": [], "linked": False}
+    try:
+        raw = c.get_all_positions()
+        return {
+            "positions": [
+                {
+                    "symbol":       p.symbol,
+                    "qty":          float(p.qty),
+                    "entry":        float(p.avg_entry_price),
+                    "current":      float(p.current_price) if p.current_price else 0,
+                    "pl":           float(p.unrealized_pl),
+                    "pl_pct":       float(p.unrealized_plpc) * 100,
+                    "market_value": float(p.market_value),
+                }
+                for p in raw
+            ],
+            "linked": True,
+        }
+    except Exception as e:
+        return {"positions": [], "linked": True, "error": str(e)}
+
+
+@app.get("/web/api/portfolio/history", include_in_schema=False)
+def web_api_portfolio_history(request: Request,
+                               side: str = "LONG", period: str = "1W"):
+    """Return daily equity snapshots for one bot over the given period."""
+    user = _web_user(request)
+    c = _alpaca_client_for(user["id"], side.upper())
+    if c is None:
+        return {"history": [], "linked": False}
+    try:
+        from alpaca.trading.requests import GetPortfolioHistoryRequest
+        valid_periods = {"1D", "1W", "1M", "3M", "6M", "1A"}
+        p = period if period in valid_periods else "1W"
+        hist = c.get_portfolio_history(
+            filter=GetPortfolioHistoryRequest(period=p, timeframe="1D")
+        )
+        result = []
+        for ts, eq, pl in zip(
+            getattr(hist, "timestamp", []),
+            getattr(hist, "equity",    []),
+            getattr(hist, "profit_loss", []),
+        ):
+            if eq is not None:
+                result.append({"time": str(ts), "equity": eq,
+                                "pl": pl or 0})
+        return {"history": result, "linked": True}
+    except Exception as e:
+        return {"history": [], "linked": True, "error": str(e)}
+
+
 @app.post("/web/api/bots/{side}/liquidate", include_in_schema=False)
 def web_api_bot_liquidate(side: str, request: Request):
     """Emergency: close every open position on this bot's Alpaca account

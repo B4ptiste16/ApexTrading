@@ -95,7 +95,7 @@ class StatusDot(QLabel):
 
     def __init__(self, parent=None):
         super().__init__("●", parent)
-        self.setFixedSize(16, 16)
+        self.setFixedSize(20, 20)
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self._state = "stopped"
@@ -129,7 +129,7 @@ class StatusDot(QLabel):
             r, g, b = int(h[0:2],16), int(h[2:4],16), int(h[4:6],16)
             col = f"rgba({r},{g},{b},0.12)"
         self.setStyleSheet(
-            f"color:{col};font-size:8px;background:transparent;border:none;"
+            f"color:{col};font-size:12px;background:transparent;border:none;"
         )
 
 
@@ -828,6 +828,54 @@ class MoreBotsTab(QWidget):
 
 
 # ─────────────────────────────────────────
+# SWEEP LABEL  (shimmer animation for MARKET CLOSED)
+# ─────────────────────────────────────────
+
+class SweepLabel(QLabel):
+    """QLabel that paints a right-to-left shimmer when sweep is active."""
+
+    def __init__(self, text="", parent=None):
+        super().__init__(text, parent)
+        self._sweep_x = 1.2
+        self._sweeping = False
+        self._timer = QTimer(self)
+        self._timer.timeout.connect(self._step)
+
+    def start_sweep(self):
+        if self._sweeping:
+            return
+        self._sweeping = True
+        self._sweep_x = 1.2
+        self._timer.start(16)
+
+    def stop_sweep(self):
+        self._sweeping = False
+        self._timer.stop()
+        self.update()
+
+    def _step(self):
+        self._sweep_x -= 0.014
+        if self._sweep_x < -0.4:
+            self._sweep_x = 1.2
+        self.update()
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        if not self._sweeping:
+            return
+        painter = QPainter(self)
+        w, h = self.width(), self.height()
+        cx = self._sweep_x * w
+        sw = w * 0.40
+        grad = QLinearGradient(cx - sw, 0, cx + sw, 0)
+        grad.setColorAt(0.0, QColor(255, 255, 255, 0))
+        grad.setColorAt(0.5, QColor(255, 255, 255, 26))
+        grad.setColorAt(1.0, QColor(255, 255, 255, 0))
+        painter.fillRect(0, 0, w, h, grad)
+        painter.end()
+
+
+# ─────────────────────────────────────────
 # UPDATE WORKERS
 # ─────────────────────────────────────────
 
@@ -1084,7 +1132,7 @@ class ApexWindow(QMainWindow):
         layout.addLayout(brand_v)
         layout.addStretch()
 
-        self.mkt_label = QLabel("● CHECKING...")
+        self.mkt_label = SweepLabel("● CHECKING...")
         self.mkt_label.setStyleSheet(
             f"font-size:10px;font-weight:600;letter-spacing:2px;"
             f"color:{C['muted']};padding:3px 12px;"
@@ -1630,12 +1678,13 @@ class ApexWindow(QMainWindow):
             ck = c.get_clock()
             if ck.is_open:
                 self._mkt_open_prev = True
+                self.mkt_label.stop_sweep()
                 self.mkt_label.setText("● MARKET OPEN")
                 self.mkt_label.setStyleSheet(
                     f"font-size:10px;font-weight:600;letter-spacing:2px;"
                     f"color:{C['green']};padding:3px 12px;"
                     f"border:1px solid {C['green']};border-radius:12px;"
-                    f"background:rgba(63,184,154,0.08);"
+                    f"background:rgba(122,181,162,0.08);"
                 )
             else:
                 self._mkt_open_prev = False
@@ -1643,9 +1692,11 @@ class ApexWindow(QMainWindow):
                 self.mkt_label.setText(f"● CLOSED  {nxt}")
                 self.mkt_label.setStyleSheet(
                     f"font-size:10px;font-weight:600;letter-spacing:2px;"
-                    f"color:{C['muted']};padding:3px 12px;"
-                    f"border:1px solid {C['border']};border-radius:12px;"
+                    f"color:{C['red']};padding:3px 12px;"
+                    f"border:1px solid rgba(194,142,151,0.5);border-radius:12px;"
+                    f"background:rgba(194,142,151,0.06);"
                 )
+                self.mkt_label.start_sweep()
             # Re-sync all running dots now that we know market state
             for side, tab in self._bot_tabs.items():
                 bot_ctrl = getattr(tab, "bot_ctrl", None)

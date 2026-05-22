@@ -33,8 +33,14 @@ _BASE_CSS = """
   --purple:#8a93c9;
 }
 * { box-sizing: border-box; }
-html, body {
-  margin: 0; padding: 0;
+html {
+  background: var(--bg);
+}
+body {
+  margin: 0;
+  padding: 0;
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
   background: linear-gradient(135deg, var(--bg), var(--bg2));
   color: var(--text);
   font-family: 'JetBrains Mono', ui-monospace, monospace;
@@ -112,7 +118,8 @@ def landing_page(signed_in_user: dict | None = None) -> HTMLResponse:
     body = f"""<!doctype html>
 <html><head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0c0f16">
   <title>APEX — Trading platform</title>
   <style>{_BASE_CSS}
     nav      {{ display:flex; align-items:center; gap:10px;
@@ -238,7 +245,8 @@ def login_page(error: str | None = None) -> HTMLResponse:
     body = f"""<!doctype html>
 <html><head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0c0f16">
   <title>APEX — Sign in</title>
   <style>{_BASE_CSS}</style>
 </head><body>
@@ -272,7 +280,8 @@ def signup_page(error: str | None = None,
     body = f"""<!doctype html>
 <html><head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0c0f16">
   <title>APEX — Create account</title>
   <style>{_BASE_CSS}</style>
 </head><body>
@@ -307,6 +316,17 @@ def signup_page(error: str | None = None,
   </div>
 </body></html>"""
     return HTMLResponse(body, status_code=400 if error else 200)
+
+
+_SAFE_AREA_CSS = """
+  html { background: var(--bg); }
+  body {
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
+    background: linear-gradient(135deg, var(--bg), var(--bg2));
+    min-height: calc(100vh + env(safe-area-inset-top));
+  }
+"""
 
 
 def dashboard_page(user: dict, tab: str = "overview") -> HTMLResponse:
@@ -380,9 +400,10 @@ def dashboard_page(user: dict, tab: str = "overview") -> HTMLResponse:
     body = f"""<!doctype html>
 <html><head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0c0f16">
   <title>APEX — Dashboard</title>
-  <style>{_BASE_CSS}
+  <style>{_BASE_CSS}{_SAFE_AREA_CSS}
     .tabbar  {{ display:flex; gap:0; overflow-x:auto;
                  border-bottom: 1px solid var(--border);
                  margin: 4px 0 18px;
@@ -395,11 +416,12 @@ def dashboard_page(user: dict, tab: str = "overview") -> HTMLResponse:
     .tab:hover  {{ color: var(--text); }}
     .tab.active {{ color: var(--text);
                     border-bottom-color: var(--green); }}
-    .botcard {{ margin-bottom: 14px; }}
+    .botcard {{ margin-bottom: 14px; cursor: pointer; }}
     .botcard .head {{ display:flex; align-items:center; gap:8px;
                        margin-bottom: 10px; }}
-    .botcard .dot {{ width:8px; height:8px; border-radius:4px;
-                      background: var(--muted); display:inline-block; }}
+    .botcard .dot {{ width:12px; height:12px; border-radius:6px;
+                      background: var(--muted); display:inline-block;
+                      flex-shrink:0; }}
     .dot.run    {{ background: var(--green); animation: pulse 1.4s ease-in-out infinite; }}
     .dot.stop   {{ background: var(--muted); }}
     .actions    {{ display: flex; gap: 8px; margin-top: 12px;
@@ -420,6 +442,19 @@ def dashboard_page(user: dict, tab: str = "overview") -> HTMLResponse:
                       border-color: var(--border); }}
     .hint       {{ color: var(--muted); font-size: 10px;
                     margin-top: 10px; line-height: 1.5; }}
+    .detail     {{ display:none; margin-top:14px;
+                    border-top: 1px solid var(--border); padding-top:12px; }}
+    .detail.open {{ display:block; }}
+    .pos-row    {{ display:flex; justify-content:space-between;
+                    padding: 8px 0; border-bottom:1px solid var(--border);
+                    font-size:11px; }}
+    .pos-row:last-child {{ border-bottom:none; }}
+    .expand-hint {{ color:var(--muted); font-size:9px;
+                     letter-spacing:1px; margin-top:6px; }}
+    select.period {{ background:var(--panel2); color:var(--text);
+                      border:1px solid var(--border); border-radius:5px;
+                      padding:4px 8px; font-family:inherit; font-size:10px;
+                      letter-spacing:1px; cursor:pointer; }}
     @keyframes pulse {{
       0%   {{ opacity: 1; }}
       50%  {{ opacity: 0.25; }}
@@ -433,13 +468,19 @@ def dashboard_page(user: dict, tab: str = "overview") -> HTMLResponse:
 
     <div class="tabbar">{tabs_html}</div>
 
-    <!-- Summary header (visible on every tab, just like the desktop's
-         top-of-page strip that always shows portfolio value + day P/L). -->
+    <!-- Summary header -->
     <div class="card">
-      <h2>{name.upper()}</h2>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
+        <h2 style="margin:0;">{name.upper()}</h2>
+        <select class="period" id="periodSel" onchange="onPeriodChange()">
+          <option value="1D">Today</option>
+          <option value="1W">1 Week</option>
+          <option value="1M">1 Month</option>
+        </select>
+      </div>
       <div class="stat"><span class="k">TOTAL EQUITY</span>
         <span class="v" id="total">—</span></div>
-      <div class="stat"><span class="k">TODAY'S P/L</span>
+      <div class="stat"><span class="k">P/L  <span id="periodLabel">TODAY</span></span>
         <span class="v" id="today">—</span></div>
       <div class="stat"><span class="k">SERVER</span>
         <span class="v" id="srv">checking…</span></div>
@@ -457,6 +498,9 @@ def dashboard_page(user: dict, tab: str = "overview") -> HTMLResponse:
             {{minimumFractionDigits: 2, maximumFractionDigits: 2}});
     const fmtPct = n => n == null ? "—" :
       (n >= 0 ? "+" : "") + n.toFixed(2) + "%";
+
+    let _lastState = null;
+    let _periodCache = {{}};  // period → {{total, today_pl, today_pct}}
 
     function renderBotsMini(state) {{
       const c = document.getElementById("botsmini");
@@ -481,19 +525,64 @@ def dashboard_page(user: dict, tab: str = "overview") -> HTMLResponse:
       }}
     }}
 
-    function renderTotals(state) {{
+    function computeTotals(state) {{
       let total = 0, today = 0, haveAny = false;
       for (const side of SIDES) {{
         const s = state.bots[side] || {{}};
         if (s.equity != null) {{ total += s.equity; haveAny = true; }}
         if (s.today_pl != null) {{ today += s.today_pl; }}
       }}
+      return {{ total: haveAny ? total : null, today_pl: today, haveAny }};
+    }}
+
+    function renderTotals(total, today_pl, haveAny) {{
       const tot = document.getElementById("total");
       if (tot) tot.textContent = haveAny ? fmt$(total) : "—";
       const t = document.getElementById("today");
       if (t) {{
-        t.textContent = haveAny ? fmt$(today) : "—";
-        t.className = "v " + (today >= 0 ? "pos" : "neg");
+        t.textContent = haveAny ? fmt$(today_pl) : "—";
+        t.className = "v " + ((today_pl||0) >= 0 ? "pos" : "neg");
+      }}
+    }}
+
+    function onPeriodChange() {{
+      const sel = document.getElementById("periodSel");
+      const lbl = document.getElementById("periodLabel");
+      const map = {{"1D":"TODAY","1W":"THIS WEEK","1M":"THIS MONTH"}};
+      lbl.textContent = map[sel.value] || "TODAY";
+      if (sel.value === "1D") {{
+        // Use cached today data
+        if (_lastState) {{
+          const t = computeTotals(_lastState);
+          renderTotals(t.total, t.today_pl, t.haveAny);
+        }}
+      }} else {{
+        // Try to fetch portfolio history for the period
+        fetchPeriodPl(sel.value);
+      }}
+    }}
+
+    async function fetchPeriodPl(period) {{
+      try {{
+        // Sum up each bot's history for the period
+        let totalPl = 0, haveAny = false;
+        for (const side of SIDES) {{
+          const r = await fetch(
+            `/web/api/portfolio/history?side=${{side}}&period=${{period}}`);
+          if (!r.ok) continue;
+          const j = await r.json();
+          if (j.history && j.history.length > 0) {{
+            const first = j.history[0].equity;
+            const last  = j.history[j.history.length-1].equity;
+            if (first && last) {{ totalPl += (last - first); haveAny = true; }}
+          }}
+        }}
+        if (haveAny) {{
+          const t = computeTotals(_lastState || {{bots:{{}}}});
+          renderTotals(t.total, totalPl, true);
+        }}
+      }} catch(e) {{
+        // Silently ignore — period history is best-effort
       }}
     }}
 
@@ -501,16 +590,14 @@ def dashboard_page(user: dict, tab: str = "overview") -> HTMLResponse:
       const c = document.getElementById("bots");
       if (!c) return;
       c.innerHTML = "";
-      let total = 0, today = 0, haveAny = false;
       for (const side of SIDES) {{
         const s = state.bots[side] || {{}};
-        if (s.equity != null) {{ total += s.equity; haveAny = true; }}
-        if (s.today_pl != null) {{ today += s.today_pl; }}
         const running = s.running === true;
         const dotCls = running ? "dot run" : "dot stop";
         const dis = (state.linked === false) ? "disabled" : "";
+        const nPos = s.positions == null ? 0 : s.positions;
         c.insertAdjacentHTML("beforeend", `
-          <div class="card botcard">
+          <div class="card botcard" id="card-${{side}}" onclick="toggleDetail('${{side}}')">
             <div class="head">
               <span class="${{dotCls}}"></span>
               <h2 style="margin:0;flex:1;">${{side}}</h2>
@@ -520,24 +607,27 @@ def dashboard_page(user: dict, tab: str = "overview") -> HTMLResponse:
               <span class="v ${{(s.today_pl||0) >= 0 ? 'pos' : 'neg'}}">
                 ${{fmt$(s.today_pl)}} (${{fmtPct(s.today_pct)}})</span></div>
             <div class="stat"><span class="k">POSITIONS</span>
-              <span class="v">${{s.positions == null ? '—' : s.positions}}</span></div>
+              <span class="v">${{nPos}}</span></div>
             <div class="stat"><span class="k">STATUS</span>
               <span class="v">${{running ? 'RUNNING' : 'STOPPED'}}</span></div>
-            <div class="actions">
-              <button class="btn go" ${{running || dis ? 'disabled' : ''}}
-                      onclick="act('${{side}}','start')">▶  START</button>
-              <button class="btn stop" ${{!running || dis ? 'disabled' : ''}}
-                      onclick="act('${{side}}','stop')">■  STOP</button>
-              <button class="btn liq" ${{dis ? 'disabled' : ''}}
-                      onclick="liq('${{side}}')">⚠  LIQUIDATE</button>
+            <p class="expand-hint">▼ TAP FOR DETAILS</p>
+            <!-- Detail panel (hidden by default) -->
+            <div class="detail" id="detail-${{side}}">
+              <div id="positions-${{side}}" style="font-size:11px;color:var(--muted);">
+                Loading positions…
+              </div>
+              <div class="actions" onclick="event.stopPropagation()">
+                <button class="btn go" ${{running || dis ? 'disabled' : ''}}
+                        onclick="act('${{side}}','start')">▶  START</button>
+                <button class="btn stop" ${{!running || dis ? 'disabled' : ''}}
+                        onclick="act('${{side}}','stop')">■  STOP</button>
+                <button class="btn liq" ${{dis ? 'disabled' : ''}}
+                        onclick="liq('${{side}}',${{nPos}})">⚠  LIQUIDATE</button>
+              </div>
             </div>
           </div>
         `);
       }}
-      document.getElementById("total").textContent = haveAny ? fmt$(total) : "—";
-      const t = document.getElementById("today");
-      t.textContent = haveAny ? fmt$(today) : "—";
-      t.className = "v " + (today >= 0 ? "pos" : "neg");
       if (state.linked === false) {{
         c.insertAdjacentHTML("afterbegin", `
           <div class="card">
@@ -549,15 +639,64 @@ def dashboard_page(user: dict, tab: str = "overview") -> HTMLResponse:
       }}
     }}
 
+    const _detailOpen = {{}};
+    function toggleDetail(side) {{
+      const el = document.getElementById(`detail-${{side}}`);
+      if (!el) return;
+      const open = el.classList.toggle("open");
+      _detailOpen[side] = open;
+      if (open) fetchPositions(side);
+    }}
+
+    async function fetchPositions(side) {{
+      const el = document.getElementById(`positions-${{side}}`);
+      if (!el) return;
+      try {{
+        const r = await fetch(`/web/api/bots/${{side}}/positions`);
+        const j = await r.json();
+        if (!j.linked) {{
+          el.innerHTML = '<span style="color:var(--muted);">No broker linked.</span>';
+          return;
+        }}
+        if (!j.positions || j.positions.length === 0) {{
+          el.innerHTML = '<span style="color:var(--muted);">No open positions.</span>';
+          return;
+        }}
+        let html = '';
+        for (const p of j.positions) {{
+          const plColor = p.pl >= 0 ? 'var(--green)' : 'var(--red)';
+          const sign = p.pl >= 0 ? '+' : '';
+          html += `<div class="pos-row">
+            <span><b>${{p.symbol}}</b> ×${{p.qty.toFixed(0)}}</span>
+            <span>${{sign}}$${{Math.abs(p.pl).toFixed(2)}}
+              <span style="color:var(--muted);">(${{p.pl_pct >= 0 ? '+' : ''}}${{p.pl_pct.toFixed(1)}}%)</span>
+            </span>
+          </div>`;
+        }}
+        el.innerHTML = html;
+      }} catch(e) {{
+        el.innerHTML = '<span style="color:var(--red);">Could not load positions.</span>';
+      }}
+    }}
+
     async function refresh() {{
       try {{
         const r = await fetch("/web/api/status");
         const j = await r.json();
+        _lastState = j;
         document.getElementById("srv").textContent = "OK";
         document.getElementById("srv").className = "v pos";
-        renderTotals(j);
+        const t = computeTotals(j);
+        const sel = document.getElementById("periodSel");
+        if (!sel || sel.value === "1D") {{
+          renderTotals(t.total, t.today_pl, t.haveAny);
+        }}
         renderBots(j);
         renderBotsMini(j);
+        // Re-fetch open detail panels
+        for (const side of SIDES) {{
+          if (_detailOpen[side]) fetchPositions(side);
+        }}
       }} catch (e) {{
         document.getElementById("srv").textContent = "OFFLINE";
         document.getElementById("srv").className = "v neg";
@@ -575,16 +714,18 @@ def dashboard_page(user: dict, tab: str = "overview") -> HTMLResponse:
       refresh();
     }}
 
-    async function liq(side) {{
+    async function liq(side, nPos) {{
+      const posText = nPos > 0
+        ? `${{nPos}} open position${{nPos > 1 ? 's' : ''}} will be sold at market price.`
+        : 'All open positions will be sold at market price.';
       if (!confirm(
-        `LIQUIDATE all positions held by ${{side}}?\\n\\n` +
-        `This sells every open position immediately at market. ` +
-        `It cannot be undone.`)) return;
+        `LIQUIDATE ${{side}} bot?\\n\\n` + posText +
+        `\\n\\nThis cannot be undone. Proceed?`)) return;
       try {{
         const r = await fetch(`/web/api/bots/${{side}}/liquidate`,
                               {{ method: "POST" }});
         const j = await r.json();
-        alert(j.detail || (r.ok ? "Liquidate request sent."
+        alert(j.detail || (r.ok ? "Liquidation order sent."
                                  : "Liquidate failed."));
       }} catch (e) {{ alert(e.message); }}
       refresh();

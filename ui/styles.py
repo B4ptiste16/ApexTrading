@@ -8,9 +8,9 @@ COLORS = {
     # standard monitor brightness; these are desaturated by ~25 %.
     # Backgrounds also moved one step lighter so the gradient feels
     # less cave-like.
-    "green":  "#5fa68f",   # was #3fb89a (toned-down teal)
-    "red":    "#b66f7a",   # was #c75c6b (muted rose)
-    "orange": "#c89060",   # was #d99a52
+    "green":  "#7ab5a2",   # was #5fa68f → softer sage-teal
+    "red":    "#c28e97",   # was #b66f7a → lighter rose
+    "orange": "#c8a070",   # was #c89060 → lighter amber
     "yellow": "#cdc578",   # was #d6c95e
     "purple": "#8a93c9",   # kept — already soft
     "bg":     "#161a26",   # gradient start  (was #0c0f16)
@@ -115,7 +115,7 @@ QPushButton#tabPlayBtn {{
 
 QPushButton#tabPlayBtn:hover {{
     color: {C['green']};
-    background: rgba(63,184,154,0.15);
+    background: rgba(122,181,162,0.15);
 }}
 
 QPushButton#tabStopBtn {{
@@ -132,7 +132,7 @@ QPushButton#tabStopBtn {{
 
 QPushButton#tabStopBtn:hover {{
     color: {C['red']};
-    background: rgba(199,92,107,0.15);
+    background: rgba(194,142,151,0.15);
 }}
 
 QPushButton#tabRemoveBtn {{
@@ -249,35 +249,35 @@ QPushButton:hover {{
 }}
 
 QPushButton#runBtn {{
-    background: rgba(63,184,154,0.10);
+    background: rgba(122,181,162,0.10);
     color: {C['green']};
-    border: 1px solid rgba(63,184,154,0.55);
+    border: 1px solid rgba(122,181,162,0.55);
 }}
 
 QPushButton#runBtn:hover {{
-    background: rgba(63,184,154,0.18);
+    background: rgba(122,181,162,0.18);
     border-color: {C['green']};
 }}
 
 QPushButton#stopBtn {{
-    background: rgba(199,92,107,0.10);
+    background: rgba(194,142,151,0.10);
     color: {C['red']};
-    border: 1px solid rgba(199,92,107,0.55);
+    border: 1px solid rgba(194,142,151,0.55);
 }}
 
 QPushButton#stopBtn:hover {{
-    background: rgba(199,92,107,0.18);
+    background: rgba(194,142,151,0.18);
     border-color: {C['red']};
 }}
 
 QPushButton#dangerBtn {{
-    background: rgba(199,92,107,0.08);
+    background: rgba(194,142,151,0.08);
     color: {C['red']};
-    border: 1px solid rgba(199,92,107,0.45);
+    border: 1px solid rgba(194,142,151,0.45);
 }}
 
 QPushButton#dangerBtn:hover {{
-    background: rgba(199,92,107,0.16);
+    background: rgba(194,142,151,0.16);
     border-color: {C['red']};
 }}
 
@@ -315,20 +315,20 @@ QPushButton#quitBtn {{
 
 QPushButton#quitBtn:hover {{
     color: {C['red']};
-    border-color: rgba(182,111,122,0.55);
-    background: rgba(182,111,122,0.08);
+    border-color: rgba(194,142,151,0.55);
+    background: rgba(194,142,151,0.08);
 }}
 
 QPushButton#addBotBtn {{
-    background: rgba(63,184,154,0.08);
+    background: rgba(122,181,162,0.08);
     color: {C['green']};
-    border: 1px solid rgba(63,184,154,0.40);
+    border: 1px solid rgba(122,181,162,0.40);
     font-size: 10px;
     padding: 6px 14px;
 }}
 
 QPushButton#addBotBtn:hover {{
-    background: rgba(63,184,154,0.16);
+    background: rgba(122,181,162,0.16);
     border-color: {C['green']};
 }}
 
