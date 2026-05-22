@@ -16,7 +16,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 
 from . import (auth, database, credentials as creds,
-               bots as marketplace, web, bot_runner, scheduler)
+               bots as marketplace, web, bot_runner, scheduler,
+               friends)
 from .schemas import SignupRequest, LoginRequest
 
 
@@ -27,6 +28,7 @@ async def _lifespan(app: FastAPI):
     database.init_db()
     creds.init_credentials_table()
     marketplace.init_marketplace_table()
+    friends.init_friends_db()
     # V7.1.12: kick off the once-a-minute schedule reconciliation loop.
     # Runs forever inside the FastAPI event loop until shutdown.
     scheduler.start_loop()
@@ -627,6 +629,172 @@ def web_api_portfolio_history(request: Request,
         return {"history": result, "linked": True}
     except Exception as e:
         return {"history": [], "linked": True, "error": str(e)}
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# V3.0.0 — Friends + share-settings
+# All endpoints are bearer-authed.
+# ──────────────────────────────────────────────────────────────────────────────
+
+@app.get("/friends")
+def api_friends_list(authorization: str | None = Header(default=None)):
+    user = _current_user(authorization)
+    return friends.list_friends(user["id"])
+
+
+@app.post("/friends/request")
+def api_friend_request(payload: dict,
+                       authorization: str | None = Header(default=None)):
+    user = _current_user(authorization)
+    target_username = (payload or {}).get("username", "").strip().lower()
+    target_id_raw   = (payload or {}).get("user_id")
+    target = None
+    if target_username:
+        target = database.get_user_by_username(target_username)
+    elif target_id_raw is not None:
+        try:
+            target = database.get_user_by_id(int(target_id_raw))
+        except Exception:
+            target = None
+    if not target:
+        raise HTTPException(404, "User not found.")
+    result = friends.send_request(user["id"], target["id"])
+    if not result.get("ok"):
+        raise HTTPException(400, result.get("detail", "Request failed."))
+    return result
+
+
+@app.post("/friends/{friendship_id}/respond")
+def api_friend_respond(friendship_id: int, payload: dict,
+                       authorization: str | None = Header(default=None)):
+    user = _current_user(authorization)
+    accept = bool((payload or {}).get("accept", False))
+    result = friends.respond_to_request(user["id"], friendship_id, accept)
+    if not result.get("ok"):
+        raise HTTPException(400, result.get("detail", "Response failed."))
+    return result
+
+
+@app.delete("/friends/{other_user_id}")
+def api_friend_remove(other_user_id: int,
+                      authorization: str | None = Header(default=None)):
+    user = _current_user(authorization)
+    return friends.remove_friend(user["id"], other_user_id)
+
+
+@app.get("/friends/search")
+def api_friend_search(q: str = "", limit: int = 20,
+                      authorization: str | None = Header(default=None)):
+    user = _current_user(authorization)
+    return {"users": friends.search_users(q, limit=min(limit, 50),
+                                          exclude_id=user["id"])}
+
+
+@app.get("/share-settings")
+def api_share_get(authorization: str | None = Header(default=None)):
+    user = _current_user(authorization)
+    return friends.get_share_settings(user["id"])
+
+
+@app.put("/share-settings")
+def api_share_set(payload: dict,
+                  authorization: str | None = Header(default=None)):
+    user = _current_user(authorization)
+    if not isinstance(payload, dict):
+        raise HTTPException(400, "Body must be a JSON object.")
+    return friends.set_share_settings(user["id"], payload)
+
+
+@app.get("/users/{username}/profile")
+def api_user_profile(username: str,
+                     authorization: str | None = Header(default=None)):
+    """Return whatever the target user has chosen to share with this
+    viewer. Friends see the 'friends' tier; non-friends see only the
+    'public' tier (and may not see anything at all)."""
+    viewer = _current_user(authorization)
+    target = database.get_user_by_username(username.strip().lower())
+    if not target:
+        raise HTTPException(404, "User not found.")
+    settings = friends.get_share_settings(target["id"])
+    is_friend = friends.are_friends(viewer["id"], target["id"])
+    is_self   = viewer["id"] == target["id"]
+    tier      = "self" if is_self else ("friends" if is_friend else "public")
+
+    def visible(key: str) -> bool:
+        if is_self:
+            return True
+        if is_friend and settings.get(f"share_{key}_friends"):
+            return True
+        if settings.get(f"share_{key}_public"):
+            return True
+        return False
+
+    out = {
+        "user":      {"id": target["id"], "username": target["username"],
+                      "display_name": target["display_name"]},
+        "tier":      tier,
+        "is_friend": is_friend,
+        "shows": {
+            "broker":  visible("broker"),
+            "daily":   visible("daily"),
+            "monthly": visible("monthly"),
+            "yearly":  visible("yearly"),
+            "bots":    visible("bots"),
+        },
+        "allow_bot_download": bool(settings.get("allow_bot_download", 0))
+                              and (is_friend or settings.get("share_bots_public")),
+    }
+    # Pull live data only for fields the viewer can see — saves Alpaca
+    # round-trips for fields that would just be redacted.
+    if any(out["shows"].values()):
+        # Broker is trivially derivable from the user's stored creds.
+        if out["shows"]["broker"]:
+            blob = creds.load_credentials(target["id"]) or {}
+            brokers = []
+            if any(k.startswith("ALPACA_API_KEY") for k in blob):
+                brokers.append("Alpaca")
+            if any(k.startswith("IBKR_") for k in blob):
+                brokers.append("IBKR")
+            out["broker"] = brokers
+    # Per-period P&L is computed on demand from the target's Alpaca
+    # accounts. Aggregate across LONG/SHORT/DAY for a single headline
+    # number per period; the client can request a finer breakdown later.
+    if out["shows"]["daily"] or out["shows"]["monthly"] or out["shows"]["yearly"]:
+        out["pl"] = _pl_for_user(target["id"], out["shows"])
+    return out
+
+
+def _pl_for_user(user_id: int, shows: dict) -> dict:
+    """Aggregate P&L across all linked bot accounts for the periods
+    the viewer is allowed to see."""
+    period_map = {"daily": "1D", "monthly": "1M", "yearly": "1A"}
+    result: dict = {}
+    for label, alpaca_period in period_map.items():
+        if not shows.get(label):
+            continue
+        total_pl = 0.0
+        first_eq = 0.0
+        last_eq  = 0.0
+        try:
+            from alpaca.trading.requests import GetPortfolioHistoryRequest
+            for side in ("LONG", "SHORT", "DAY"):
+                c = _alpaca_client_for(user_id, side)
+                if c is None:
+                    continue
+                h = c.get_portfolio_history(
+                    GetPortfolioHistoryRequest(period=alpaca_period,
+                                                timeframe="1D"))
+                eq = [e for e in (getattr(h, "equity", []) or []) if e]
+                if len(eq) >= 2:
+                    total_pl += eq[-1] - eq[0]
+                    first_eq += eq[0]
+                    last_eq  += eq[-1]
+        except Exception:
+            pass
+        pct = ((last_eq / first_eq) - 1) * 100 if first_eq else 0.0
+        result[label] = {"pl": round(total_pl, 2),
+                          "pct": round(pct, 2)}
+    return result
 
 
 @app.post("/web/api/bots/{side}/liquidate", include_in_schema=False)
