@@ -485,10 +485,23 @@ def api_makebot_generate(payload: dict,
             429,
             f"Free-AI rate limit reached: {_MAKEBOT_RATE_LIMIT} calls "
             f"per hour per user. Wait a bit or paste your own API key.")
+    # Try APEX's pooled key first; fall back to this user's own
+    # synced Anthropic key if the server doesn't have a pooled one.
+    # Either way the user doesn't need to paste a key into the desktop
+    # app — "free" means "free of the paste-your-key step".
     server_key = _os.environ.get("APEX_ANTHROPIC_KEY") or _os.environ.get("ANTHROPIC_API_KEY")
     if not server_key:
+        try:
+            stored = creds.load_credentials(user["id"]) or {}
+            server_key = (stored.get("ANTHROPIC_API_KEY")
+                          or stored.get("ANTHROPIC_KEY") or "")
+        except Exception:
+            server_key = ""
+    if not server_key:
         raise HTTPException(503,
-            "Free AI not configured on this server. Use your own key.")
+            "Free AI not configured on this server, and no Anthropic key "
+            "synced to your APEX account. Sync your key from the desktop "
+            "Tools tab or paste a key into the form.")
     prompt = (payload or {}).get("prompt", "").strip()
     system = (payload or {}).get("system", "").strip()
     if not prompt or not system:
