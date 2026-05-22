@@ -17,7 +17,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response
 
 from . import (auth, database, credentials as creds,
                bots as marketplace, web, bot_runner, scheduler,
-               friends)
+               friends, oauth as google_oauth, email_send)
 from .schemas import SignupRequest, LoginRequest
 
 
@@ -103,9 +103,187 @@ def signup(data: SignupRequest):
     display_name = (data.display_name or "").strip() or username
 
     hashed = auth.hash_password(data.password)
-    user   = database.create_user(username, email, hashed, display_name)
-    token  = auth.create_token(user["id"], user["email"])
+    # If Resend isn't configured on the server, auto-verify so the
+    # user isn't stuck in an unverified state with no way to escape.
+    auto_verify = not email_send.is_configured()
+    user = database.create_user(username, email, hashed, display_name,
+                                is_verified=1 if auto_verify else 0)
+    if not auto_verify:
+        _send_verification_email(user)
+    token = auth.create_token(user["id"], user["email"])
+    return {"token": token, "user": _public(database.get_user_by_id(user["id"]))}
+
+
+def _send_verification_email(user: dict) -> None:
+    import secrets as _secrets
+    token = _secrets.token_urlsafe(32)
+    database.set_verification_token(user["id"], token)
+    try:
+        email_send.send_verification(user["email"],
+                                      user["display_name"] or user["username"],
+                                      token)
+    except Exception as e:
+        print(f"[verify] send failed: {e}", flush=True)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# V3 wave 4 — Google OAuth + email verification + profile management
+# ──────────────────────────────────────────────────────────────────────────────
+
+
+@app.get("/auth/google/config")
+def auth_google_config():
+    """Tells the client whether Google sign-in is available + the
+    client_id needed to start the auth URL."""
+    return {"configured": google_oauth.is_configured(),
+            "client_id":  google_oauth.client_id()}
+
+
+@app.post("/auth/google/exchange")
+def auth_google_exchange(payload: dict):
+    """Desktop sends {code, redirect_uri} after catching the OAuth
+    callback on a loopback HTTP listener. We swap the code for the
+    user's email via Google's token endpoint, then match or create
+    an APEX account and return our own JWT."""
+    code         = (payload or {}).get("code", "").strip()
+    redirect_uri = (payload or {}).get("redirect_uri", "").strip()
+    if not code or not redirect_uri:
+        raise HTTPException(400, "Missing code or redirect_uri.")
+    if not google_oauth.is_configured():
+        raise HTTPException(
+            503,
+            "Google sign-in is not configured on this server.")
+    try:
+        info = google_oauth.exchange_code(code, redirect_uri)
+    except Exception as e:
+        raise HTTPException(400, f"Google sign-in failed: {e}")
+
+    sub   = info["sub"]
+    email = info["email"]
+    name  = info["name"]
+
+    # Match by Google subject ID first (rock-solid), then by email
+    # (covers users who originally signed up with email/password and
+    # are now adding Google as an auth method).
+    user = database.get_user_by_google_sub(sub) if sub else None
+    if not user:
+        existing = database.get_user_by_email(email)
+        if existing:
+            if sub:
+                database.link_google_sub(existing["id"], sub)
+            user = database.get_user_by_id(existing["id"])
+        else:
+            # Brand-new user — derive a username and create them.
+            base = google_oauth.random_username_from(email)
+            uname = base
+            while database.get_user_by_username(uname):
+                uname = google_oauth.random_username_from(email)
+            user = database.create_user(
+                username=uname, email=email,
+                hashed_password="__google_oauth__",
+                display_name=name,
+                google_sub=sub,
+                # Google already proved they own the address.
+                is_verified=1 if info.get("email_verified") else 0,
+            )
+
+    token = auth.create_token(user["id"], user["email"])
     return {"token": token, "user": _public(user)}
+
+
+@app.get("/auth/verify")
+def auth_verify(token: str):
+    """Public link clicked from the verification email."""
+    user = database.get_user_by_verification_token(token)
+    if not user:
+        return HTMLResponse(
+            "<html><body style='font-family:sans-serif;"
+            "padding:40px;text-align:center;'>"
+            "<h2>Link expired or already used</h2>"
+            "<p>Open APEX and request a new verification email "
+            "from the Account tab.</p></body></html>",
+            status_code=400)
+    database.mark_verified(user["id"])
+    return HTMLResponse(
+        "<html><body style='font-family:sans-serif;"
+        "padding:40px;text-align:center;background:#0c0f16;color:#d8dde8;'>"
+        "<h2 style='color:#3fb89a;letter-spacing:4px;'>◈ APEX</h2>"
+        "<p>Email confirmed — you can close this tab and head back to "
+        "APEX.</p></body></html>")
+
+
+@app.post("/auth/resend-verification")
+def auth_resend_verification(authorization: str | None = Header(default=None)):
+    user = _current_user(authorization)
+    if user.get("is_verified"):
+        return {"ok": True, "already_verified": True}
+    if not email_send.is_configured():
+        # Dev mode — just flip the bit so the user isn't stuck.
+        database.mark_verified(user["id"])
+        return {"ok": True, "auto_verified": True,
+                "detail": "Email service not configured — auto-verified."}
+    _send_verification_email(user)
+    return {"ok": True, "sent_to": user["email"]}
+
+
+@app.put("/auth/profile")
+def auth_update_profile(payload: dict,
+                         authorization: str | None = Header(default=None)):
+    user = _current_user(authorization)
+    if not isinstance(payload, dict):
+        raise HTTPException(400, "Body must be a JSON object.")
+    updates = {
+        "display_name": payload.get("display_name"),
+        "avatar_url":   payload.get("avatar_url"),
+        "phone":        payload.get("phone"),
+    }
+    updates = {k: v for k, v in updates.items() if v is not None}
+    if not updates:
+        return _public(user)
+    updated = database.update_user_profile(user["id"], **updates)
+    return _public(updated)
+
+
+@app.put("/auth/password")
+def auth_change_password(payload: dict,
+                          authorization: str | None = Header(default=None)):
+    user = _current_user(authorization)
+    current_pw = (payload or {}).get("current_password", "")
+    new_pw     = (payload or {}).get("new_password", "")
+    if user["hashed_password"] == "__google_oauth__":
+        # Google-only accounts can SET (not change) a password — they
+        # weren't authenticated via password to begin with.
+        if not new_pw or len(new_pw) < 8:
+            raise HTTPException(400, "Password must be at least 8 characters.")
+        database.update_user_password(user["id"], auth.hash_password(new_pw))
+        return {"ok": True, "first_password": True}
+    if not auth.verify_password(current_pw, user["hashed_password"]):
+        raise HTTPException(401, "Current password is incorrect.")
+    if not new_pw or len(new_pw) < 8:
+        raise HTTPException(400, "New password must be at least 8 characters.")
+    database.update_user_password(user["id"], auth.hash_password(new_pw))
+    return {"ok": True}
+
+
+@app.put("/auth/email")
+def auth_change_email(payload: dict,
+                       authorization: str | None = Header(default=None)):
+    user = _current_user(authorization)
+    new_email = (payload or {}).get("new_email", "").strip().lower()
+    if not new_email or "@" not in new_email:
+        raise HTTPException(400, "Invalid email address.")
+    if database.get_user_by_email(new_email):
+        raise HTTPException(400, "An account with this email already exists.")
+    updated = database.update_user_email(user["id"], new_email)
+    if email_send.is_configured():
+        _send_verification_email(updated)
+        sent = True
+    else:
+        database.mark_verified(updated["id"])
+        sent = False
+    return {"ok": True, "verification_sent": sent,
+            "user": _public(database.get_user_by_id(user["id"]))}
+
 
 
 @app.post("/auth/login")

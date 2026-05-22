@@ -85,6 +85,131 @@ class _PingWorker(QThread):
             self.result.emit(False)
 
 
+class _GoogleOAuthWorker(QThread):
+    """Spawn a loopback HTTP listener, drive the standard OAuth2 'native
+    app' flow, then hand the resulting code to the APEX server for
+    exchange. All network operations live off the Qt main thread."""
+    success = pyqtSignal(str, dict)
+    failure = pyqtSignal(str)
+
+    def __init__(self, client_id: str, server_url: str):
+        super().__init__()
+        self.client_id  = client_id
+        self.server_url = server_url
+
+    def run(self):
+        import http.server
+        import secrets as _secrets
+        import socket
+        import threading
+        import urllib.parse
+        import webbrowser
+
+        # 1. Pick a free loopback port. Google's Desktop-App client type
+        # accepts ANY 127.0.0.1:N redirect URI without pre-registration.
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+        s.close()
+        redirect_uri = f"http://127.0.0.1:{port}"
+        state = _secrets.token_urlsafe(16)
+
+        # 2. Build the auth URL
+        params = {
+            "client_id":     self.client_id,
+            "redirect_uri":  redirect_uri,
+            "response_type": "code",
+            "scope":         "openid email profile",
+            "state":         state,
+            "access_type":   "online",
+            "prompt":        "select_account",
+        }
+        auth_url = ("https://accounts.google.com/o/oauth2/v2/auth?"
+                    + urllib.parse.urlencode(params))
+
+        # 3. Spin up a single-request HTTP server to catch the redirect.
+        result: dict = {}
+
+        class _Handler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self_inner):
+                qs = urllib.parse.urlparse(self_inner.path).query
+                qd = dict(urllib.parse.parse_qsl(qs))
+                result["code"]  = qd.get("code", "")
+                result["state"] = qd.get("state", "")
+                result["error"] = qd.get("error", "")
+                body = (
+                    "<html><body style='font-family:sans-serif;"
+                    "padding:40px;text-align:center;background:#0c0f16;"
+                    "color:#d8dde8;'><h2 style='color:#3fb89a;letter-spacing:4px;'>"
+                    "◈ APEX</h2><p>Sign-in received. You can close this tab "
+                    "and return to APEX.</p></body></html>"
+                ).encode("utf-8")
+                self_inner.send_response(200)
+                self_inner.send_header("Content-Type", "text/html")
+                self_inner.send_header("Content-Length", str(len(body)))
+                self_inner.end_headers()
+                self_inner.wfile.write(body)
+
+            def log_message(self_inner, *args):  # silence noisy logs
+                pass
+
+        try:
+            srv = http.server.HTTPServer(("127.0.0.1", port), _Handler)
+        except Exception as e:
+            self.failure.emit(f"Could not bind loopback port: {e}")
+            return
+
+        # Serve one request, then shut down. 5-minute hard cap.
+        def _serve_one():
+            srv.timeout = 300
+            srv.handle_request()
+        t = threading.Thread(target=_serve_one, daemon=True)
+        t.start()
+
+        # 4. Open the browser
+        try:
+            webbrowser.open(auth_url)
+        except Exception as e:
+            srv.server_close()
+            self.failure.emit(f"Could not open browser: {e}")
+            return
+
+        # 5. Wait for the handler to populate `result`
+        t.join(timeout=305)
+        try:
+            srv.server_close()
+        except Exception:
+            pass
+
+        if result.get("error"):
+            self.failure.emit(f"Google: {result['error']}")
+            return
+        if result.get("state") != state:
+            self.failure.emit("OAuth state mismatch — aborted for safety.")
+            return
+        code = result.get("code")
+        if not code:
+            self.failure.emit("Sign-in window closed without completing.")
+            return
+
+        # 6. Hand the code to APEX server for the actual exchange.
+        try:
+            r = requests.post(
+                f"{self.server_url}/auth/google/exchange",
+                json={"code": code, "redirect_uri": redirect_uri},
+                timeout=20,
+            )
+            if not r.ok:
+                detail = r.json().get("detail", r.text) if r.headers.get(
+                    "content-type", "").startswith("application/json") else r.text
+                self.failure.emit(f"APEX server: {detail}")
+                return
+            body = r.json()
+            self.success.emit(body["token"], body["user"])
+        except Exception as e:
+            self.failure.emit(f"Token exchange failed: {e}")
+
+
 class AuthWorker(QThread):
     success = pyqtSignal(str, dict)   # token, user
     failure = pyqtSignal(str)         # error message
@@ -640,16 +765,14 @@ class LoginWindow(_GradWidget):
         vl.addWidget(sep_w)
         vl.addSpacing(12)
 
-        # Google button (disabled — wired in a future release)
+        # V3.0.2 — Google OAuth via standard loopback flow.
         self._google_btn = QPushButton("◯  Continue with Google")
         self._google_btn.setFixedHeight(40)
-        self._google_btn.setEnabled(False)
-        self._google_btn.setCursor(QCursor(Qt.CursorShape.ForbiddenCursor))
-        self._google_btn.setToolTip("Coming soon")
+        self._google_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         self._google_btn.setStyleSheet(f"""
             QPushButton {{
                 background    : {C['panel2']};
-                color         : {C['muted']};
+                color         : {C['text']};
                 border        : 1px solid {C['border']};
                 border-radius : 7px;
                 font-family   : 'JetBrains Mono';
@@ -657,11 +780,16 @@ class LoginWindow(_GradWidget):
                 letter-spacing: 2px;
                 text-align    : center;
             }}
+            QPushButton:hover {{
+                background    : {C['panel']};
+                border-color  : {C['muted']};
+            }}
             QPushButton:disabled {{
                 color         : {C['muted']};
                 background    : {C['panel2']};
             }}
         """)
+        self._google_btn.clicked.connect(self._start_google_oauth)
         vl.addWidget(self._google_btn)
         vl.addSpacing(8)
 
@@ -790,6 +918,57 @@ class LoginWindow(_GradWidget):
         w.finished.connect(lambda: self._sv.set_loading(False))
         self._workers.append(w)
         w.start()
+
+    # ── Google OAuth (V3 wave 4) ──────────────────────────────────────────
+
+    def _start_google_oauth(self):
+        """Standard loopback flow:
+          1. Spawn a one-shot HTTP server on 127.0.0.1:RANDOM_PORT.
+          2. Open the user's default browser to Google's consent page.
+          3. Google redirects back to our loopback URI with ?code=...
+          4. We forward the code to APEX server's /auth/google/exchange.
+          5. Save the returned APEX JWT and emit auth_success.
+        All run inside a single background QThread so the UI never freezes."""
+        # First check the server has Google OAuth configured
+        self._google_btn.setEnabled(False)
+        self._google_btn.setText("◯  Asking server…")
+        try:
+            r = requests.get(f"{self._server_url}/auth/google/config", timeout=6)
+            cfg = r.json() if r.ok else {}
+        except Exception as e:
+            self._google_btn.setEnabled(True)
+            self._google_btn.setText("◯  Continue with Google")
+            self._show_err(f"Could not reach APEX server: {e}")
+            return
+        if not cfg.get("configured"):
+            self._google_btn.setEnabled(True)
+            self._google_btn.setText("◯  Continue with Google")
+            self._show_err(
+                "Google sign-in not configured on the server. Ask the "
+                "admin to set GOOGLE_OAUTH_CLIENT_ID / SECRET.")
+            return
+
+        self._google_btn.setText("◯  Waiting for browser sign-in…")
+        worker = _GoogleOAuthWorker(
+            client_id=cfg["client_id"],
+            server_url=self._server_url,
+        )
+        worker.success.connect(
+            lambda tok, usr: self._on_google_done(worker, True, tok, usr, ""))
+        worker.failure.connect(
+            lambda msg: self._on_google_done(worker, False, "", {}, msg))
+        self._workers.append(worker)
+        worker.start()
+
+    def _on_google_done(self, worker, ok: bool, token: str,
+                        user: dict, err: str):
+        self._google_btn.setEnabled(True)
+        self._google_btn.setText("◯  Continue with Google")
+        if ok:
+            save_auth(token, user)
+            self.auth_success.emit(token, user)
+        else:
+            self._show_err(err or "Google sign-in failed.")
 
     def _on_success(self, token: str, user: dict, remember: bool):
         if remember:

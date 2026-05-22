@@ -40,6 +40,23 @@ def init_db() -> None:
                 is_active        INTEGER NOT NULL DEFAULT 1
             )
         """)
+        # V3.0.2 — idempotent migrations to add Google OAuth + email
+        # verification columns. SQLite has no "IF NOT EXISTS" for ADD
+        # COLUMN, so we wrap each in a try/except.
+        for ddl in (
+            "ALTER TABLE users ADD COLUMN google_sub          TEXT",
+            "ALTER TABLE users ADD COLUMN is_verified         INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE users ADD COLUMN verification_token  TEXT",
+            "ALTER TABLE users ADD COLUMN verification_sent_at TEXT",
+            "ALTER TABLE users ADD COLUMN avatar_url          TEXT",
+            "ALTER TABLE users ADD COLUMN phone               TEXT",
+            "CREATE INDEX IF NOT EXISTS idx_users_google_sub ON users(google_sub)",
+            "CREATE INDEX IF NOT EXISTS idx_users_verif_token ON users(verification_token)",
+        ):
+            try:
+                c.execute(ddl)
+            except Exception:
+                pass
         c.commit()
 
 
@@ -81,15 +98,104 @@ def list_user_ids() -> list[int]:
 
 
 def create_user(username: str, email: str,
-                hashed_password: str, display_name: str) -> dict:
+                hashed_password: str, display_name: str,
+                google_sub: Optional[str] = None,
+                is_verified: int = 0) -> dict:
     now = datetime.now(timezone.utc).isoformat()
     with _conn() as c:
         cur = c.execute(
             """INSERT INTO users (username, email, hashed_password,
-                                  display_name, created_at)
-               VALUES (?,?,?,?,?)""",
+                                  display_name, created_at,
+                                  google_sub, is_verified)
+               VALUES (?,?,?,?,?,?,?)""",
             (username.strip().lower(), email.strip().lower(),
-             hashed_password, display_name.strip(), now),
+             hashed_password, display_name.strip(), now,
+             google_sub, int(bool(is_verified))),
         )
         c.commit()
         return get_user_by_id(cur.lastrowid)
+
+
+def get_user_by_google_sub(sub: str) -> Optional[dict]:
+    if not sub:
+        return None
+    with _conn() as c:
+        return _row(c.execute(
+            "SELECT * FROM users WHERE google_sub=?", (sub,)
+        ).fetchone())
+
+
+def link_google_sub(user_id: int, sub: str) -> None:
+    """Attach a Google subject ID to an existing email/password user so
+    future Google sign-ins land on the same account."""
+    with _conn() as c:
+        c.execute("UPDATE users SET google_sub=? WHERE id=?", (sub, user_id))
+        c.commit()
+
+
+def set_verification_token(user_id: int, token: Optional[str],
+                            sent_at: Optional[str] = None) -> None:
+    with _conn() as c:
+        c.execute(
+            "UPDATE users SET verification_token=?, verification_sent_at=? WHERE id=?",
+            (token, sent_at or (datetime.now(timezone.utc).isoformat()
+                                if token else None), user_id),
+        )
+        c.commit()
+
+
+def get_user_by_verification_token(token: str) -> Optional[dict]:
+    if not token:
+        return None
+    with _conn() as c:
+        return _row(c.execute(
+            "SELECT * FROM users WHERE verification_token=?",
+            (token,)).fetchone())
+
+
+def mark_verified(user_id: int) -> None:
+    with _conn() as c:
+        c.execute(
+            """UPDATE users
+               SET is_verified=1, verification_token=NULL, verification_sent_at=NULL
+               WHERE id=?""", (user_id,))
+        c.commit()
+
+
+def update_user_profile(user_id: int, *,
+                         display_name: Optional[str] = None,
+                         avatar_url: Optional[str] = None,
+                         phone: Optional[str] = None) -> dict:
+    fields, vals = [], []
+    if display_name is not None:
+        fields.append("display_name=?"); vals.append(display_name.strip())
+    if avatar_url is not None:
+        fields.append("avatar_url=?"); vals.append(avatar_url.strip())
+    if phone is not None:
+        fields.append("phone=?"); vals.append(phone.strip())
+    if not fields:
+        return get_user_by_id(user_id)
+    vals.append(user_id)
+    with _conn() as c:
+        c.execute(f"UPDATE users SET {', '.join(fields)} WHERE id=?", vals)
+        c.commit()
+    return get_user_by_id(user_id)
+
+
+def update_user_password(user_id: int, hashed_password: str) -> None:
+    with _conn() as c:
+        c.execute("UPDATE users SET hashed_password=? WHERE id=?",
+                  (hashed_password, user_id))
+        c.commit()
+
+
+def update_user_email(user_id: int, new_email: str) -> dict:
+    """Change email + invalidate verification (will need re-verifying)."""
+    with _conn() as c:
+        c.execute(
+            """UPDATE users
+               SET email=?, is_verified=0, verification_token=NULL
+               WHERE id=?""",
+            (new_email.strip().lower(), user_id))
+        c.commit()
+    return get_user_by_id(user_id)

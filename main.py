@@ -38,6 +38,7 @@ from ui.overview     import ToolsTab
 from ui.universe     import UniverseTab
 from ui.make_bot_tab import MakeBotTab    # V7.1.9
 from ui.friends_tab  import FriendsTab    # V3.0.0
+from ui.account_tab  import AccountTab    # V3 wave 4
 from ui.styles     import DARK_STYLESHEET, COLORS
 from core.updater  import (check_for_update, download_and_apply,
                             get_current_version, restart_app,
@@ -956,23 +957,22 @@ class ApexWindow(QMainWindow):
         self.universe_tab  = UniverseTab()
         self.make_bot_tab  = MakeBotTab()        # V7.1.9
         self.friends_tab   = FriendsTab()        # V3.0.0
+        self.account_tab   = AccountTab()        # V3 wave 4
         self.tools_tab     = ToolsTab()
 
         self._overview_idx  = self.tabs.addTab(self.overview_tab,  "◈  OVERVIEW")
         self._morebots_idx  = self.tabs.addTab(self.more_bots_tab, "⊕  MORE BOTS")
 
-        # Universe / Make Bot / Friends / Tools added as real tabs but hidden
-        # — corner buttons drive them. V3.0.0 inserts FRIENDS between MAKE
-        # BOT and TOOLS so the corner row reads:
-        #   UNIVERSE  ·  MAKE BOT  ·  FRIENDS  ·  TOOLS.
+        # Corner row reads:
+        #   UNIVERSE · MAKE BOT · FRIENDS · ACCOUNT · TOOLS
         self._universe_idx  = self.tabs.addTab(self.universe_tab, "")
         self._makebot_idx   = self.tabs.addTab(self.make_bot_tab, "")
         self._friends_idx   = self.tabs.addTab(self.friends_tab,  "")
+        self._account_idx   = self.tabs.addTab(self.account_tab,  "")
         self._tools_idx     = self.tabs.addTab(self.tools_tab,    "")
-        self.tabs.tabBar().setTabVisible(self._universe_idx, False)
-        self.tabs.tabBar().setTabVisible(self._makebot_idx,  False)
-        self.tabs.tabBar().setTabVisible(self._friends_idx,  False)
-        self.tabs.tabBar().setTabVisible(self._tools_idx,    False)
+        for idx in (self._universe_idx, self._makebot_idx,
+                    self._friends_idx, self._account_idx, self._tools_idx):
+            self.tabs.tabBar().setTabVisible(idx, False)
 
         # ── CORNER WIDGET (Universe / Tools) ────────────────
         self.tabs.setCornerWidget(self._build_corner(), Qt.Corner.TopRightCorner)
@@ -1220,12 +1220,14 @@ class ApexWindow(QMainWindow):
         row.setSpacing(0)
 
         self._corner_universe = QPushButton("✦  UNIVERSE")
-        self._corner_makebot  = QPushButton("⚒  MAKE BOT")   # V7.1.9
-        self._corner_friends  = QPushButton("☺  FRIENDS")    # V3.0.0
+        self._corner_makebot  = QPushButton("⚒  MAKE BOT")
+        self._corner_friends  = QPushButton("☺  FRIENDS")
+        self._corner_account  = QPushButton("⚇  ACCOUNT")    # V3 wave 4
         self._corner_tools    = QPushButton("⚙  TOOLS")
 
         for btn in (self._corner_universe, self._corner_makebot,
-                    self._corner_friends, self._corner_tools):
+                    self._corner_friends, self._corner_account,
+                    self._corner_tools):
             btn.setObjectName("cornerBtn")
             btn.setCheckable(True)
             btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
@@ -1237,6 +1239,8 @@ class ApexWindow(QMainWindow):
             lambda: self._switch_corner(self._makebot_idx,  self._corner_makebot))
         self._corner_friends.clicked.connect(
             lambda: self._switch_corner(self._friends_idx,  self._corner_friends))
+        self._corner_account.clicked.connect(
+            lambda: self._switch_corner(self._account_idx,  self._corner_account))
         self._corner_tools.clicked.connect(
             lambda: self._switch_corner(self._tools_idx, self._corner_tools))
         self.tabs.currentChanged.connect(self._on_tab_changed)
@@ -1245,7 +1249,8 @@ class ApexWindow(QMainWindow):
     def _switch_corner(self, idx: int, btn: QPushButton):
         self.tabs.setCurrentIndex(idx)
         all_corners = (self._corner_universe, self._corner_makebot,
-                       self._corner_friends, self._corner_tools)
+                       self._corner_friends, self._corner_account,
+                       self._corner_tools)
         for b in all_corners:
             b.setProperty("active", str(b is btn).lower())
             b.style().unpolish(b)
@@ -1254,9 +1259,11 @@ class ApexWindow(QMainWindow):
     def _on_tab_changed(self, idx: int):
         # Deactivate corner buttons if we switched away from their tabs
         if idx not in (self._universe_idx, self._makebot_idx,
-                       self._friends_idx, self._tools_idx):
+                       self._friends_idx, self._account_idx,
+                       self._tools_idx):
             for b in (self._corner_universe, self._corner_makebot,
-                      self._corner_friends, self._corner_tools):
+                      self._corner_friends, self._corner_account,
+                      self._corner_tools):
                 b.setProperty("active", "false")
                 b.setChecked(False)
                 b.style().unpolish(b)
@@ -1299,18 +1306,18 @@ class ApexWindow(QMainWindow):
         insert_at = self._morebots_idx
         self.tabs.insertTab(insert_at, tab, label)
 
-        # Shift static indices  (V3.0.0 added _friends_idx)
+        # Shift static indices  (V3 wave 4 added _account_idx)
         self._morebots_idx += 1
         self._universe_idx += 1
         self._makebot_idx  += 1
         self._friends_idx  += 1
+        self._account_idx  += 1
         self._tools_idx    += 1
 
-        # Update tab button visibility
-        self.tabs.tabBar().setTabVisible(self._universe_idx, False)
-        self.tabs.tabBar().setTabVisible(self._makebot_idx,  False)
-        self.tabs.tabBar().setTabVisible(self._friends_idx,  False)
-        self.tabs.tabBar().setTabVisible(self._tools_idx,    False)
+        for hidden in (self._universe_idx, self._makebot_idx,
+                       self._friends_idx, self._account_idx,
+                       self._tools_idx):
+            self.tabs.tabBar().setTabVisible(hidden, False)
 
         actual_idx = self.tabs.indexOf(tab)
         self._tab_indices[side] = actual_idx
@@ -1348,21 +1355,17 @@ class ApexWindow(QMainWindow):
         idx = self.tabs.indexOf(tab)
         if idx >= 0:
             self.tabs.removeTab(idx)
-            # Shift static indices back  (V3.0.0 added _friends_idx)
-            if idx < self._morebots_idx:
-                self._morebots_idx -= 1
-            if idx < self._universe_idx:
-                self._universe_idx -= 1
-            if idx < self._makebot_idx:
-                self._makebot_idx -= 1
-            if idx < self._friends_idx:
-                self._friends_idx -= 1
-            if idx < self._tools_idx:
-                self._tools_idx -= 1
-            self.tabs.tabBar().setTabVisible(self._universe_idx, False)
-            self.tabs.tabBar().setTabVisible(self._makebot_idx,  False)
-            self.tabs.tabBar().setTabVisible(self._friends_idx,  False)
-            self.tabs.tabBar().setTabVisible(self._tools_idx,    False)
+            # Shift static indices back  (V3 wave 4 added _account_idx)
+            if idx < self._morebots_idx: self._morebots_idx -= 1
+            if idx < self._universe_idx: self._universe_idx -= 1
+            if idx < self._makebot_idx:  self._makebot_idx  -= 1
+            if idx < self._friends_idx:  self._friends_idx  -= 1
+            if idx < self._account_idx:  self._account_idx  -= 1
+            if idx < self._tools_idx:    self._tools_idx    -= 1
+            for hidden in (self._universe_idx, self._makebot_idx,
+                           self._friends_idx, self._account_idx,
+                           self._tools_idx):
+                self.tabs.tabBar().setTabVisible(hidden, False)
 
         self._bot_dots.pop(side, None)
         self._bot_ctrls.pop(side, None)
@@ -1630,8 +1633,10 @@ class ApexWindow(QMainWindow):
         try:
             if hasattr(self, "friends_tab"):
                 self.friends_tab.refresh()
+            if hasattr(self, "account_tab"):
+                self.account_tab.refresh()
         except Exception as e:
-            print(f"[relogin] friends refresh: {e}")
+            print(f"[relogin] tabs refresh: {e}")
         QTimer.singleShot(500, self._refresh_all)
         # Re-attempt cloud-bot resume against the new user's bot list
         QTimer.singleShot(2500, self._resume_cloud_bots)
