@@ -1175,17 +1175,40 @@ class ApexWindow(QMainWindow):
         self.quit_btn.clicked.connect(self._quit_app)
         layout.addWidget(self.quit_btn)
 
-        # Logged-in user chip
+        # Logged-in user chip — V3.0.1: clickable, opens an account menu
+        # with Switch account / Sign out so the user doesn't have to dig
+        # into the system-tray menu.
         display = self._user.get("display_name") or self._user.get("username", "")
         if display:
-            user_lbl = QLabel(f"▸  {display}")
-            user_lbl.setStyleSheet(
-                f"font-size:10px;color:{C['muted']};margin-left:12px;"
-                f"letter-spacing:0.5px;"
-            )
-            layout.addWidget(user_lbl)
+            self.user_chip_btn = QPushButton(f"▸  {display}  ▾")
+            self.user_chip_btn.setObjectName("userChipBtn")
+            self.user_chip_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            self.user_chip_btn.setToolTip("Click to switch account or sign out")
+            self.user_chip_btn.clicked.connect(self._show_account_menu)
+            layout.addWidget(self.user_chip_btn)
 
         return header
+
+    def _show_account_menu(self):
+        """Drop-down anchored under the user chip. Both items go through
+        the existing _sign_out flow (clear token → LoginWindow); the only
+        difference is the label, so the user can express intent."""
+        menu = QMenu(self)
+        menu.setStyleSheet(self.styleSheet())
+
+        switch_act = QAction("⇄  Switch account", self)
+        switch_act.triggered.connect(self._sign_out)
+
+        signout_act = QAction("⏻  Sign out", self)
+        signout_act.triggered.connect(self._sign_out)
+
+        menu.addAction(switch_act)
+        menu.addSeparator()
+        menu.addAction(signout_act)
+
+        pos = self.user_chip_btn.mapToGlobal(
+            QPoint(0, self.user_chip_btn.height()))
+        menu.exec(pos)
 
     # ── CORNER WIDGET ────────────────────────────────────────
 
@@ -1590,14 +1613,28 @@ class ApexWindow(QMainWindow):
         save_auth(token, user)
         login_win.close()
         self._user = user
-        # Update header user label if present
         display = user.get("display_name") or user.get("username", "")
+        # Update the clickable chip in the header (v3.0.1)
+        if hasattr(self, "user_chip_btn"):
+            self.user_chip_btn.setText(f"▸  {display}  ▾")
+        # Legacy QLabel fallback (in case it survives from older builds)
         for child in self.centralWidget().findChildren(QLabel):
             if child.text().startswith("▸  "):
                 child.setText(f"▸  {display}")
                 break
         self.show()
         self.raise_()
+        # Refresh anything that's account-scoped so the new user doesn't
+        # see the previous account's data. Friends in particular needs
+        # to repopulate the requests / friends lists.
+        try:
+            if hasattr(self, "friends_tab"):
+                self.friends_tab.refresh()
+        except Exception as e:
+            print(f"[relogin] friends refresh: {e}")
+        QTimer.singleShot(500, self._refresh_all)
+        # Re-attempt cloud-bot resume against the new user's bot list
+        QTimer.singleShot(2500, self._resume_cloud_bots)
 
     def closeEvent(self, event):
         # V7.1.7: distinguish between the X button (minimise-to-tray

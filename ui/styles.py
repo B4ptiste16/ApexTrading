@@ -301,6 +301,58 @@ QPushButton#updateBtn {{
     padding: 6px 16px;
 }}
 
+/* V3.0.1 — clickable user chip in the header (opens Account menu) */
+QPushButton#userChipBtn {{
+    background: transparent;
+    color: {C['muted']};
+    border: 1px solid transparent;
+    border-radius: 5px;
+    font-family: 'JetBrains Mono';
+    font-size: 10px;
+    letter-spacing: 0.5px;
+    padding: 6px 12px;
+    margin-left: 12px;
+    text-align: center;
+}}
+
+QPushButton#userChipBtn:hover {{
+    color: {C['text']};
+    border-color: {C['border']};
+    background: rgba(255,255,255,0.04);
+}}
+
+QPushButton#userChipBtn:pressed {{
+    background: rgba(255,255,255,0.08);
+}}
+
+/* Drop-down menu used by the user chip (Switch / Sign-out) */
+QMenu {{
+    background: {C['panel']};
+    color: {C['text']};
+    border: 1px solid {C['border']};
+    border-radius: 8px;
+    padding: 6px;
+    font-family: 'JetBrains Mono';
+    font-size: 11px;
+}}
+
+QMenu::item {{
+    padding: 8px 22px 8px 16px;
+    border-radius: 5px;
+    margin: 1px 0;
+}}
+
+QMenu::item:selected {{
+    background: {C['panel2']};
+    color: {C['text']};
+}}
+
+QMenu::separator {{
+    height: 1px;
+    background: {C['border']};
+    margin: 4px 6px;
+}}
+
 /* V7.1.7: explicit Quit button in the header */
 QPushButton#quitBtn {{
     background: transparent;
