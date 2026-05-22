@@ -26,9 +26,10 @@ C = COLORS
 
 # ── Persisted paths ───────────────────────────────────────────────────────────
 
-AUTH_FILE   = DATA_DIR / "apex_auth.json"
-SRV_CFG     = DATA_DIR / "apex_server.json"
-DEFAULT_URL = "http://localhost:8000"
+AUTH_FILE     = DATA_DIR / "apex_auth.json"
+ACCOUNTS_FILE = DATA_DIR / "apex_accounts.json"   # V3 wave 5
+SRV_CFG       = DATA_DIR / "apex_server.json"
+DEFAULT_URL   = "http://localhost:8000"
 
 
 # ── Auth-file helpers (used by main.py too) ───────────────────────────────────
@@ -48,9 +49,12 @@ def save_server_url(url: str) -> None:
 
 
 def save_auth(token: str, user: dict) -> None:
+    """Persist the ACTIVE session + also keep a copy in the multi-account
+    list so the user can later one-click-switch back."""
     AUTH_FILE.parent.mkdir(parents=True, exist_ok=True)
     with open(AUTH_FILE, "w", encoding="utf-8") as f:
         json.dump({"token": token, "user": user}, f, indent=2)
+    _upsert_saved_account(token, user)
 
 
 def load_auth() -> dict | None:
@@ -62,10 +66,79 @@ def load_auth() -> dict | None:
 
 
 def clear_auth() -> None:
+    """Clear the ACTIVE session without forgetting the saved-accounts list,
+    so the login window can still offer one-click sign-in to other
+    accounts the user has previously used on this machine."""
     try:
         AUTH_FILE.unlink(missing_ok=True)
     except Exception:
         pass
+
+
+# ── V3 wave 5 — Multi-account storage ────────────────────────────────
+
+def _load_accounts_file() -> list[dict]:
+    try:
+        with open(ACCOUNTS_FILE, encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, dict):
+            return data.get("accounts", [])
+        return data if isinstance(data, list) else []
+    except Exception:
+        return []
+
+
+def _write_accounts_file(accounts: list[dict]) -> None:
+    ACCOUNTS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    with open(ACCOUNTS_FILE, "w", encoding="utf-8") as f:
+        json.dump({"accounts": accounts}, f, indent=2)
+
+
+def _upsert_saved_account(token: str, user: dict) -> None:
+    """Add or refresh this account's entry in the saved-accounts list."""
+    if not user or not user.get("id"):
+        return
+    from datetime import datetime, timezone
+    accounts = _load_accounts_file()
+    uid = int(user["id"])
+    accounts = [a for a in accounts if int(a.get("user", {}).get("id", 0)) != uid]
+    accounts.insert(0, {
+        "token":        token,
+        "user":         user,
+        "last_used_at": datetime.now(timezone.utc).isoformat(),
+    })
+    _write_accounts_file(accounts[:20])  # keep the 20 most recent
+
+
+def list_saved_accounts() -> list[dict]:
+    """Returns the saved-accounts list (most-recent first). Each entry:
+       {token, user: {id, username, display_name, email, ...}, last_used_at}"""
+    return _load_accounts_file()
+
+
+def activate_saved_account(user_id: int) -> dict | None:
+    """Promote a saved account to the active session. Returns the
+    promoted account dict, or None if not found."""
+    accounts = _load_accounts_file()
+    for a in accounts:
+        if int(a.get("user", {}).get("id", 0)) == int(user_id):
+            with open(AUTH_FILE, "w", encoding="utf-8") as f:
+                json.dump({"token": a["token"], "user": a["user"]},
+                          f, indent=2)
+            from datetime import datetime, timezone
+            a["last_used_at"] = datetime.now(timezone.utc).isoformat()
+            # Move to front
+            others = [x for x in accounts
+                      if int(x.get("user", {}).get("id", 0)) != int(user_id)]
+            _write_accounts_file([a] + others[:19])
+            return a
+    return None
+
+
+def forget_saved_account(user_id: int) -> None:
+    accounts = _load_accounts_file()
+    _write_accounts_file([a for a in accounts
+                          if int(a.get("user", {}).get("id", 0)) != int(user_id)])
 
 
 # ── Worker threads ────────────────────────────────────────────────────────────
@@ -695,6 +768,116 @@ class LoginWindow(_GradWidget):
         vl.addWidget(sub)
         return w
 
+    def _build_saved_accounts_section(self) -> QWidget:
+        """V3 wave 5 — one-click sign-in for previously-used accounts.
+        Hidden when no saved accounts exist."""
+        wrap = QWidget()
+        wrap.setStyleSheet("background:transparent;")
+        col = QVBoxLayout(wrap)
+        col.setContentsMargins(0, 0, 0, 14)
+        col.setSpacing(6)
+
+        title = QLabel("CONTINUE AS")
+        title.setStyleSheet(
+            f"color:{C['muted']};font-size:9px;letter-spacing:3px;"
+            f"font-weight:700;background:transparent;padding:0 0 4px 0;")
+        col.addWidget(title)
+
+        self._saved_rows_box = QWidget()
+        self._saved_rows_box.setStyleSheet("background:transparent;")
+        self._saved_rows_layout = QVBoxLayout(self._saved_rows_box)
+        self._saved_rows_layout.setContentsMargins(0, 0, 0, 0)
+        self._saved_rows_layout.setSpacing(6)
+        col.addWidget(self._saved_rows_box)
+
+        self._populate_saved_accounts()
+        wrap.setVisible(len(list_saved_accounts()) > 0)
+        return wrap
+
+    def _populate_saved_accounts(self):
+        # Clear existing
+        while self._saved_rows_layout.count():
+            item = self._saved_rows_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        accounts = list_saved_accounts()
+        for acc in accounts:
+            self._saved_rows_layout.addWidget(self._make_saved_row(acc))
+
+    def _make_saved_row(self, acc: dict) -> QWidget:
+        u = acc.get("user", {})
+        row = QFrame()
+        row.setStyleSheet(f"""
+            QFrame {{
+                background    : {C['panel2']};
+                border        : 1px solid {C['border']};
+                border-radius : 7px;
+            }}
+            QFrame:hover {{
+                border-color  : {C['muted']};
+            }}
+        """)
+        hl = QHBoxLayout(row)
+        hl.setContentsMargins(12, 8, 8, 8)
+        hl.setSpacing(8)
+
+        name_btn = QPushButton(
+            f"{u.get('display_name') or u.get('username','?')}\n"
+            f"  @{u.get('username','?')}")
+        name_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        name_btn.setStyleSheet(f"""
+            QPushButton {{
+                background    : transparent;
+                color         : {C['text']};
+                border        : none;
+                text-align    : left;
+                font-family   : 'JetBrains Mono';
+                font-size     : 11px;
+                padding       : 2px 0;
+            }}
+            QPushButton:hover {{
+                color         : {C['green']};
+            }}
+        """)
+        name_btn.clicked.connect(
+            lambda _, uid=u.get("id"): self._activate_saved(uid))
+        hl.addWidget(name_btn, 1)
+
+        forget = QPushButton("×")
+        forget.setFixedSize(22, 22)
+        forget.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        forget.setStyleSheet(f"""
+            QPushButton {{
+                background    : transparent;
+                color         : {C['muted']};
+                border        : none;
+                font-size     : 14px;
+            }}
+            QPushButton:hover {{
+                color         : {C['red']};
+            }}
+        """)
+        forget.setToolTip("Forget this account")
+        forget.clicked.connect(
+            lambda _, uid=u.get("id"): self._forget_saved(uid))
+        hl.addWidget(forget)
+        return row
+
+    def _activate_saved(self, user_id: int):
+        if not user_id:
+            return
+        acc = activate_saved_account(int(user_id))
+        if not acc:
+            self._show_err("Could not switch to that account.")
+            return
+        self.auth_success.emit(acc["token"], acc["user"])
+
+    def _forget_saved(self, user_id: int):
+        forget_saved_account(int(user_id))
+        self._populate_saved_accounts()
+        if not list_saved_accounts():
+            self._saved_section.setVisible(False)
+
     def _card(self) -> QFrame:
         card = QFrame()
         card.setFixedWidth(430)
@@ -729,6 +912,11 @@ class LoginWindow(_GradWidget):
             border-radius:5px;padding:8px 10px;margin-bottom:12px;
         """)
         vl.addWidget(self._err)
+
+        # V3 wave 5 — saved accounts (one-click sign-in if previously
+        # signed in on this machine).
+        self._saved_section = self._build_saved_accounts_section()
+        vl.addWidget(self._saved_section)
 
         # Stacked views
         self._stack = _AdaptiveStack()

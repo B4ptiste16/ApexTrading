@@ -15,6 +15,7 @@ from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame,
     QLineEdit, QGridLayout, QCheckBox, QMessageBox, QSizePolicy,
+    QStackedWidget,
 )
 
 from ui.styles  import COLORS
@@ -71,12 +72,20 @@ class FriendsTab(QWidget):
         super().__init__(parent)
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
+        # V3 wave 5 — two views in a stack so the friend profile can
+        # replace the friends list IN PLACE instead of popping a dialog.
+        self._stack = QStackedWidget()
+        root.addWidget(self._stack)
+
         self.scroll = ScrollContent()
-        root.addWidget(self.scroll)
+        self._stack.addWidget(self.scroll)       # index 0: list view
+
+        self._profile_view = _FriendProfileView(self)
+        self._stack.addWidget(self._profile_view)   # index 1: profile
+
         self._workers: list[QThread] = []
         self._settings_loaded = False
         self._build()
-        # Defer first refresh so the tab paints before hitting the network
         QTimer.singleShot(300, self.refresh)
 
     def refresh(self):
@@ -418,39 +427,36 @@ class FriendsTab(QWidget):
             ok, body, "Removed." if ok else None))
 
     def _view_profile(self, username: str):
-        """For v3.0.0 we just pop a small dialog with the shared info.
-        A richer profile page comes in a later wave."""
-        w = _HttpWorker("GET", f"/users/{username}/profile")
-        self._spawn(w, self._show_profile_dialog)
+        """V3 wave 5 — swap to the in-place profile view, fetch both the
+        profile info and the friend's shareable bots, render in MetricCard
+        style (matches the overview tab)."""
+        self._profile_view.show_loading(username)
+        self._stack.setCurrentIndex(1)
 
-    def _show_profile_dialog(self, ok: bool, body: dict):
-        if not ok:
-            QMessageBox.warning(self, "Profile",
-                                body.get("detail", "Could not load profile."))
-            return
-        u     = body.get("user", {})
-        shows = body.get("shows", {})
-        lines = [f"<b>{u.get('display_name') or u.get('username')}</b> "
-                 f"&nbsp; <span style='color:#888'>@{u.get('username')}</span>",
-                 f"<span style='color:#888;font-size:11px;'>"
-                 f"Tier: {body.get('tier')}</span><br>"]
-        if not any(shows.values()):
-            lines.append("<i>This user hasn't shared anything with you.</i>")
-        if shows.get("broker"):
-            brokers = body.get("broker") or []
-            lines.append(f"<b>Brokers:</b> {', '.join(brokers) or '—'}")
-        pl = body.get("pl", {})
-        for label, key in (("Today", "daily"),
-                           ("This month", "monthly"),
-                           ("This year", "yearly")):
-            if shows.get(key) and key in pl:
-                d = pl[key]
-                sign = "+" if d["pl"] >= 0 else ""
-                lines.append(
-                    f"<b>{label}:</b> {sign}${d['pl']:,.2f} "
-                    f"({sign}{d['pct']:.2f}%)")
-        QMessageBox.information(self, "Friend profile",
-                                "<br>".join(lines))
+        # Parallel fetches: /profile + /bots
+        prof = _HttpWorker("GET", f"/users/{username}/profile")
+        bots = _HttpWorker("GET", f"/users/{username}/bots")
+        # Track both completing before rendering
+        state = {"profile": None, "bots": None}
+
+        def _check():
+            if state["profile"] is not None and state["bots"] is not None:
+                self._profile_view.render(state["profile"], state["bots"])
+
+        def _on_prof(ok, body):
+            state["profile"] = body if ok else {"error": body.get("detail", "Failed")}
+            _check()
+
+        def _on_bots(ok, body):
+            state["bots"] = body if ok else {"bots": [], "error": True}
+            _check()
+
+        self._spawn(prof, _on_prof)
+        self._spawn(bots, _on_bots)
+
+    def show_list_view(self):
+        """Called by the profile view's back button."""
+        self._stack.setCurrentIndex(0)
 
     def _after_action(self, ok: bool, body: dict, success_msg: str | None):
         if not ok:
@@ -507,3 +513,265 @@ class FriendsTab(QWidget):
             self._share_status.setStyleSheet(
                 f"color:{C['red']};font-size:10px;")
         QTimer.singleShot(3000, lambda: self._share_status.setText(""))
+
+
+# ── In-place friend profile view (V3 wave 5) ────────────────────────
+
+class _FriendProfileView(QWidget):
+    """Full-tab view showing a friend's shared profile + their bot
+    library with install buttons. Swapped into the FriendsTab's stack."""
+
+    def __init__(self, parent_tab):
+        super().__init__()
+        self._parent_tab = parent_tab
+        from ui.widgets import ScrollContent as _SC, SectionHeader as _SH
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        self.scroll = _SC()
+        root.addWidget(self.scroll)
+
+        # Back button row
+        back_row = QHBoxLayout()
+        back = QPushButton("←  Back to friends")
+        back.setObjectName("toolBtn")
+        back.clicked.connect(parent_tab.show_list_view)
+        back_row.addWidget(back)
+        back_row.addStretch()
+        bw = QWidget(); bw.setLayout(back_row)
+        self.scroll.add(bw)
+
+        # Header card (name + username + tier)
+        self._header_card = QFrame()
+        self._header_card.setStyleSheet(
+            f"background:{C['panel']};border:1px solid {C['border']};"
+            f"border-radius:10px;border-top:2px solid {C['purple']};")
+        hv = QVBoxLayout(self._header_card)
+        hv.setContentsMargins(20, 16, 20, 16)
+        self._name_lbl = QLabel("")
+        self._name_lbl.setStyleSheet(
+            f"font-family:'Syne',sans-serif;font-size:22px;font-weight:800;"
+            f"color:{C['text']};letter-spacing:1px;")
+        self._handle_lbl = QLabel("")
+        self._handle_lbl.setStyleSheet(
+            f"color:{C['muted']};font-size:11px;")
+        self._tier_lbl = QLabel("")
+        self._tier_lbl.setStyleSheet(
+            f"color:{C['purple']};font-size:9px;letter-spacing:3px;"
+            f"font-weight:700;padding-top:4px;")
+        hv.addWidget(self._name_lbl)
+        hv.addWidget(self._handle_lbl)
+        hv.addWidget(self._tier_lbl)
+        self.scroll.add(self._header_card)
+
+        # Stats cards row (broker / day / month / year)
+        from ui.widgets import MetricCard as _MC, SectionHeader as _SH2
+        self.scroll.add(_SH2("SHARED STATS", C["green"]))
+        self._stats_row = QHBoxLayout()
+        self._stats_row.setSpacing(10)
+        self._card_broker  = _MC("BROKERS",       "—")
+        self._card_daily   = _MC("TODAY P/L",     "—")
+        self._card_monthly = _MC("THIS MONTH",    "—")
+        self._card_yearly  = _MC("THIS YEAR",     "—")
+        for card in (self._card_broker, self._card_daily,
+                     self._card_monthly, self._card_yearly):
+            self._stats_row.addWidget(card)
+        sw = QWidget(); sw.setLayout(self._stats_row)
+        self.scroll.add(sw)
+
+        # Bot library
+        self.scroll.add(_SH2("BOTS SHARED", C["yellow"]))
+        self._bots_box = QWidget()
+        self._bots_layout = QVBoxLayout(self._bots_box)
+        self._bots_layout.setContentsMargins(0, 4, 0, 4)
+        self._bots_layout.setSpacing(8)
+        self._bots_empty = QLabel("Nothing shared.")
+        self._bots_empty.setStyleSheet(
+            f"color:{C['muted']};font-size:11px;padding:6px 0;")
+        self._bots_layout.addWidget(self._bots_empty)
+        self.scroll.add(self._bots_box)
+
+        self.scroll.add_stretch()
+
+    def show_loading(self, username: str):
+        self._name_lbl.setText(username)
+        self._handle_lbl.setText("Loading…")
+        self._tier_lbl.setText("")
+        for c in (self._card_broker, self._card_daily,
+                  self._card_monthly, self._card_yearly):
+            c.update_value("—")
+        self._clear_bots()
+
+    def _clear_bots(self):
+        while self._bots_layout.count():
+            item = self._bots_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+    def render(self, profile: dict, bots_resp: dict):
+        if profile.get("error"):
+            self._handle_lbl.setText("Could not load profile.")
+            return
+        u     = profile.get("user", {})
+        shows = profile.get("shows", {})
+        self._name_lbl.setText(u.get("display_name") or u.get("username", "?"))
+        self._handle_lbl.setText(f"@{u.get('username','?')}")
+        tier = profile.get("tier", "public")
+        if tier == "self":
+            self._tier_lbl.setText("YOUR PROFILE")
+        elif tier == "friends":
+            self._tier_lbl.setText("FRIEND TIER")
+        else:
+            self._tier_lbl.setText("PUBLIC VIEW")
+
+        # Broker card
+        if shows.get("broker"):
+            brokers = profile.get("broker") or []
+            self._card_broker.update_value(
+                ", ".join(brokers) if brokers else "—")
+        else:
+            self._card_broker.update_value("—",
+                sub="not shared" if tier != "self" else None)
+
+        # P&L cards
+        pl = profile.get("pl", {})
+        for key, card in (("daily",   self._card_daily),
+                          ("monthly", self._card_monthly),
+                          ("yearly",  self._card_yearly)):
+            if shows.get(key) and pl.get(key):
+                d = pl[key]
+                sign = "+" if d["pl"] >= 0 else ""
+                color = C["green"] if d["pl"] >= 0 else C["red"]
+                card.update_value(f"{sign}${d['pl']:,.2f}", color,
+                                   sub=f"{sign}{d['pct']:.2f}%")
+            else:
+                card.update_value("—",
+                    sub="not shared" if tier != "self" else None)
+
+        # Bots
+        self._clear_bots()
+        bots = (bots_resp or {}).get("bots", []) or []
+        allow = bool((bots_resp or {}).get("allow_bot_download", False))
+        if not bots:
+            empty = QLabel(
+                "No bots shared." if tier != "self" else
+                "You haven't published any bots yet.")
+            empty.setStyleSheet(f"color:{C['muted']};font-size:11px;padding:6px 0;")
+            self._bots_layout.addWidget(empty)
+            return
+        for b in bots:
+            self._bots_layout.addWidget(self._make_bot_row(b, allow_install=allow))
+
+    def _make_bot_row(self, b: dict, *, allow_install: bool) -> QWidget:
+        row = QFrame()
+        row.setStyleSheet(
+            f"background:{C['panel']};border:1px solid {C['border']};"
+            f"border-radius:8px;")
+        v = QVBoxLayout(row)
+        v.setContentsMargins(16, 12, 16, 12)
+        v.setSpacing(6)
+
+        head = QHBoxLayout()
+        name = QLabel(b.get("name", "?"))
+        name.setStyleSheet(
+            f"font-family:'Syne',sans-serif;font-size:13px;font-weight:700;"
+            f"color:{C['text']};")
+        head.addWidget(name)
+        head.addStretch()
+        if b.get("price_credits"):
+            price = QLabel(f"{b['price_credits']} credits")
+            price.setStyleSheet(
+                f"color:{C['yellow']};font-size:11px;font-weight:600;")
+            head.addWidget(price)
+        else:
+            price = QLabel("FREE")
+            price.setStyleSheet(
+                f"color:{C['green']};font-size:10px;letter-spacing:2px;"
+                f"font-weight:700;")
+            head.addWidget(price)
+        hw = QWidget(); hw.setLayout(head)
+        v.addWidget(hw)
+
+        desc = QLabel(b.get("description") or "—")
+        desc.setStyleSheet(f"color:{C['muted']};font-size:11px;")
+        desc.setWordWrap(True)
+        v.addWidget(desc)
+
+        meta = QLabel(
+            f"⬇ {b.get('downloads',0)}   ·   "
+            f"{b.get('size_bytes',0)//1024} KB   ·   "
+            f"{b.get('philosophy') or 'unspecified'}"
+            + (f"   ·   ★ {b['rating']:.1f}" if b.get("rating") else "")
+        )
+        meta.setStyleSheet(f"color:{C['muted']};font-size:10px;")
+        v.addWidget(meta)
+
+        if allow_install:
+            row_btn = QHBoxLayout()
+            row_btn.addStretch()
+            install = QPushButton("⬇  Install to my library")
+            install.setObjectName("addBotBtn")
+            install.clicked.connect(
+                lambda _, slug=b["slug"], name=b["name"]:
+                    self._install_bot(slug, name))
+            row_btn.addWidget(install)
+            bw = QWidget(); bw.setLayout(row_btn)
+            v.addWidget(bw)
+        return row
+
+    def _install_bot(self, slug: str, name: str):
+        """Use the existing public marketplace download endpoint + then
+        register the bot in the local registry (same as MoreBotsTab does)."""
+        from PyQt6.QtCore import QThread as _QT, pyqtSignal as _Sig
+        from ui.login import load_server_url
+        from core.paths import DATA_DIR
+        import shutil
+
+        url = load_server_url()
+
+        class _DL(_QT):
+            done = _Sig(bool, str, bytes)
+            def run(self_):
+                import requests
+                try:
+                    r = requests.get(f"{url}/bots/{slug}/download", timeout=20)
+                    if r.ok:
+                        self_.done.emit(True, "", r.content)
+                    else:
+                        self_.done.emit(False, f"HTTP {r.status_code}", b"")
+                except Exception as e:
+                    self_.done.emit(False, str(e), b"")
+
+        def _on_done(ok, err, blob):
+            if not ok:
+                QMessageBox.warning(self, "Install failed", err)
+                return
+            bots_dir = DATA_DIR / "bots"
+            bots_dir.mkdir(exist_ok=True)
+            dest = bots_dir / f"{slug}.py"
+            dest.write_bytes(blob)
+            # Register in local bot_registry so MORE BOTS picks it up
+            try:
+                from core import data as _D
+                import json as _json
+                s = _D.load_settings()
+                reg = s.get("bot_registry",
+                            {"active": [], "silenced": [], "custom": []})
+                existing = [c["id"] for c in reg.get("custom", [])]
+                if slug not in existing:
+                    reg.setdefault("custom", []).append({
+                        "id":     slug, "label":  name,
+                        "script": str(dest), "color":  C["purple"],
+                    })
+                    s["bot_registry"] = reg
+                    with open(_D.SETTINGS_FILE, "w", encoding="utf-8") as f:
+                        _json.dump(s, f, indent=2)
+            except Exception as e:
+                print(f"[friend-install] registry update failed: {e}")
+            QMessageBox.information(
+                self, "Bot installed",
+                f"'{name}' is now in your library. Open MORE BOTS → "
+                f"AVAILABLE TO ADD to activate it.")
+
+        self._dl_worker = _DL()
+        self._dl_worker.done.connect(_on_done)
+        self._dl_worker.start()

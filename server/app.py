@@ -17,7 +17,8 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response
 
 from . import (auth, database, credentials as creds,
                bots as marketplace, web, bot_runner, scheduler,
-               friends, oauth as google_oauth, email_send)
+               friends, oauth as google_oauth, email_send,
+               credits as credits_mod)
 from .schemas import SignupRequest, LoginRequest
 
 
@@ -29,6 +30,11 @@ async def _lifespan(app: FastAPI):
     creds.init_credentials_table()
     marketplace.init_marketplace_table()
     friends.init_friends_db()
+    credits_mod.init_credits_tables()
+    promoted = database.bootstrap_boss_admin()
+    if promoted:
+        print(f"[bootstrap] promoted user_id={promoted} to BOSS_ADMIN",
+              flush=True)
     # V7.1.12: kick off the once-a-minute schedule reconciliation loop.
     # Runs forever inside the FastAPI event loop until shutdown.
     scheduler.start_loop()
@@ -807,6 +813,171 @@ def web_api_portfolio_history(request: Request,
         return {"history": result, "linked": True}
     except Exception as e:
         return {"history": [], "linked": True, "error": str(e)}
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# V3 wave 5 — Credits + admin role hierarchy
+# Role precedence: BOSS_ADMIN > SUB_BOSS_ADMIN > ADMIN > USER
+# Only BOSS_ADMIN can promote/demote other admins. ADMIN can grant
+# credits and view the user list but can't change roles.
+# ──────────────────────────────────────────────────────────────────────────────
+
+
+def _require_admin(user: dict, min_role: str = "ADMIN") -> None:
+    rank = {"USER": 0, "ADMIN": 1, "SUB_BOSS_ADMIN": 2, "BOSS_ADMIN": 3}
+    if rank.get(user.get("role", "USER"), 0) < rank.get(min_role, 1):
+        raise HTTPException(403, f"Requires {min_role} role.")
+
+
+@app.get("/credits/me")
+def api_credits_me(authorization: str | None = Header(default=None)):
+    user = _current_user(authorization)
+    return {
+        "balance":      credits_mod.get_balance(user["id"]),
+        "transactions": credits_mod.list_transactions(user["id"], limit=20),
+    }
+
+
+@app.get("/admin/users")
+def api_admin_list_users(authorization: str | None = Header(default=None)):
+    user = _current_user(authorization)
+    _require_admin(user)
+    rows = database.list_all_users(limit=500)
+    out = []
+    for r in rows:
+        r2 = {k: v for k, v in r.items() if k != "hashed_password"}
+        r2["credit_balance"] = credits_mod.get_balance(r["id"])
+        out.append(r2)
+    return {"users": out}
+
+
+@app.post("/admin/credits/grant")
+def api_admin_grant_credits(payload: dict,
+                            authorization: str | None = Header(default=None)):
+    user = _current_user(authorization)
+    _require_admin(user)
+    target_id = (payload or {}).get("user_id")
+    delta     = (payload or {}).get("delta", 0)
+    reason    = (payload or {}).get("reason", "admin grant")
+    if not target_id:
+        raise HTTPException(400, "Missing user_id.")
+    if not database.get_user_by_id(int(target_id)):
+        raise HTTPException(404, "Target user not found.")
+    try:
+        delta = int(delta)
+    except Exception:
+        raise HTTPException(400, "delta must be an integer number of credits.")
+    if delta == 0:
+        raise HTTPException(400, "delta cannot be zero.")
+    result = credits_mod.grant(int(target_id), delta, reason,
+                                granted_by=user["id"])
+    return {"ok": True, **result, "target": int(target_id)}
+
+
+@app.put("/admin/users/{user_id}/role")
+def api_admin_set_role(user_id: int, payload: dict,
+                       authorization: str | None = Header(default=None)):
+    actor = _current_user(authorization)
+    _require_admin(actor, min_role="BOSS_ADMIN")
+    role = (payload or {}).get("role", "")
+    try:
+        target = database.set_user_role(user_id, role)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    if not target:
+        raise HTTPException(404, "User not found.")
+    return _public(target)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# V3 wave 5 — Bot Market: filters + classify + publisher analytics + friend bots
+# ──────────────────────────────────────────────────────────────────────────────
+
+
+@app.get("/bots/philosophies")
+def api_bots_philosophies():
+    return {"philosophies": marketplace.get_distinct_philosophies()}
+
+
+@app.get("/bots/mine")
+def api_bots_mine(authorization: str | None = Header(default=None)):
+    user = _current_user(authorization)
+    bots = marketplace.list_bots_for_owner(user["id"])
+    return {"bots": bots, "total_downloads": sum(b["downloads"] for b in bots)}
+
+
+@app.put("/bots/{slug}")
+def api_bot_update(slug: str, payload: dict,
+                   authorization: str | None = Header(default=None)):
+    user = _current_user(authorization)
+    if not isinstance(payload, dict):
+        raise HTTPException(400, "Body must be a JSON object.")
+    ok = marketplace.update_bot_meta(slug=slug, owner_id=user["id"], **payload)
+    if not ok:
+        raise HTTPException(404, "Bot not found or not yours.")
+    return marketplace.get_bot(slug)
+
+
+@app.put("/admin/bots/{slug}/classify")
+def api_admin_classify(slug: str, payload: dict,
+                       authorization: str | None = Header(default=None)):
+    user = _current_user(authorization)
+    _require_admin(user)
+    ok = marketplace.admin_classify(
+        slug,
+        featured=payload.get("featured"),
+        recommended=payload.get("recommended"),
+    )
+    if not ok:
+        raise HTTPException(400, "Nothing to classify.")
+    return marketplace.get_bot(slug)
+
+
+@app.get("/users/{username}/bots")
+def api_user_bots(username: str,
+                  authorization: str | None = Header(default=None)):
+    viewer = _current_user(authorization)
+    target = database.get_user_by_username(username.strip().lower())
+    if not target:
+        raise HTTPException(404, "User not found.")
+    settings = friends.get_share_settings(target["id"])
+    is_friend = friends.are_friends(viewer["id"], target["id"])
+    is_self   = viewer["id"] == target["id"]
+    if is_self:
+        bots = marketplace.list_bots_for_owner(target["id"])
+    elif is_friend and settings.get("share_bots_friends"):
+        bots = marketplace.list_bots_visible_to_friend(target["id"])
+    elif settings.get("share_bots_public"):
+        bots = [b for b in marketplace.list_bots_visible_to_friend(target["id"])
+                if b.get("visibility") == "public"]
+    else:
+        bots = []
+    return {
+        "bots":               bots,
+        "allow_bot_download": bool(settings.get("allow_bot_download", 0)),
+        "is_friend":          is_friend,
+        "is_self":            is_self,
+    }
+
+
+# Enhance the existing /bots endpoint with the new filter knobs.
+# We keep the original signature as a thin wrapper.
+@app.get("/bots/v2")
+def api_bots_v2(q: str = "", tag: str = "", philosophy: str = "",
+                 max_price: int = -1, min_win_rate: float = 0.0,
+                 section: str = "", sort: str = "downloads",
+                 limit: int = 50, offset: int = 0,
+                 authorization: str | None = Header(default=None)):
+    owner_id = None
+    if section == "mine":
+        user = _current_user(authorization)
+        owner_id = user["id"]
+    return {"bots": marketplace.list_bots(
+        q=q, tag=tag, philosophy=philosophy,
+        max_price=max_price if max_price >= 0 else None,
+        min_win_rate=min_win_rate, section=section, owner_id=owner_id,
+        sort=sort, limit=min(limit, 100), offset=offset,
+    )}
 
 
 # ──────────────────────────────────────────────────────────────────────────────

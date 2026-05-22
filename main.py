@@ -39,6 +39,7 @@ from ui.universe     import UniverseTab
 from ui.make_bot_tab import MakeBotTab    # V7.1.9
 from ui.friends_tab  import FriendsTab    # V3.0.0
 from ui.account_tab  import AccountTab    # V3 wave 4
+from ui.admin_tab    import AdminTab      # V3 wave 5
 from ui.styles     import DARK_STYLESHEET, COLORS
 from core.updater  import (check_for_update, download_and_apply,
                             get_current_version, restart_app,
@@ -958,20 +959,24 @@ class ApexWindow(QMainWindow):
         self.make_bot_tab  = MakeBotTab()        # V7.1.9
         self.friends_tab   = FriendsTab()        # V3.0.0
         self.account_tab   = AccountTab()        # V3 wave 4
+        self.admin_tab     = AdminTab()          # V3 wave 5
         self.tools_tab     = ToolsTab()
 
         self._overview_idx  = self.tabs.addTab(self.overview_tab,  "◈  OVERVIEW")
-        self._morebots_idx  = self.tabs.addTab(self.more_bots_tab, "⊕  MORE BOTS")
+        self._morebots_idx  = self.tabs.addTab(self.more_bots_tab, "⊕  BOT MARKET")
 
         # Corner row reads:
-        #   UNIVERSE · MAKE BOT · FRIENDS · ACCOUNT · TOOLS
+        #   UNIVERSE · MAKE BOT · FRIENDS · ACCOUNT · ADMIN · TOOLS
+        # (ADMIN is hidden for non-admin users — see _refresh_admin_visibility.)
         self._universe_idx  = self.tabs.addTab(self.universe_tab, "")
         self._makebot_idx   = self.tabs.addTab(self.make_bot_tab, "")
         self._friends_idx   = self.tabs.addTab(self.friends_tab,  "")
         self._account_idx   = self.tabs.addTab(self.account_tab,  "")
+        self._admin_idx     = self.tabs.addTab(self.admin_tab,    "")
         self._tools_idx     = self.tabs.addTab(self.tools_tab,    "")
         for idx in (self._universe_idx, self._makebot_idx,
-                    self._friends_idx, self._account_idx, self._tools_idx):
+                    self._friends_idx, self._account_idx,
+                    self._admin_idx, self._tools_idx):
             self.tabs.tabBar().setTabVisible(idx, False)
 
         # ── CORNER WIDGET (Universe / Tools) ────────────────
@@ -1023,6 +1028,12 @@ class ApexWindow(QMainWindow):
         # across desktop restarts), light up their tabs without making
         # the user click ▶ again.
         QTimer.singleShot(3000, self._resume_cloud_bots)
+        # V3 wave 5 — credits + admin visibility refresh, fires shortly
+        # after launch and then every 60 s.
+        QTimer.singleShot(1500, self._refresh_user_meta)
+        self._meta_timer = QTimer()
+        self._meta_timer.timeout.connect(self._refresh_user_meta)
+        self._meta_timer.start(60_000)
 
         # V7.1.1: accept .py drops anywhere in the window so a user can
         # drag a bot script in and we'll offer to install it locally or
@@ -1175,6 +1186,18 @@ class ApexWindow(QMainWindow):
         self.quit_btn.clicked.connect(self._quit_app)
         layout.addWidget(self.quit_btn)
 
+        # V3 wave 5 — credit balance chip (visible to everyone)
+        self.credits_chip = QLabel("◊  — credits")
+        self.credits_chip.setObjectName("creditsChip")
+        self.credits_chip.setStyleSheet(
+            f"color:{C['yellow']};font-size:10px;font-weight:600;"
+            f"letter-spacing:1px;padding:6px 12px;margin-left:6px;"
+            f"border:1px solid {C['border']};border-radius:5px;"
+            f"background:rgba(214,201,94,0.06);"
+        )
+        self.credits_chip.setToolTip("Your APEX credit balance — refreshes every 60 s")
+        layout.addWidget(self.credits_chip)
+
         # Logged-in user chip — V3.0.1: clickable, opens an account menu
         # with Switch account / Sign out so the user doesn't have to dig
         # into the system-tray menu.
@@ -1190,25 +1213,70 @@ class ApexWindow(QMainWindow):
         return header
 
     def _show_account_menu(self):
-        """Drop-down anchored under the user chip. Both items go through
-        the existing _sign_out flow (clear token → LoginWindow); the only
-        difference is the label, so the user can express intent."""
+        """V3 wave 5 — drop-down anchored under the user chip. Lists any
+        OTHER saved accounts for one-click switch (no re-login required),
+        plus 'Add account' which takes you to the login window."""
+        from ui.login import list_saved_accounts, activate_saved_account
         menu = QMenu(self)
         menu.setStyleSheet(self.styleSheet())
 
-        switch_act = QAction("⇄  Switch account", self)
-        switch_act.triggered.connect(self._sign_out)
+        current_id = (self._user or {}).get("id")
+        others = [a for a in list_saved_accounts()
+                  if int(a.get("user", {}).get("id", 0)) != int(current_id or 0)]
+
+        if others:
+            hdr = QAction("◍  Switch to saved account", self)
+            hdr.setEnabled(False)
+            menu.addAction(hdr)
+            for acc in others:
+                u = acc.get("user", {})
+                label = f"   {u.get('display_name') or u.get('username','?')}"
+                act = QAction(label, self)
+                act.setToolTip(f"@{u.get('username','?')}")
+                act.triggered.connect(
+                    lambda _checked=False, uid=u.get("id"):
+                        self._switch_to_saved_account(uid))
+                menu.addAction(act)
+            menu.addSeparator()
+
+        add_act = QAction("➕  Add / sign in to another account", self)
+        add_act.triggered.connect(self._sign_out)
+        menu.addAction(add_act)
 
         signout_act = QAction("⏻  Sign out", self)
         signout_act.triggered.connect(self._sign_out)
-
-        menu.addAction(switch_act)
-        menu.addSeparator()
         menu.addAction(signout_act)
 
         pos = self.user_chip_btn.mapToGlobal(
             QPoint(0, self.user_chip_btn.height()))
         menu.exec(pos)
+
+    def _switch_to_saved_account(self, user_id: int):
+        """One-click switch to a previously-saved account — no login
+        prompt. The saved token is reused; if it has expired the next
+        API call will 401 and TokenVerifyWorker boots us to the login
+        screen as usual."""
+        from ui.login import activate_saved_account
+        acc = activate_saved_account(int(user_id))
+        if not acc:
+            self.statusBar().showMessage(
+                "Could not switch to that account.")
+            return
+        self._user = acc["user"]
+        display = self._user.get("display_name") or self._user.get("username", "")
+        if hasattr(self, "user_chip_btn"):
+            self.user_chip_btn.setText(f"▸  {display}  ▾")
+        self.statusBar().showMessage(f"Switched to {display}")
+        # Refresh account-scoped tabs against the new user
+        try:
+            if hasattr(self, "friends_tab"):
+                self.friends_tab.refresh()
+            if hasattr(self, "account_tab"):
+                self.account_tab.refresh()
+        except Exception as e:
+            print(f"[switch] refresh: {e}")
+        QTimer.singleShot(500, self._refresh_all)
+        QTimer.singleShot(2500, self._resume_cloud_bots)
 
     # ── CORNER WIDGET ────────────────────────────────────────
 
@@ -1222,16 +1290,21 @@ class ApexWindow(QMainWindow):
         self._corner_universe = QPushButton("✦  UNIVERSE")
         self._corner_makebot  = QPushButton("⚒  MAKE BOT")
         self._corner_friends  = QPushButton("☺  FRIENDS")
-        self._corner_account  = QPushButton("⚇  ACCOUNT")    # V3 wave 4
+        self._corner_account  = QPushButton("⚇  ACCOUNT")
+        self._corner_admin    = QPushButton("♛  ADMIN")      # V3 wave 5
         self._corner_tools    = QPushButton("⚙  TOOLS")
 
         for btn in (self._corner_universe, self._corner_makebot,
                     self._corner_friends, self._corner_account,
-                    self._corner_tools):
+                    self._corner_admin, self._corner_tools):
             btn.setObjectName("cornerBtn")
             btn.setCheckable(True)
             btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
             row.addWidget(btn)
+
+        # ADMIN corner button is hidden by default — _refresh_admin_visibility
+        # un-hides it once /auth/me returns a non-USER role.
+        self._corner_admin.setVisible(False)
 
         self._corner_universe.clicked.connect(
             lambda: self._switch_corner(self._universe_idx, self._corner_universe))
@@ -1241,6 +1314,8 @@ class ApexWindow(QMainWindow):
             lambda: self._switch_corner(self._friends_idx,  self._corner_friends))
         self._corner_account.clicked.connect(
             lambda: self._switch_corner(self._account_idx,  self._corner_account))
+        self._corner_admin.clicked.connect(
+            lambda: self._switch_corner(self._admin_idx,    self._corner_admin))
         self._corner_tools.clicked.connect(
             lambda: self._switch_corner(self._tools_idx, self._corner_tools))
         self.tabs.currentChanged.connect(self._on_tab_changed)
@@ -1250,7 +1325,7 @@ class ApexWindow(QMainWindow):
         self.tabs.setCurrentIndex(idx)
         all_corners = (self._corner_universe, self._corner_makebot,
                        self._corner_friends, self._corner_account,
-                       self._corner_tools)
+                       self._corner_admin, self._corner_tools)
         for b in all_corners:
             b.setProperty("active", str(b is btn).lower())
             b.style().unpolish(b)
@@ -1260,10 +1335,10 @@ class ApexWindow(QMainWindow):
         # Deactivate corner buttons if we switched away from their tabs
         if idx not in (self._universe_idx, self._makebot_idx,
                        self._friends_idx, self._account_idx,
-                       self._tools_idx):
+                       self._admin_idx, self._tools_idx):
             for b in (self._corner_universe, self._corner_makebot,
                       self._corner_friends, self._corner_account,
-                      self._corner_tools):
+                      self._corner_admin, self._corner_tools):
                 b.setProperty("active", "false")
                 b.setChecked(False)
                 b.style().unpolish(b)
@@ -1306,17 +1381,18 @@ class ApexWindow(QMainWindow):
         insert_at = self._morebots_idx
         self.tabs.insertTab(insert_at, tab, label)
 
-        # Shift static indices  (V3 wave 4 added _account_idx)
+        # Shift static indices  (V3 wave 5 added _admin_idx)
         self._morebots_idx += 1
         self._universe_idx += 1
         self._makebot_idx  += 1
         self._friends_idx  += 1
         self._account_idx  += 1
+        self._admin_idx    += 1
         self._tools_idx    += 1
 
         for hidden in (self._universe_idx, self._makebot_idx,
                        self._friends_idx, self._account_idx,
-                       self._tools_idx):
+                       self._admin_idx, self._tools_idx):
             self.tabs.tabBar().setTabVisible(hidden, False)
 
         actual_idx = self.tabs.indexOf(tab)
@@ -1355,16 +1431,17 @@ class ApexWindow(QMainWindow):
         idx = self.tabs.indexOf(tab)
         if idx >= 0:
             self.tabs.removeTab(idx)
-            # Shift static indices back  (V3 wave 4 added _account_idx)
+            # Shift static indices back  (V3 wave 5 added _admin_idx)
             if idx < self._morebots_idx: self._morebots_idx -= 1
             if idx < self._universe_idx: self._universe_idx -= 1
             if idx < self._makebot_idx:  self._makebot_idx  -= 1
             if idx < self._friends_idx:  self._friends_idx  -= 1
             if idx < self._account_idx:  self._account_idx  -= 1
+            if idx < self._admin_idx:    self._admin_idx    -= 1
             if idx < self._tools_idx:    self._tools_idx    -= 1
             for hidden in (self._universe_idx, self._makebot_idx,
                            self._friends_idx, self._account_idx,
-                           self._tools_idx):
+                           self._admin_idx, self._tools_idx):
                 self.tabs.tabBar().setTabVisible(hidden, False)
 
         self._bot_dots.pop(side, None)
@@ -1529,6 +1606,60 @@ class ApexWindow(QMainWindow):
                     bc.cloud_resume_if_running()
                 except Exception as e:
                     print(f"[cloud-resume] {side}: {e}")
+
+    # ── V3 wave 5 — credits chip + admin tab visibility ─────────────
+
+    def _refresh_user_meta(self):
+        """Hit /auth/me + /credits/me to update the credit chip and the
+        ADMIN corner button visibility. Bundled so we only hit the
+        server twice instead of once per consumer."""
+        class _W(QThread):
+            done = pyqtSignal(dict, int)
+            def run(self_):
+                import requests
+                from ui.login import load_auth, load_server_url
+                tok = (load_auth() or {}).get("token") or ""
+                if not tok:
+                    self_.done.emit({}, 0)
+                    return
+                base = load_server_url()
+                hdr  = {"Authorization": f"Bearer {tok}"}
+                me   = {}
+                bal  = 0
+                try:
+                    r = requests.get(f"{base}/auth/me", headers=hdr, timeout=8)
+                    if r.ok:
+                        me = r.json()
+                except Exception:
+                    pass
+                try:
+                    r = requests.get(f"{base}/credits/me", headers=hdr, timeout=8)
+                    if r.ok:
+                        bal = int(r.json().get("balance", 0))
+                except Exception:
+                    pass
+                self_.done.emit(me, bal)
+
+        w = _W()
+        w.done.connect(self._on_user_meta_loaded)
+        w.finished.connect(
+            lambda _w=w: self._meta_workers.remove(_w)
+                          if _w in getattr(self, "_meta_workers", []) else None)
+        self._meta_workers = getattr(self, "_meta_workers", [])
+        self._meta_workers.append(w)
+        w.start()
+
+    def _on_user_meta_loaded(self, me: dict, balance: int):
+        # Credits chip — always update
+        if hasattr(self, "credits_chip"):
+            self.credits_chip.setText(f"◊  {balance:,} credits")
+        # Admin corner button — show only for admin roles
+        role = (me or {}).get("role", "USER")
+        is_admin = role in ("ADMIN", "SUB_BOSS_ADMIN", "BOSS_ADMIN")
+        if hasattr(self, "_corner_admin"):
+            self._corner_admin.setVisible(is_admin)
+            if is_admin:
+                self._corner_admin.setToolTip(f"Admin dashboard · role: {role}")
 
     # ── QUICK CONTROLS ───────────────────────────────────────
 

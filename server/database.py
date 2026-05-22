@@ -50,8 +50,11 @@ def init_db() -> None:
             "ALTER TABLE users ADD COLUMN verification_sent_at TEXT",
             "ALTER TABLE users ADD COLUMN avatar_url          TEXT",
             "ALTER TABLE users ADD COLUMN phone               TEXT",
+            # V3 wave 5 — admin hierarchy
+            "ALTER TABLE users ADD COLUMN role                TEXT NOT NULL DEFAULT 'USER'",
             "CREATE INDEX IF NOT EXISTS idx_users_google_sub ON users(google_sub)",
             "CREATE INDEX IF NOT EXISTS idx_users_verif_token ON users(verification_token)",
+            "CREATE INDEX IF NOT EXISTS idx_users_role         ON users(role)",
         ):
             try:
                 c.execute(ddl)
@@ -187,6 +190,48 @@ def update_user_password(user_id: int, hashed_password: str) -> None:
         c.execute("UPDATE users SET hashed_password=? WHERE id=?",
                   (hashed_password, user_id))
         c.commit()
+
+
+def set_user_role(user_id: int, role: str) -> dict:
+    """role must be one of: USER, ADMIN, SUB_BOSS_ADMIN, BOSS_ADMIN."""
+    valid = {"USER", "ADMIN", "SUB_BOSS_ADMIN", "BOSS_ADMIN"}
+    if role not in valid:
+        raise ValueError(f"Invalid role: {role}")
+    with _conn() as c:
+        c.execute("UPDATE users SET role=? WHERE id=?", (role, user_id))
+        c.commit()
+    return get_user_by_id(user_id)
+
+
+def list_all_users(limit: int = 200) -> list[dict]:
+    """Admin-only listing used to populate the user table on the admin tab."""
+    with _conn() as c:
+        rows = c.execute(
+            "SELECT * FROM users ORDER BY id ASC LIMIT ?", (limit,)
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def bootstrap_boss_admin() -> Optional[int]:
+    """If nobody has the BOSS_ADMIN role yet, promote the lowest-id active
+    user. Called once on server startup so the developer (first signup)
+    automatically gets the master role.
+
+    Returns the promoted user's id, or None if nobody to promote."""
+    with _conn() as c:
+        row = c.execute(
+            "SELECT id FROM users WHERE role='BOSS_ADMIN' LIMIT 1"
+        ).fetchone()
+        if row:
+            return None
+        first = c.execute(
+            "SELECT id FROM users WHERE is_active=1 ORDER BY id ASC LIMIT 1"
+        ).fetchone()
+        if not first:
+            return None
+        c.execute("UPDATE users SET role='BOSS_ADMIN' WHERE id=?", (first["id"],))
+        c.commit()
+        return first["id"]
 
 
 def update_user_email(user_id: int, new_email: str) -> dict:
