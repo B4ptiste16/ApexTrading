@@ -426,6 +426,9 @@ async def upload_public_bot(
     name:        str = Form(...),
     description: str = Form(""),
     tags:        str = Form(""),     # comma-separated
+    philosophy:  str = Form(""),     # V3.1.1
+    price_credits: int = Form(0),    # V3.1.1
+    visibility:  str = Form("public"),
     file:        UploadFile = File(...),
     authorization: str | None = Header(default=None),
 ):
@@ -438,6 +441,9 @@ async def upload_public_bot(
             description=description.strip(),
             tags=[t for t in tags.split(",") if t.strip()],
             file_bytes=blob,
+            philosophy=philosophy,
+            price_credits=price_credits,
+            visibility=visibility,
         )
     except ValueError as e:
         raise HTTPException(400, str(e))
