@@ -1013,6 +1013,11 @@ class ApexWindow(QMainWindow):
 
         self._setup_tray()
         QTimer.singleShot(600, self._refresh_all)
+        # v1.2.0 — restore cloud-bot UI state on startup. If any cloud
+        # bots are still running on Oracle (the server keeps them alive
+        # across desktop restarts), light up their tabs without making
+        # the user click ▶ again.
+        QTimer.singleShot(3000, self._resume_cloud_bots)
 
         # V7.1.1: accept .py drops anywhere in the window so a user can
         # drag a bot script in and we'll offer to install it locally or
@@ -1473,6 +1478,19 @@ class ApexWindow(QMainWindow):
                 ov.refresh_active_bots()
         except Exception as e:
             print(f"[overview sync] {e}")
+
+    # ── CLOUD RESUME ─────────────────────────────────────────
+
+    def _resume_cloud_bots(self):
+        """Ask each cloud-flagged bot's controller to query Oracle for
+        its current running state, and restore the UI accordingly."""
+        for side, tab in self._bot_tabs.items():
+            bc = getattr(tab, "bot_ctrl", None)
+            if bc and hasattr(bc, "cloud_resume_if_running"):
+                try:
+                    bc.cloud_resume_if_running()
+                except Exception as e:
+                    print(f"[cloud-resume] {side}: {e}")
 
     # ── QUICK CONTROLS ───────────────────────────────────────
 
