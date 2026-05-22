@@ -336,6 +336,51 @@ class MoreBotsTab(QWidget):
         s.add(uw)
 
         # ─────────────────────────────────────────────────────
+        # V3.1.5 — Bot library lock
+        # ─────────────────────────────────────────────────────
+        lock_wrap = QFrame()
+        lock_wrap.setStyleSheet(
+            f"background:{C['panel2']};border:1px solid {C['border']};"
+            f"border-radius:8px;")
+        lv = QVBoxLayout(lock_wrap)
+        lv.setContentsMargins(16, 12, 16, 12)
+        lv.setSpacing(6)
+
+        lock_head = QHBoxLayout()
+        lock_title = QLabel("🔒  LIBRARY LOCK")
+        lock_title.setStyleSheet(
+            f"color:{C['muted']};font-size:9px;letter-spacing:3px;"
+            f"font-weight:700;")
+        lock_head.addWidget(lock_title)
+        lock_head.addStretch()
+        self._lock_status = QLabel("")
+        self._lock_status.setStyleSheet(f"color:{C['green']};font-size:10px;")
+        lock_head.addWidget(self._lock_status)
+        lhw = QWidget(); lhw.setLayout(lock_head)
+        lv.addWidget(lhw)
+
+        lock_desc = QLabel(
+            "Encrypt every custom bot's .py file → .apex so the bot "
+            "library can't be opened by a text editor or sync utility. "
+            "<b>Casual protection only</b> — anyone with APEX.exe can "
+            "extract the key. For real isolation, run bots in cloud "
+            "mode (Tools → AUTOMATION).")
+        lock_desc.setStyleSheet(f"color:{C['muted']};font-size:11px;line-height:1.5;")
+        lock_desc.setWordWrap(True)
+        lv.addWidget(lock_desc)
+
+        lock_row = QHBoxLayout()
+        self._lock_btn = QPushButton("🔒  Lock library")
+        self._lock_btn.setObjectName("toolBtn")
+        self._lock_btn.clicked.connect(self._toggle_lock)
+        lock_row.addWidget(self._lock_btn)
+        lock_row.addStretch()
+        lrw = QWidget(); lrw.setLayout(lock_row)
+        lv.addWidget(lrw)
+        s.add(lock_wrap)
+        self._refresh_lock_state()
+
+        # ─────────────────────────────────────────────────────
         # V3.1.3 — BOT MARKET launcher
         # The full marketplace lives in its own tab (ui/bot_market_tab.py).
         # It only appears in the tab bar once the user opens it from here,
@@ -442,6 +487,72 @@ class MoreBotsTab(QWidget):
         win = self.window()
         if hasattr(win, "_open_bot_market"):
             win._open_bot_market()
+
+    # ── V3.1.5 — Library lock / unlock ──────────────────────
+
+    def _refresh_lock_state(self):
+        from core.paths  import DATA_DIR
+        from core        import secure
+        bots_dir = DATA_DIR / "bots"
+        locked   = secure.is_locked(bots_dir)
+        if locked:
+            self._lock_btn.setText("🔓  Unlock library")
+            self._lock_status.setText("LOCKED")
+            self._lock_status.setStyleSheet(
+                f"color:{C['orange']};font-size:10px;font-weight:700;"
+                f"letter-spacing:2px;")
+        else:
+            self._lock_btn.setText("🔒  Lock library")
+            self._lock_status.setText("UNLOCKED")
+            self._lock_status.setStyleSheet(
+                f"color:{C['muted']};font-size:10px;letter-spacing:2px;")
+
+    def _toggle_lock(self):
+        from core.paths import DATA_DIR
+        from core       import secure
+        bots_dir = DATA_DIR / "bots"
+        if not secure.HAS_CRYPTO:
+            QMessageBox.warning(
+                self, "Missing dependency",
+                "Locking requires the 'cryptography' Python package. "
+                "Install it: pip install cryptography")
+            return
+        if secure.is_locked(bots_dir):
+            unlocked = secure.unlock_bot_library(bots_dir)
+            self._sync_registry_after_lock(unlocked, locked=False)
+            self._upload_msg.setText(
+                f"✓ Unlocked {len(unlocked)} bot{'s' if len(unlocked)!=1 else ''}")
+        else:
+            if QMessageBox.question(
+                    self, "Lock library",
+                    "Encrypt every custom bot in your library?\n\n"
+                    "After locking, the .py files become .apex and can "
+                    "no longer be opened by a text editor. You can "
+                    "unlock the library any time from this same button."
+            ) != QMessageBox.StandardButton.Yes:
+                return
+            locked = secure.lock_bot_library(bots_dir)
+            self._sync_registry_after_lock(locked, locked=True)
+            self._upload_msg.setText(
+                f"✓ Locked {len(locked)} bot{'s' if len(locked)!=1 else ''}")
+        QTimer.singleShot(4000, lambda: self._upload_msg.setText(""))
+        self._refresh_lock_state()
+
+    def _sync_registry_after_lock(self, slugs: list, *, locked: bool):
+        """Rewrite custom-bot registry entries so their `script` field
+        points to whichever file extension currently exists on disk."""
+        from core.paths import DATA_DIR
+        s = D.load_settings()
+        reg = s.get("bot_registry",
+                    {"active": [], "silenced": [], "custom": []})
+        new_ext = ".apex" if locked else ".py"
+        for c in reg.get("custom", []):
+            if c.get("id") in slugs:
+                old = Path(c.get("script", ""))
+                c["script"] = str(old.with_suffix(new_ext))
+        s["bot_registry"] = reg
+        with open(D.SETTINGS_FILE, "w", encoding="utf-8") as f:
+            json.dump(s, f, indent=2)
 
     def _clear_grid(self, layout, keep_row0=False):
         for i in reversed(range(layout.count())):

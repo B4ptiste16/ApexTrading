@@ -335,12 +335,32 @@ class BotProcessWidget(QWidget):
         if self._is_cloud_mode():
             return self._cloud_start()
         frozen = getattr(sys, "frozen", False)
-        # In a frozen build the bot code is bundled inside APEX.exe and
-        # launched via `APEX.exe --run-bot SIDE`, so there is no .py on
-        # disk to check. Only validate the path when running from source.
-        if not frozen and not self.script_path.exists():
-            self._log(f"Script not found: {self.script_path}", C["red"])
-            return
+
+        # V3.1.5 — if the user has locked their bot library, the file
+        # on disk is .apex (encrypted). Find whatever's actually there,
+        # decrypt to a short-lived temp .py, then run THAT.
+        run_path = self.script_path
+        self._tmp_script: Optional[Path] = None
+        if not frozen:
+            if not run_path.exists() and self.script_path.suffix in (".py", ".apex"):
+                alt = self.script_path.with_suffix(
+                    ".apex" if self.script_path.suffix == ".py" else ".py")
+                if alt.exists():
+                    run_path = alt
+            if run_path.suffix == ".apex":
+                try:
+                    from core import secure
+                    self._tmp_script = secure.decrypted_temp_file(run_path)
+                    run_path = self._tmp_script
+                    self._log(f"🔓  Decrypted {self.script_path.name} → "
+                              f"{run_path.name}", C["muted"])
+                except Exception as e:
+                    self._log(f"Could not decrypt {self.script_path.name}: {e}",
+                              C["red"])
+                    return
+            if not run_path.exists():
+                self._log(f"Script not found: {run_path}", C["red"])
+                return
         self.process = QProcess(self)
         self.process.readyReadStandardOutput.connect(self._on_stdout)
         self.process.readyReadStandardError.connect(self._on_stderr)
@@ -358,7 +378,7 @@ class BotProcessWidget(QWidget):
             self.process.setWorkingDirectory(str(DATA_DIR))
             self.process.start(sys.executable, ["--run-bot", self.side])
         else:
-            self.process.start(sys.executable, ["-u", str(self.script_path)])
+            self.process.start(sys.executable, ["-u", str(run_path)])
         if self.process.waitForStarted(3000):
             self._set_running(True)
             self._log(f"Started {self.script_path.name}", C["green"])
@@ -537,6 +557,14 @@ class BotProcessWidget(QWidget):
 
     def _on_finished(self, exit_code, exit_status):
         self._set_running(False)
+        # V3.1.5 — delete the short-lived decrypted .py if any
+        tmp = getattr(self, "_tmp_script", None)
+        if tmp is not None:
+            try:
+                tmp.unlink(missing_ok=True)
+            except Exception:
+                pass
+            self._tmp_script = None
         self._log(f"Process ended (exit code {exit_code})",
                   C["yellow"] if exit_code == 0 else C["red"])
 

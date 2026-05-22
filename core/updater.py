@@ -40,33 +40,69 @@ GITHUB_REPO    = "B4ptiste16/ApexTrading"
 CURRENT_VERSION = "1.0.0"
 
 
-def _bundled_version_file() -> Path:
-    """v3.1.2 — in a PyInstaller --onedir build the project source lives
-    inside an archive, so Path(__file__).parent.parent doesn't reach the
-    data directory. Data files (version.json, BOT_SKELETON.md, assets/)
-    land under sys._MEIPASS instead.
+def _candidate_version_paths() -> list[Path]:
+    """v3.1.5 — return ALL known places version.json might live, in
+    priority order, so the resolver tries each and uses whichever exists.
 
-    In source / dev mode, fall back to the project-root version.json so
-    `python main.py` still picks up the right version."""
+    Previously we relied solely on sys._MEIPASS, but a few PyInstaller
+    --onedir builds were observed not setting _MEIPASS at import time
+    (timing of pyimod02_archive vs. our module import). Falling back to
+    the executable's directory + _internal/ covers that case too."""
+    candidates: list[Path] = []
     if getattr(sys, "frozen", False):
         meipass = getattr(sys, "_MEIPASS", None)
         if meipass:
-            return Path(meipass) / "version.json"
-    return Path(__file__).parent.parent / "version.json"
+            candidates.append(Path(meipass) / "version.json")
+        exe_dir = Path(sys.executable).parent
+        candidates.append(exe_dir / "_internal" / "version.json")
+        candidates.append(exe_dir / "version.json")
+    candidates.append(Path(__file__).parent.parent / "version.json")
+    candidates.append(Path(__file__).parent / "version.json")
+    return candidates
+
+
+def _bundled_version_file() -> Path:
+    for p in _candidate_version_paths():
+        try:
+            if p.exists():
+                return p
+        except Exception:
+            continue
+    # No candidate exists — return the first so callers can stat() it
+    # and at least log a sensible "not found" path.
+    cands = _candidate_version_paths()
+    return cands[0] if cands else Path("version.json")
 
 
 VERSION_FILE = _bundled_version_file()
 # ─────────────────────────────────────────────────────────
 
 
+_VERSION_LOGGED = False
+
+
 def get_current_version() -> str:
-    """Read version from the bundled (or dev) version.json."""
-    if VERSION_FILE.exists():
+    """Read version from the bundled (or dev) version.json. Logs the
+    resolution path on first call so any future regression is debuggable
+    from the user's apex_update.log / console output."""
+    global _VERSION_LOGGED
+    path = VERSION_FILE
+    if path.exists():
         try:
-            with open(VERSION_FILE) as f:
-                return json.load(f).get("version", CURRENT_VERSION)
-        except Exception:
-            pass
+            with open(path) as f:
+                v = json.load(f).get("version", CURRENT_VERSION)
+            if not _VERSION_LOGGED:
+                print(f"[updater] version {v} (from {path})", flush=True)
+                _VERSION_LOGGED = True
+            return v
+        except Exception as e:
+            print(f"[updater] read failed for {path}: {e}", flush=True)
+    if not _VERSION_LOGGED:
+        cands = _candidate_version_paths()
+        print(f"[updater] version.json not found. Tried:", flush=True)
+        for c in cands:
+            print(f"  - {c}  exists={c.exists()}", flush=True)
+        _VERSION_LOGGED = True
     return CURRENT_VERSION
 
 

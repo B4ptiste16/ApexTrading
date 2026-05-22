@@ -83,6 +83,30 @@ def _openai_extract(j: dict) -> str:
         return ""
 
 
+# V3.1.5 — Google Gemini's free tier (60 req/min, 1500/day per project)
+# uses a slightly different request shape than OpenAI's. system prompt
+# goes into `system_instruction`, user message into `contents`.
+
+def _gemini_build(prompt: str, system: str, key: str, model: str) -> tuple[dict, dict]:
+    return (
+        {"x-goog-api-key": key,
+         "Content-Type":   "application/json"},
+        {"system_instruction": {"parts": [{"text": system}]},
+         "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+         "generationConfig": {"maxOutputTokens": 4096, "temperature": 0.6}},
+    )
+
+
+def _gemini_extract(j: dict) -> str:
+    try:
+        return "".join(
+            p.get("text", "")
+            for p in j["candidates"][0]["content"]["parts"]
+        )
+    except (KeyError, IndexError, TypeError):
+        return ""
+
+
 def _apex_free_build(prompt: str, system: str, key: str, model: str) -> tuple[dict, dict]:
     """The 'Free (via APEX)' option doesn't need an API key — it routes
     through the APEX server which uses APEX's own pooled Anthropic key.
@@ -111,6 +135,35 @@ PROVIDERS = {
         ],
         "build":   _apex_free_build,
         "extract": _apex_free_extract,
+        "free":    True,
+        "credits": True,
+    },
+    "🎁  Google Gemini  (free 1500/day)": {
+        # Gemini's URL embeds the model — {model} placeholder resolved
+        # in the worker just before the POST. Free tier: ~1500 req/day,
+        # 60 RPM. Get a key at https://aistudio.google.com/apikey.
+        "url":     "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
+        "models":  [
+            ("Gemini 2.5 Flash  (recommended)", "gemini-2.5-flash"),
+            ("Gemini 2.5 Pro",                  "gemini-2.5-pro"),
+            ("Gemini 2.0 Flash",                "gemini-2.0-flash"),
+        ],
+        "build":   _gemini_build,
+        "extract": _gemini_extract,
+        "free":    True,
+    },
+    "🎁  Groq  (free, fast Llama)": {
+        # Groq has an OpenAI-compatible API. Free tier: ~14k tokens/min,
+        # 30 RPM. Key at https://console.groq.com/keys.
+        "url":     "https://api.groq.com/openai/v1/chat/completions",
+        "models":  [
+            ("Llama 3.3 70B  (recommended)",   "llama-3.3-70b-versatile"),
+            ("Llama 3.1 8B Instant",           "llama-3.1-8b-instant"),
+            ("Mixtral 8×7B",                   "mixtral-8x7b-32768"),
+            ("Gemma 2 9B",                     "gemma2-9b-it"),
+        ],
+        "build":   _openai_build,
+        "extract": _openai_extract,
         "free":    True,
     },
     "Anthropic (Claude)": {
@@ -233,6 +286,9 @@ class _GenerateWorker(QThread):
                 self.done.emit(False,
                     "APEX server URL not configured. Sign in first.")
                 return
+        # V3.1.5 — Gemini's URL embeds the model in the path.
+        if "{model}" in url:
+            url = url.format(model=self.model)
         try:
             r = requests.post(url, headers=headers,
                               json=body, timeout=120)
@@ -500,19 +556,34 @@ class MakeBotTab(QWidget):
         # option is selected
         self._model_combo.currentIndexChanged.connect(self._refresh_custom_visibility)
         self._refresh_custom_visibility()
-        # Via-APEX: no key needed, credits badge appears + balance is
-        # fetched from the server.
-        is_free = bool(cfg.get("free"))
+        # V3.1.5 — three flavours of "free":
+        #   • APEX-credits  (cfg.credits=True)  → no key needed, badge
+        #     shows current credit balance, charged 10 ◊ per gen
+        #   • Provider free tier (Gemini / Groq) → user pastes their own
+        #     free-tier key, badge says "FREE TIER", call costs nothing
+        #   • Paid (Anthropic / OpenAI / OpenRouter) → user pastes a key,
+        #     no badge
+        is_free     = bool(cfg.get("free"))
+        is_credits  = bool(cfg.get("credits"))
         self._free_badge.setVisible(is_free)
         if hasattr(self, "_key_edit"):
-            self._key_edit.setEnabled(not is_free)
-            if is_free:
+            self._key_edit.setEnabled(not is_credits)
+            if is_credits:
                 self._key_edit.setPlaceholderText(
                     "Not required — generation costs APEX credits")
+            elif name.startswith("🎁  Google"):
+                self._key_edit.setPlaceholderText(
+                    "Get a free key at aistudio.google.com/apikey")
+            elif name.startswith("🎁  Groq"):
+                self._key_edit.setPlaceholderText(
+                    "Get a free key at console.groq.com/keys")
             else:
                 self._key_edit.setPlaceholderText("")
-        if is_free:
+        if is_credits:
             self._refresh_credit_balance()
+        elif is_free:
+            # Provider free tier — show a static "FREE TIER" badge
+            self._free_badge.setText("FREE TIER  ✨")
 
     def _refresh_credit_balance(self):
         """Fetch /api/makebot/price so the badge shows live cost + balance."""
@@ -605,7 +676,8 @@ class MakeBotTab(QWidget):
     def _on_generate(self):
         prov = self._provider_combo.currentText()
         cfg = PROVIDERS.get(prov) or {}
-        is_free = bool(cfg.get("free"))
+        is_credits = bool(cfg.get("credits"))    # APEX-credits flow
+        is_free    = bool(cfg.get("free"))       # APEX OR free-tier provider
         model = self._resolved_model_slug()
         key   = self._key_edit.text().strip()
         prompt = self._desc.toPlainText().strip()
@@ -614,10 +686,14 @@ class MakeBotTab(QWidget):
             QMessageBox.warning(self, "Missing model",
                 "Pick (or type) a model first.")
             return
-        if not is_free and not key:
+        # APEX-credits: no key needed at all.
+        # Provider free-tier (Gemini / Groq): user still needs their
+        # own (free) API key — paste it after signing up.
+        if not is_credits and not key:
             QMessageBox.warning(self, "Missing key",
-                "Paste your API key for the chosen provider, "
-                "or switch to the Free (via APEX) provider.")
+                "Paste your API key for the chosen provider. For the "
+                "free tiers, grab one from the link in the key-field "
+                "placeholder — it takes ~1 minute.")
             return
         if len(prompt) < 20:
             QMessageBox.warning(self, "Description too short",
@@ -681,7 +757,7 @@ class MakeBotTab(QWidget):
         # badge so the user sees the updated balance immediately.
         prov = self._provider_combo.currentText()
         cfg  = PROVIDERS.get(prov) or {}
-        if cfg.get("free"):
+        if cfg.get("credits"):
             self._refresh_credit_balance()
 
     # ── Save / publish ───────────────────────────────────────────────
