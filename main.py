@@ -1608,24 +1608,43 @@ class ApexWindow(QMainWindow):
                 QSystemTrayIcon.MessageIcon.Information, 2500)
 
     def _quit_app(self):
-        """V7.1.7: explicit quit. Confirms if bots are running, then
-        triggers closeEvent with _user_requested_quit=True so the
-        normal teardown path runs and the app fully exits."""
-        running = []
+        """v1.2.3 — explicit quit. Cloud bots live on Oracle and keep
+        trading independently of the desktop; only LOCAL bots die when
+        APEX quits. Confirmation dialog now distinguishes the two so the
+        user knows what will and won't happen."""
+        local_running:  list[str] = []
+        cloud_running:  list[str] = []
         for side, tab in self._bot_tabs.items():
             bc = getattr(tab, "bot_ctrl", None)
-            if bc and bc.is_running():
-                running.append(side)
-        if running:
+            if not bc:
+                continue
+            if getattr(bc, "_cloud_running", False):
+                cloud_running.append(side)
+            elif bc.is_running():
+                local_running.append(side)
+
+        if local_running or cloud_running:
             msg = QMessageBox(self)
             msg.setWindowTitle("Quit APEX?")
-            msg.setText(
-                f"<b>{len(running)} bot{'s' if len(running) > 1 else ''} "
-                f"still running:</b> {', '.join(running)}<br><br>"
-                "Quitting will stop them. They won't resume until you "
-                "open APEX again and start them (or until the auto-"
-                "schedule fires at the next market open).<br><br>"
-                "Quit anyway?")
+            parts = []
+            if local_running:
+                parts.append(
+                    f"<b>{len(local_running)} local bot"
+                    f"{'s' if len(local_running) > 1 else ''} "
+                    f"will stop:</b> {', '.join(local_running)}<br>"
+                    f"<span style='color:#7a8597;font-size:11px;'>"
+                    f"Running on this laptop — they die when APEX "
+                    f"quits.</span>")
+            if cloud_running:
+                parts.append(
+                    f"<b>{len(cloud_running)} cloud bot"
+                    f"{'s' if len(cloud_running) > 1 else ''} "
+                    f"will KEEP RUNNING on Oracle:</b> "
+                    f"{', '.join(cloud_running)}<br>"
+                    f"<span style='color:#7a8597;font-size:11px;'>"
+                    f"They trade 24/7 regardless of whether the "
+                    f"desktop is open.</span>")
+            msg.setText("<br><br>".join(parts) + "<br><br>Quit APEX?")
             msg.setStandardButtons(
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
             msg.setDefaultButton(QMessageBox.StandardButton.No)
@@ -1637,11 +1656,19 @@ class ApexWindow(QMainWindow):
         self.close()
 
     def _teardown_for_quit(self):
-        """Stop running bots, hide the tray icon, save state.
-        Called from closeEvent when _user_requested_quit is True."""
+        """Stop LOCAL bots only, hide the tray icon, save state.
+        Cloud bots live on Oracle and must survive desktop quit — the
+        whole point of cloud mode is 24/7 trading independent of this
+        machine. Called from closeEvent when _user_requested_quit
+        is True."""
         for side, tab in self._bot_tabs.items():
             bc = getattr(tab, "bot_ctrl", None)
-            if bc and bc.is_running():
+            if not bc:
+                continue
+            # Skip anything that's running on Oracle.
+            if getattr(bc, "_cloud_running", False):
+                continue
+            if bc.is_running():
                 try:
                     bc.stop_bot()
                 except Exception:
