@@ -308,6 +308,15 @@ def bracket_gauge(brackets: dict, positions: list) -> str:
         return empty_chart("No open brackets", 260)
 
     pos_map = {p["symbol"]: p for p in positions}
+    # v1.2.1 — only render brackets whose underlying position still
+    # exists on Alpaca. Liquidated positions linger in daybot_state.json
+    # until the bot's next sync_brackets_with_alpaca() cycle; without
+    # this filter the chart would show them frozen at "+0.0%" (current
+    # price falls back to entry when no live position is found).
+    brackets = {t: b for t, b in brackets.items() if t in pos_map}
+    if not brackets:
+        return empty_chart("No open brackets", 260)
+
     data    = []
     tickers = list(brackets.keys())
     n       = len(tickers)

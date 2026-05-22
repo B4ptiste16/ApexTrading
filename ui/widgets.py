@@ -427,22 +427,23 @@ class BotProcessWidget(QWidget):
         self._http_workers = [w for w in self._http_workers if w.isRunning()]
 
     def cloud_resume_if_running(self):
-        """v1.2.0 — called on app startup. If the Oracle server reports
-        this bot is already running (i.e. you closed the desktop app
-        while a cloud bot kept trading), restore the running UI state
-        and resume log-tail polling instead of asking the user to start
-        it again."""
-        if not self._is_cloud_mode():
-            return
+        """v1.2.1 — called on app startup. Query Oracle for live status
+        regardless of the local 'cloud mode' toggle, because the bot
+        might have been started on the cloud in a previous session and
+        the local flag has since been reset. If the server reports
+        running:true, restore the UI and resume log-tail polling."""
         def _on(ok, body):
-            if ok and body.get("running", False):
-                self._cloud_running = True
-                self._set_running(True)
-                self._log(
-                    f"☁  Already running on Oracle (resumed) · pid "
-                    f"{body.get('pid','?')}",
-                    C["green"])
-                self._start_cloud_polling()
+            if not ok:
+                return
+            if not body.get("running", False):
+                return
+            self._cloud_running = True
+            self._set_running(True)
+            self._log(
+                f"☁  Already running on Oracle (resumed) · pid "
+                f"{body.get('pid','?')}",
+                C["green"])
+            self._start_cloud_polling()
         self._cloud_call("GET", f"/bots/{self.side}/status", _on)
 
     def _cloud_start(self):

@@ -92,6 +92,43 @@ def _log_path(user_id: int, side: str) -> Path:
     return d / f"{side.lower()}.log"
 
 
+def _pid_file(user_id: int, side: str) -> Path:
+    """v1.2.1 — cross-worker dedup. uvicorn runs with --workers 2, so each
+    worker has its own in-memory _RUNNING dict. Without a shared
+    coordination point, two consecutive /bots/X/start calls hit different
+    workers and spawn duplicate bot processes. We persist the spawned PID
+    to a file under /opt/apex_users/user_<id>/pids/ that all workers read."""
+    d = _user_data_dir(user_id) / "pids"
+    d.mkdir(exist_ok=True)
+    return d / f"{side.lower()}.pid"
+
+
+def _read_pid_file(user_id: int, side: str) -> int:
+    p = _pid_file(user_id, side)
+    if not p.exists():
+        return 0
+    try:
+        return int(p.read_text(encoding="utf-8").strip() or 0)
+    except Exception:
+        return 0
+
+
+def _write_pid_file(user_id: int, side: str, pid: int) -> None:
+    try:
+        _pid_file(user_id, side).write_text(str(pid), encoding="utf-8")
+    except Exception as e:
+        print(f"[bot_runner] pid-file write failed: {e}", flush=True)
+
+
+def _clear_pid_file(user_id: int, side: str) -> None:
+    p = _pid_file(user_id, side)
+    try:
+        if p.exists():
+            p.unlink()
+    except Exception:
+        pass
+
+
 def _pid_alive(pid: int) -> bool:
     """True if a process with this PID exists. POSIX-only."""
     if pid <= 0:
@@ -140,13 +177,25 @@ def _build_env(user_id: int, side: str) -> dict[str, str]:
 # ── Public API ──────────────────────────────────────────────────────
 
 def is_running(user_id: int, side: str) -> bool:
-    key = (user_id, side.upper())
+    """v1.2.1 — first consult the on-disk PID file so any uvicorn worker
+    sees bots spawned by any other worker. Falls back to the in-memory
+    registry for completeness."""
+    s = side.upper()
+    # 1. PID file — cross-worker source of truth
+    pid = _read_pid_file(user_id, s)
+    if pid and _pid_alive(pid):
+        return True
+    if pid and not _pid_alive(pid):
+        _clear_pid_file(user_id, s)
+    # 2. Worker-local registry (still useful for proc / log handles)
+    key = (user_id, s)
     bot = _RUNNING.get(key)
     if bot is None:
         return False
     if _pid_alive(bot.pid):
+        # Restore the missing PID file (e.g. crashed before write)
+        _write_pid_file(user_id, s, bot.pid)
         return True
-    # Reap the dead entry
     with _LOCK:
         _RUNNING.pop(key, None)
     return False
@@ -154,10 +203,12 @@ def is_running(user_id: int, side: str) -> bool:
 
 def start_bot(user_id: int, side: str) -> dict:
     """Spawn the bot. Returns a small status dict for the API caller."""
-    key = (user_id, side.upper())
+    s = side.upper()
+    key = (user_id, s)
     if is_running(user_id, side):
-        bot = _RUNNING[key]
-        return {"ok": True, "already_running": True, "pid": bot.pid}
+        existing_pid = (_RUNNING[key].pid if key in _RUNNING
+                        else _read_pid_file(user_id, s))
+        return {"ok": True, "already_running": True, "pid": existing_pid}
 
     module = _bot_module(side)
     if module is None:
@@ -214,51 +265,89 @@ def start_bot(user_id: int, side: str) -> dict:
             user_id=user_id, side=side.upper(),
             pid=proc.pid, log_path=log_path, proc=proc,
         )
+    _write_pid_file(user_id, side, proc.pid)
     return {"ok": True, "pid": proc.pid,
             "log": str(log_path)}
 
 
 def stop_bot(user_id: int, side: str) -> dict:
-    key = (user_id, side.upper())
-    bot = _RUNNING.get(key)
-    if bot is None or not _pid_alive(bot.pid):
+    s = side.upper()
+    key = (user_id, s)
+    # PID file is the cross-worker source of truth; fall back to the
+    # worker-local registry only when the file is gone.
+    pid = _read_pid_file(user_id, s)
+    if not pid:
+        bot = _RUNNING.get(key)
+        pid = bot.pid if bot else 0
+    if not pid or not _pid_alive(pid):
         with _LOCK:
             _RUNNING.pop(key, None)
+        _clear_pid_file(user_id, s)
         return {"ok": True, "not_running": True}
     try:
-        os.killpg(os.getpgid(bot.pid), signal.SIGTERM)
+        os.killpg(os.getpgid(pid), signal.SIGTERM)
     except ProcessLookupError:
         pass
     except Exception as e:
         return {"ok": False, "detail": f"kill failed: {e}"}
-    # Give the bot up to 5s to exit cleanly, then SIGKILL
     for _ in range(50):
-        if not _pid_alive(bot.pid):
+        if not _pid_alive(pid):
             break
         time.sleep(0.1)
-    if _pid_alive(bot.pid):
+    if _pid_alive(pid):
         try:
-            os.killpg(os.getpgid(bot.pid), signal.SIGKILL)
+            os.killpg(os.getpgid(pid), signal.SIGKILL)
         except Exception:
             pass
     with _LOCK:
         _RUNNING.pop(key, None)
+    _clear_pid_file(user_id, s)
     return {"ok": True}
 
 
 def status(user_id: int, side: str) -> dict:
-    key = (user_id, side.upper())
-    bot = _RUNNING.get(key)
-    if bot is None or not _pid_alive(bot.pid):
-        return {"running": False}
-    return {"running": True, "pid": bot.pid,
-            "uptime_s": round(time.time() - bot.started_at, 1)}
+    s = side.upper()
+    pid = _read_pid_file(user_id, s)
+    if pid and _pid_alive(pid):
+        bot = _RUNNING.get((user_id, s))
+        return {"running": True, "pid": pid,
+                "uptime_s": (round(time.time() - bot.started_at, 1)
+                             if bot else None)}
+    if pid:
+        _clear_pid_file(user_id, s)
+    bot = _RUNNING.get((user_id, s))
+    if bot and _pid_alive(bot.pid):
+        _write_pid_file(user_id, s, bot.pid)
+        return {"running": True, "pid": bot.pid,
+                "uptime_s": round(time.time() - bot.started_at, 1)}
+    return {"running": False}
 
 
 def list_running(user_id: int) -> list[dict]:
-    out = []
+    out: list[dict] = []
+    seen: set[str] = set()
+    # Iterate PID files first (cross-worker truth)
+    try:
+        pid_dir = _user_data_dir(user_id) / "pids"
+        if pid_dir.exists():
+            for pf in pid_dir.glob("*.pid"):
+                side = pf.stem.upper()
+                pid  = _read_pid_file(user_id, side)
+                if pid and _pid_alive(pid):
+                    bot = _RUNNING.get((user_id, side))
+                    out.append({
+                        "side": side, "pid": pid,
+                        "uptime_s": (round(time.time() - bot.started_at, 1)
+                                     if bot else None),
+                    })
+                    seen.add(side)
+                elif pid:
+                    _clear_pid_file(user_id, side)
+    except Exception as e:
+        print(f"[bot_runner] list_running pid scan: {e}", flush=True)
+    # Fall through to in-memory entries this worker spawned
     for (uid, side), bot in list(_RUNNING.items()):
-        if uid != user_id:
+        if uid != user_id or side in seen:
             continue
         if not _pid_alive(bot.pid):
             continue
