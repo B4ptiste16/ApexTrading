@@ -138,8 +138,11 @@ class BotTab(QWidget):
         self.conf_spin.valueChanged.connect(self._on_conf_changed)
         self.conf_saved = QLabel("")
         self.conf_saved.setStyleSheet(f"color:{C['green']};font-size:10px;")
+        # Recommended values match each bot's built-in MIN_CONFIDENCE constant
+        _rec_conf = D.BOT_DEFAULT_CONF.get(self.side, 0.65)
         conf_hint = QLabel(
-            "lower = trades more often · applied on the bot's next cycle")
+            f"lower = trades more often · applied on the bot's next "
+            f"cycle · Recommended: {_rec_conf:.2f}")
         conf_hint.setStyleSheet(f"color:{C['muted']};font-size:10px;")
         conf_row.addWidget(conf_lbl)
         conf_row.addWidget(self.conf_spin)
@@ -164,7 +167,7 @@ class BotTab(QWidget):
             self.minpos_saved.setStyleSheet(f"color:{C['green']};font-size:10px;")
             mp_hint = QLabel(
                 "0 = only buy when AI is confident · 5+ = always stay invested "
-                "in the top-ranked names")
+                "in the top-ranked names · Recommended: 5")
             mp_hint.setStyleSheet(f"color:{C['muted']};font-size:10px;")
             mp_row.addWidget(mp_lbl)
             mp_row.addWidget(self.minpos_spin)
@@ -189,7 +192,8 @@ class BotTab(QWidget):
             self.minscore_saved.setStyleSheet(
                 f"color:{C['green']};font-size:10px;")
             ms_hint = QLabel(
-                "higher = call Claude (costs $) less often · 0 = always call")
+                "higher = call Claude (costs $) less often · 0 = always "
+                "call · Recommended: 30")
             ms_hint.setStyleSheet(f"color:{C['muted']};font-size:10px;")
             ms_row.addWidget(ms_lbl)
             ms_row.addWidget(self.minscore_spin)
@@ -214,7 +218,7 @@ class BotTab(QWidget):
             self.maxbr_saved.setStyleSheet(f"color:{C['green']};font-size:10px;")
             mb_hint = QLabel(
                 "0 = unlimited · each position has its own stop-loss & "
-                "take-profit · capped by buying power")
+                "take-profit · capped by buying power · Recommended: 0")
             mb_hint.setStyleSheet(f"color:{C['muted']};font-size:10px;")
             mb_row.addWidget(mb_lbl)
             mb_row.addWidget(self.maxbr_spin)
@@ -249,7 +253,7 @@ class BotTab(QWidget):
             self.atrmult_saved.setStyleSheet(f"color:{C['green']};font-size:10px;")
             atr_hint = QLabel(
                 "smaller = tighter, faster intraday trades · % ≈ ATR× × the "
-                "stock's daily ATR%")
+                "stock's daily ATR% · Recommended: stop ×0.50 / TP ×1.00")
             atr_hint.setStyleSheet(f"color:{C['muted']};font-size:10px;")
             atr_row.addWidget(sl_lbl)
             atr_row.addWidget(self.slmult_spin)

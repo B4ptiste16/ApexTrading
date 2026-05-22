@@ -6,8 +6,53 @@ Embedded in QWebEngineView widgets inside the Qt app.
 
 import json
 import math
+import datetime
 import numpy as np
 import pandas as pd
+
+try:
+    from zoneinfo import ZoneInfo
+    _ET = ZoneInfo("America/New_York")
+except Exception:
+    _ET = None
+
+# Cache the user's local tzinfo at import time. This is the only "local"
+# we need because Plotly will draw whatever times we hand it; the chart
+# axis label honours the data, not the browser locale.
+_LOCAL_TZ = datetime.datetime.now().astimezone().tzinfo
+
+
+def _utc_to_local_strings(times) -> list:
+    """Convert a UTC-aware datetime Series to naive local-time ISO
+    strings so Plotly displays them in the user's wall-clock time
+    (Alpaca always returns UTC; without this the chart x-axis is
+    shifted by the user's timezone offset)."""
+    try:
+        s = pd.to_datetime(times, utc=True)
+        local = s.dt.tz_convert(_LOCAL_TZ).dt.tz_localize(None)
+        return local.astype(str).tolist()
+    except Exception:
+        return [str(t) for t in times]
+
+
+def _local_market_hours() -> tuple[float, float]:
+    """US market session (09:30-16:00 ET) expressed in the user's local
+    time as (open_hour, close_hour) fractional hours. Used to feed
+    Plotly's xaxis.rangebreaks so the chart hides non-trading hours
+    accurately wherever in the world the user is."""
+    if _ET is None:
+        return (13.5, 20.0)        # fallback: UTC
+    try:
+        now_et = datetime.datetime.now(_ET)
+        o = now_et.replace(hour=9,  minute=30, second=0, microsecond=0)
+        c = now_et.replace(hour=16, minute=0,  second=0, microsecond=0)
+        ol = o.astimezone(_LOCAL_TZ)
+        cl = c.astimezone(_LOCAL_TZ)
+        return (ol.hour + ol.minute / 60.0,
+                cl.hour + cl.minute / 60.0)
+    except Exception:
+        return (13.5, 20.0)
+
 
 # All charts return HTML strings — no Qt imports needed here
 
@@ -130,12 +175,14 @@ def _market_hours_rangebreaks(period: str) -> list:
     """Plotly x-axis rangebreaks that hide hours / days when no broker
     quote is published, so the equity line draws close-to-close with no
     flat overnight gaps. Skips weekends, plus the 16:00-09:30 ET overnight
-    band (= 20:00-13:30 UTC) for intraday-resolution periods.
+    band — translated to the user's local timezone so it lines up with
+    the local-time x-axis labels.
     The DAILY-resolution periods (3M/6M/1Y) only need the weekend hide."""
     breaks = [{"bounds": ["sat", "mon"]}]
     if period in {"1D", "1W", "1M"}:
-        # Hide non-market hours (UTC). Approximate; covers both EDT/EST.
-        breaks.append({"bounds": [20, 13.5], "pattern": "hour"})
+        open_h, close_h = _local_market_hours()
+        # Plotly hides from `close_h` to next-day `open_h` (wraps midnight)
+        breaks.append({"bounds": [close_h, open_h], "pattern": "hour"})
     return breaks
 
 
@@ -151,7 +198,7 @@ def equity_curve(equity_df: pd.DataFrame, side: str, period: str) -> str:
 
     data = [{
         "type": "scatter",
-        "x":    equity_df["time"].astype(str).tolist(),
+        "x":    _utc_to_local_strings(equity_df["time"]),
         "y":    y,
         "mode": "lines",
         "name": "Equity",
@@ -194,7 +241,7 @@ def combined_history_chart(df: pd.DataFrame, period: str) -> str:
 
     data = [{
         "type": "scatter",
-        "x":    df["time"].astype(str).tolist(),
+        "x":    _utc_to_local_strings(df["time"]),
         "y":    y,
         "mode": "lines",
         "name": "Total",
@@ -235,7 +282,7 @@ def lifetime_chart(snaps: pd.DataFrame, side: str) -> str:
     data = [
         {
             "type": "scatter",
-            "x": snaps["time"].astype(str).tolist(),
+            "x": _utc_to_local_strings(snaps["time"]),
             "y": pv.tolist(),
             "mode": "lines", "name": "Portfolio",
             "line": {"width": 2.5, "color": color},
@@ -245,7 +292,7 @@ def lifetime_chart(snaps: pd.DataFrame, side: str) -> str:
         },
         {
             "type": "scatter",
-            "x": snaps["time"].astype(str).tolist(),
+            "x": _utc_to_local_strings(snaps["time"]),
             "y": peak,
             "mode": "lines", "name": "ATH",
             "line": {"width": 1, "color": MUTED, "dash": "dot"},
@@ -273,7 +320,7 @@ def drawdown_chart(snaps: pd.DataFrame) -> str:
 
     data = [{
         "type": "scatter",
-        "x": snaps["time"].astype(str).tolist(),
+        "x": _utc_to_local_strings(snaps["time"]),
         "y": dd.tolist(),
         "mode": "lines", "name": "DD",
         "line": {"width": 1.8, "color": R},
@@ -651,7 +698,7 @@ def combined_lifetime(snapshots: dict) -> str:
             continue
         data.append({
             "type": "scatter",
-            "x": snaps["time"].astype(str).tolist(),
+            "x": _utc_to_local_strings(snaps["time"]),
             "y": snaps["portfolio_value"].tolist(),
             "mode": "lines", "name": side,
             "line": {"width": 2, "color": color},
