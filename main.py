@@ -40,6 +40,7 @@ from ui.make_bot_tab import MakeBotTab    # V7.1.9
 from ui.friends_tab  import FriendsTab    # V3.0.0
 from ui.account_tab  import AccountTab    # V3 wave 4
 from ui.admin_tab    import AdminTab      # V3 wave 5
+from ui.bot_market_tab import BotMarketTab  # V3.1.3
 from ui.styles     import DARK_STYLESHEET, COLORS
 from core.updater  import (check_for_update, download_and_apply,
                             get_current_version, restart_app,
@@ -335,143 +336,55 @@ class MoreBotsTab(QWidget):
         s.add(uw)
 
         # ─────────────────────────────────────────────────────
-        # V3.1.1 — BOT MARKETPLACE
+        # V3.1.3 — BOT MARKET launcher
+        # The full marketplace lives in its own tab (ui/bot_market_tab.py).
+        # It only appears in the tab bar once the user opens it from here,
+        # keeping the MORE BOTS view focused on local bot management.
         # ─────────────────────────────────────────────────────
+        market_wrap = QFrame()
+        market_wrap.setStyleSheet(
+            f"background:{C['panel']};border:1px solid {C['border']};"
+            f"border-radius:12px;border-top:3px solid {C['purple']};")
+        mv = QVBoxLayout(market_wrap)
+        mv.setContentsMargins(24, 20, 24, 20)
+        mv.setSpacing(8)
+        title = QLabel("🛒  BOT MARKET")
+        title.setStyleSheet(
+            f"font-family:'Syne',sans-serif;font-size:18px;font-weight:800;"
+            f"color:{C['text']};letter-spacing:3px;")
+        mv.addWidget(title)
+        sub = QLabel("Browse, install and publish bots from the APEX network. "
+                      "Featured picks, personalised recommendations, full search, "
+                      "publisher analytics — open it in its own tab.")
+        sub.setStyleSheet(f"color:{C['muted']};font-size:11px;line-height:1.6;")
+        sub.setWordWrap(True)
+        mv.addWidget(sub)
 
-        # MY PUBLISHED BOTS — publisher analytics (only renders when
-        # the signed-in user has published something).
-        s.add(SectionHeader("MY PUBLISHED BOTS", C["yellow"]))
-        self._mine_status = QLabel("")
-        self._mine_status.setStyleSheet(
-            f"color:{C['muted']};font-size:11px;padding:4px 0;")
-        s.add(self._mine_status)
-        self._mine_box = QWidget()
-        self._mine_layout = QVBoxLayout(self._mine_box)
-        self._mine_layout.setSpacing(6)
-        self._mine_layout.setContentsMargins(0, 4, 0, 4)
-        s.add(self._mine_box)
-
-        # FEATURED
-        s.add(SectionHeader("⭐  FEATURED", C["orange"]))
-        self._featured_status = QLabel("")
-        self._featured_status.setStyleSheet(
-            f"color:{C['muted']};font-size:11px;padding:4px 0;")
-        s.add(self._featured_status)
-        self._featured_box = QWidget()
-        self._featured_layout = QVBoxLayout(self._featured_box)
-        self._featured_layout.setSpacing(6)
-        self._featured_layout.setContentsMargins(0, 4, 0, 4)
-        s.add(self._featured_box)
-
-        # RECOMMENDED
-        s.add(SectionHeader("✦  RECOMMENDED FOR YOU", C["purple"]))
-        self._reco_status = QLabel("")
-        self._reco_status.setStyleSheet(
-            f"color:{C['muted']};font-size:11px;padding:4px 0;")
-        s.add(self._reco_status)
-        self._reco_box = QWidget()
-        self._reco_layout = QVBoxLayout(self._reco_box)
-        self._reco_layout.setSpacing(6)
-        self._reco_layout.setContentsMargins(0, 4, 0, 4)
-        s.add(self._reco_box)
-
-        # BROWSE  — search + filters
-        from PyQt6.QtWidgets import (
-            QLineEdit as _QLineEdit, QComboBox as _QComboBox,
-            QSpinBox as _QSpinBox, QDoubleSpinBox as _QDoubleSpinBox,
+        open_row = QHBoxLayout()
+        open_row.setContentsMargins(0, 6, 0, 0)
+        open_btn = QPushButton("🛒  Open Bot Market")
+        open_btn.setObjectName("addBotBtn")
+        open_btn.setMinimumHeight(40)
+        open_btn.setStyleSheet(
+            f"QPushButton {{"
+            f"  background:rgba(138,147,201,0.12);"
+            f"  color:{C['purple']};"
+            f"  border:1px solid {C['purple']};"
+            f"  border-radius:8px;"
+            f"  font-family:'JetBrains Mono';font-size:11px;"
+            f"  letter-spacing:3px;font-weight:700;"
+            f"  padding:10px 26px;"
+            f"}}"
+            f"QPushButton:hover {{"
+            f"  background:rgba(138,147,201,0.22);"
+            f"}}"
         )
-        s.add(SectionHeader("BROWSE ALL BOTS", C["green"]))
-        browse_info = QLabel(
-            "Filter by philosophy / price / win rate / sort order, then "
-            "click any ⬇ Install to copy into your local library.")
-        browse_info.setStyleSheet(f"color:{C['muted']};font-size:11px;")
-        browse_info.setWordWrap(True)
-        s.add(browse_info)
-
-        # Search row
-        search_row = QHBoxLayout()
-        self._lib_search = _QLineEdit()
-        self._lib_search.setPlaceholderText("Search name or description…")
-        self._lib_search.setFixedHeight(32)
-        self._lib_search.setStyleSheet(
-            f"background:{C['panel2']};color:{C['text']};"
-            f"border:1px solid {C['border']};border-radius:6px;"
-            f"padding:0 12px;font-size:11px;")
-        self._lib_search.returnPressed.connect(self._refresh_library)
-        search_row.addWidget(self._lib_search)
-        lib_btn = QPushButton("Search")
-        lib_btn.setObjectName("toolBtn")
-        lib_btn.clicked.connect(self._refresh_library)
-        search_row.addWidget(lib_btn)
-        upload_pub_btn = QPushButton("⬆  Publish own bot…")
-        upload_pub_btn.setObjectName("addBotBtn")
-        upload_pub_btn.clicked.connect(self._publish_bot)
-        search_row.addWidget(upload_pub_btn)
-        srw = QWidget(); srw.setLayout(search_row)
-        s.add(srw)
-
-        # Filter row — philosophy / sort / max-price / min-win-rate
-        filt_row = QHBoxLayout()
-        filt_row.setSpacing(8)
-
-        ph_lbl = QLabel("Philosophy:")
-        ph_lbl.setStyleSheet(f"color:{C['muted']};font-size:10px;letter-spacing:2px;")
-        self._filt_philosophy = _QComboBox()
-        self._filt_philosophy.addItem("All", "")
-        for opt in ("long", "short", "day", "options", "momentum",
-                    "mean-reversion", "scalping", "swing"):
-            self._filt_philosophy.addItem(opt.title(), opt)
-        self._filt_philosophy.currentIndexChanged.connect(self._refresh_library)
-
-        sort_lbl = QLabel("Sort:")
-        sort_lbl.setStyleSheet(f"color:{C['muted']};font-size:10px;letter-spacing:2px;")
-        self._filt_sort = _QComboBox()
-        for label, key in (("Most downloaded", "downloads"),
-                           ("Top rated",       "rating"),
-                           ("Highest win rate","win_rate"),
-                           ("Newest",          "newest"),
-                           ("Cheapest first",  "cheapest")):
-            self._filt_sort.addItem(label, key)
-        self._filt_sort.currentIndexChanged.connect(self._refresh_library)
-
-        price_lbl = QLabel("Max credits:")
-        price_lbl.setStyleSheet(f"color:{C['muted']};font-size:10px;letter-spacing:2px;")
-        self._filt_max_price = _QSpinBox()
-        self._filt_max_price.setRange(0, 1_000_000)
-        self._filt_max_price.setSingleStep(50)
-        self._filt_max_price.setSpecialValueText("any")
-        self._filt_max_price.setValue(0)
-        self._filt_max_price.setFixedWidth(110)
-        self._filt_max_price.valueChanged.connect(self._refresh_library)
-
-        wr_lbl = QLabel("Min win %:")
-        wr_lbl.setStyleSheet(f"color:{C['muted']};font-size:10px;letter-spacing:2px;")
-        self._filt_min_wr = _QDoubleSpinBox()
-        self._filt_min_wr.setRange(0.0, 100.0)
-        self._filt_min_wr.setSingleStep(5.0)
-        self._filt_min_wr.setDecimals(1)
-        self._filt_min_wr.setSpecialValueText("any")
-        self._filt_min_wr.setValue(0.0)
-        self._filt_min_wr.setFixedWidth(90)
-        self._filt_min_wr.valueChanged.connect(self._refresh_library)
-
-        for w in (ph_lbl, self._filt_philosophy, sort_lbl, self._filt_sort,
-                  price_lbl, self._filt_max_price, wr_lbl, self._filt_min_wr):
-            filt_row.addWidget(w)
-        filt_row.addStretch()
-        fw = QWidget(); fw.setLayout(filt_row)
-        s.add(fw)
-
-        # Results
-        self._lib_results = QWidget()
-        self._lib_layout = QVBoxLayout(self._lib_results)
-        self._lib_layout.setSpacing(6)
-        self._lib_layout.setContentsMargins(0, 6, 0, 6)
-        self._lib_status = QLabel("Loading…")
-        self._lib_status.setStyleSheet(
-            f"color:{C['muted']};font-size:11px;padding:4px 0;")
-        self._lib_layout.addWidget(self._lib_status)
-        s.add(self._lib_results)
+        open_btn.clicked.connect(self._open_bot_market)
+        open_row.addWidget(open_btn)
+        open_row.addStretch()
+        ow = QWidget(); ow.setLayout(open_row)
+        mv.addWidget(ow)
+        s.add(market_wrap)
 
         # ── ACCOUNT LIMITS INFO ──────────────────────────────
         s.add(SectionHeader("ACCOUNT LIMITS", C["muted"]))
@@ -524,15 +437,11 @@ class MoreBotsTab(QWidget):
         sil_list = [s for s in active if s in silenced]
         self._none_sil.setVisible(len(sil_list) == 0)
 
-        # V3.1.1 — auto-load marketplace sections every time the tab
-        # is refreshed (cheap calls, server caches well).
-        try:
-            self._refresh_my_bots()
-            self._refresh_featured()
-            self._refresh_recommended()
-            self._refresh_library()
-        except Exception as e:
-            print(f"[bot-market] section refresh: {e}")
+    def _open_bot_market(self):
+        """V3.1.3 — tell ApexWindow to reveal + focus the BOT MARKET tab."""
+        win = self.window()
+        if hasattr(win, "_open_bot_market"):
+            win._open_bot_market()
 
     def _clear_grid(self, layout, keep_row0=False):
         for i in reversed(range(layout.count())):
@@ -717,242 +626,9 @@ class MoreBotsTab(QWidget):
         self.refresh()
 
     # ── V7.1+ public bot library ────────────────────────────
-
-    # ── V3.1.1: bot marketplace section loaders ─────────────
-
-    def _section_worker(self, path: str, params: dict, callback):
-        """Generic background fetch for marketplace sections. callback
-        receives (ok: bool, bots: list, err: str)."""
-        from PyQt6.QtCore import QThread, pyqtSignal as _Sig
-        from ui.login import load_auth, load_server_url
-        url = load_server_url()
-        tok = (load_auth() or {}).get("token") or ""
-
-        class _Worker(QThread):
-            done = _Sig(bool, list, str)
-            def run(self_):
-                import requests
-                try:
-                    r = requests.get(
-                        f"{url}{path}",
-                        params=params,
-                        headers={"Authorization": f"Bearer {tok}"} if tok else None,
-                        timeout=8,
-                    )
-                    if r.ok:
-                        self_.done.emit(True, r.json().get("bots", []), "")
-                    else:
-                        self_.done.emit(False, [],
-                                         f"Server error ({r.status_code}).")
-                except Exception as e:
-                    self_.done.emit(False, [], str(e))
-
-        w = _Worker()
-        w.done.connect(callback)
-        # Keep a reference so it isn't GC'd
-        self._market_workers = getattr(self, "_market_workers", [])
-        self._market_workers.append(w)
-        w.finished.connect(
-            lambda _w=w: self._market_workers.remove(_w)
-                          if _w in self._market_workers else None)
-        w.start()
-
-    def _clear_box(self, layout, keep: QLabel = None):
-        for i in reversed(range(layout.count())):
-            item = layout.itemAt(i)
-            w = item.widget() if item else None
-            if w and w is not keep:
-                w.deleteLater()
-
-    def _refresh_my_bots(self):
-        self._mine_status.setText("Loading…")
-        self._mine_status.setStyleSheet(
-            f"color:{C['muted']};font-size:11px;padding:4px 0;")
-        self._clear_box(self._mine_layout)
-        self._section_worker("/bots/mine", {}, self._on_mine_loaded)
-
-    def _on_mine_loaded(self, ok: bool, bots: list, err: str):
-        if not ok:
-            self._mine_status.setText(f"Could not load: {err}")
-            self._mine_status.setStyleSheet(
-                f"color:{C['red']};font-size:11px;padding:4px 0;")
-            return
-        if not bots:
-            self._mine_status.setText(
-                "You haven't published any bots yet. Use ⬆ Publish own bot "
-                "below to share one — you'll see download stats here.")
-            return
-        total_dl = sum(b.get("downloads", 0) for b in bots)
-        self._mine_status.setText(
-            f"{len(bots)} published · {total_dl} total downloads")
-        self._mine_status.setStyleSheet(
-            f"color:{C['green']};font-size:11px;padding:4px 0;")
-        for b in bots:
-            self._mine_layout.addWidget(
-                self._make_market_row(b, mode="mine"))
-
-    def _refresh_featured(self):
-        self._featured_status.setText("Loading…")
-        self._clear_box(self._featured_layout)
-        self._section_worker("/bots/v2",
-            {"section": "featured", "limit": 5},
-            self._on_featured_loaded)
-
-    def _on_featured_loaded(self, ok: bool, bots: list, err: str):
-        if not ok or not bots:
-            self._featured_status.setText("No featured bots yet.")
-            return
-        self._featured_status.setVisible(False)
-        for b in bots:
-            self._featured_layout.addWidget(
-                self._make_market_row(b, mode="featured"))
-
-    def _refresh_recommended(self):
-        self._reco_status.setText("Loading…")
-        self._clear_box(self._reco_layout)
-        self._section_worker("/bots/v2",
-            {"section": "recommended", "limit": 5},
-            self._on_recommended_loaded)
-
-    def _on_recommended_loaded(self, ok: bool, bots: list, err: str):
-        if not ok or not bots:
-            self._reco_status.setText("No recommended bots yet.")
-            return
-        self._reco_status.setVisible(False)
-        for b in bots:
-            self._reco_layout.addWidget(
-                self._make_market_row(b, mode="recommended"))
-
-    def _refresh_library(self):
-        """Hit /bots/v2 with the current filter UI's values."""
-        # Clear current rows except the status label
-        self._clear_box(self._lib_layout, keep=self._lib_status)
-        self._lib_status.setText("Loading…")
-        self._lib_status.setStyleSheet(
-            f"color:{C['muted']};font-size:11px;padding:4px 0;")
-        self._lib_status.setVisible(True)
-
-        params = {
-            "q":          self._lib_search.text().strip(),
-            "philosophy": self._filt_philosophy.currentData() or "",
-            "sort":       self._filt_sort.currentData() or "downloads",
-            "limit":      50,
-        }
-        if self._filt_max_price.value() > 0:
-            params["max_price"] = self._filt_max_price.value()
-        if self._filt_min_wr.value() > 0:
-            params["min_win_rate"] = self._filt_min_wr.value()
-        self._section_worker("/bots/v2", params, self._on_library_loaded)
-
-    def _on_library_loaded(self, ok: bool, bots: list, err: str):
-        if not ok:
-            self._lib_status.setText(f"Could not load library: {err}")
-            self._lib_status.setStyleSheet(
-                f"color:{C['red']};font-size:11px;padding:4px 0;")
-            return
-        if not bots:
-            self._lib_status.setText("No bots match these filters.")
-            self._lib_status.setStyleSheet(
-                f"color:{C['muted']};font-size:11px;padding:4px 0;")
-            return
-        self._lib_status.setVisible(False)
-        for b in bots:
-            self._lib_layout.addWidget(
-                self._make_market_row(b, mode="browse"))
-
-    def _make_market_row(self, b: dict, *, mode: str = "browse") -> QWidget:
-        """Render a single bot row in the marketplace.
-        `mode` controls which action appears:
-          browse / featured / recommended → ⬇ Install
-          mine                            → 📊 (download count) read-only"""
-        row = QFrame()
-        row.setStyleSheet(
-            f"background:{C['panel2']};border:1px solid {C['border']};"
-            f"border-radius:8px;")
-        v = QVBoxLayout(row)
-        v.setContentsMargins(14, 10, 14, 10)
-        v.setSpacing(6)
-
-        # Top row: name + badges + price
-        head = QHBoxLayout()
-        title = QLabel(b.get("name", b.get("slug", "?")))
-        title.setStyleSheet(
-            f"color:{C['text']};font-weight:700;font-size:13px;")
-        head.addWidget(title)
-        # Featured / Recommended badges
-        if b.get("featured"):
-            badge = QLabel("⭐ FEATURED")
-            badge.setStyleSheet(
-                f"color:{C['orange']};font-size:8px;letter-spacing:2px;"
-                f"font-weight:700;padding:2px 6px;"
-                f"border:1px solid {C['orange']};border-radius:3px;"
-                f"background:rgba(200,160,112,0.10);")
-            head.addWidget(badge)
-        if b.get("recommended"):
-            badge = QLabel("✦ RECO")
-            badge.setStyleSheet(
-                f"color:{C['purple']};font-size:8px;letter-spacing:2px;"
-                f"font-weight:700;padding:2px 6px;"
-                f"border:1px solid {C['purple']};border-radius:3px;"
-                f"background:rgba(138,147,201,0.10);")
-            head.addWidget(badge)
-        head.addStretch()
-        # Price
-        price = int(b.get("price_credits", 0))
-        if price > 0:
-            pl = QLabel(f"◊ {price}")
-            pl.setStyleSheet(
-                f"color:{C['yellow']};font-size:12px;font-weight:700;")
-        else:
-            pl = QLabel("FREE")
-            pl.setStyleSheet(
-                f"color:{C['green']};font-size:9px;letter-spacing:2px;"
-                f"font-weight:700;")
-        head.addWidget(pl)
-        hw = QWidget(); hw.setLayout(head)
-        v.addWidget(hw)
-
-        # Description
-        desc = QLabel(b.get("description") or "—")
-        desc.setStyleSheet(f"color:{C['muted']};font-size:10px;")
-        desc.setWordWrap(True)
-        v.addWidget(desc)
-
-        # Metadata strip
-        meta_parts = []
-        meta_parts.append(f"⬇ {b.get('downloads', 0)}")
-        meta_parts.append(f"{b.get('size_bytes', 0) // 1024} KB")
-        if b.get("philosophy"):
-            meta_parts.append(f"📊 {b['philosophy']}")
-        if b.get("win_rate_pct"):
-            meta_parts.append(f"🏆 {b['win_rate_pct']:.0f}% win")
-        if b.get("rating"):
-            meta_parts.append(f"★ {b['rating']:.1f}")
-        if b.get("active_users"):
-            meta_parts.append(f"👥 {b['active_users']} active")
-        meta = QLabel("   ·   ".join(meta_parts))
-        meta.setStyleSheet(f"color:{C['muted']};font-size:9px;")
-        v.addWidget(meta)
-
-        # Action row
-        btn_row = QHBoxLayout()
-        btn_row.addStretch()
-        if mode == "mine":
-            # Read-only stat label + edit button
-            stat = QLabel(
-                f"📊  {b.get('downloads', 0)} downloads")
-            stat.setStyleSheet(f"color:{C['green']};font-size:10px;")
-            btn_row.addWidget(stat)
-        else:
-            install_btn = QPushButton("⬇  Install")
-            install_btn.setObjectName("addBotBtn")
-            install_btn.clicked.connect(
-                lambda _, slug=b["slug"], name=b["name"]:
-                    self._install_public_bot(slug, name))
-            btn_row.addWidget(install_btn)
-        bw = QWidget(); bw.setLayout(btn_row)
-        v.addWidget(bw)
-        return row
+    # NOTE: the actual marketplace UI moved to ui/bot_market_tab.py in V3.1.3.
+    # _install_public_bot stays here so the old drag-and-drop install
+    # paths in ApexWindow still work.
 
     def _install_public_bot(self, slug: str, name: str):
         """Download a public bot to DATA_DIR/bots and register it locally."""
@@ -1231,10 +907,20 @@ class ApexWindow(QMainWindow):
         self.friends_tab   = FriendsTab()        # V3.0.0
         self.account_tab   = AccountTab()        # V3 wave 4
         self.admin_tab     = AdminTab()          # V3 wave 5
+        self.bot_market_tab = BotMarketTab()     # V3.1.3
+        self.bot_market_tab.closed.connect(self._close_bot_market)
         self.tools_tab     = ToolsTab()
 
         self._overview_idx  = self.tabs.addTab(self.overview_tab,  "◈  OVERVIEW")
-        self._morebots_idx  = self.tabs.addTab(self.more_bots_tab, "⊕  BOT MARKET")
+        self._morebots_idx  = self.tabs.addTab(self.more_bots_tab, "⊕  MORE BOTS")
+
+        # V3.1.3 — BOT MARKET is a "summon-able" tab. Hidden by default;
+        # MORE BOTS → 🛒 Open Bot Market makes it visible and switches to
+        # it. The market tab itself has a ✕ Close button that hides it
+        # again. Placed right after MORE BOTS so it appears in the
+        # natural reading order when revealed.
+        self._botmarket_idx = self.tabs.addTab(self.bot_market_tab,
+                                                "🛒  BOT MARKET")
 
         # Corner row reads:
         #   UNIVERSE · MAKE BOT · FRIENDS · ACCOUNT · ADMIN · TOOLS
@@ -1245,7 +931,8 @@ class ApexWindow(QMainWindow):
         self._account_idx   = self.tabs.addTab(self.account_tab,  "")
         self._admin_idx     = self.tabs.addTab(self.admin_tab,    "")
         self._tools_idx     = self.tabs.addTab(self.tools_tab,    "")
-        for idx in (self._universe_idx, self._makebot_idx,
+        for idx in (self._botmarket_idx,
+                    self._universe_idx, self._makebot_idx,
                     self._friends_idx, self._account_idx,
                     self._admin_idx, self._tools_idx):
             self.tabs.tabBar().setTabVisible(idx, False)
@@ -1652,19 +1339,27 @@ class ApexWindow(QMainWindow):
         insert_at = self._morebots_idx
         self.tabs.insertTab(insert_at, tab, label)
 
-        # Shift static indices  (V3 wave 5 added _admin_idx)
-        self._morebots_idx += 1
-        self._universe_idx += 1
-        self._makebot_idx  += 1
-        self._friends_idx  += 1
-        self._account_idx  += 1
-        self._admin_idx    += 1
-        self._tools_idx    += 1
+        # Shift static indices  (V3.1.3 added _botmarket_idx)
+        self._morebots_idx  += 1
+        self._botmarket_idx += 1
+        self._universe_idx  += 1
+        self._makebot_idx   += 1
+        self._friends_idx   += 1
+        self._account_idx   += 1
+        self._admin_idx     += 1
+        self._tools_idx     += 1
 
-        for hidden in (self._universe_idx, self._makebot_idx,
+        for hidden in (self._botmarket_idx,
+                       self._universe_idx, self._makebot_idx,
                        self._friends_idx, self._account_idx,
                        self._admin_idx, self._tools_idx):
-            self.tabs.tabBar().setTabVisible(hidden, False)
+            # The BOT MARKET tab keeps whatever visibility the user
+            # set last; the others stay hidden behind the corner buttons.
+            if hidden == self._botmarket_idx:
+                # leave alone — visibility is toggled by _open_bot_market
+                pass
+            else:
+                self.tabs.tabBar().setTabVisible(hidden, False)
 
         actual_idx = self.tabs.indexOf(tab)
         self._tab_indices[side] = actual_idx
@@ -1702,14 +1397,15 @@ class ApexWindow(QMainWindow):
         idx = self.tabs.indexOf(tab)
         if idx >= 0:
             self.tabs.removeTab(idx)
-            # Shift static indices back  (V3 wave 5 added _admin_idx)
-            if idx < self._morebots_idx: self._morebots_idx -= 1
-            if idx < self._universe_idx: self._universe_idx -= 1
-            if idx < self._makebot_idx:  self._makebot_idx  -= 1
-            if idx < self._friends_idx:  self._friends_idx  -= 1
-            if idx < self._account_idx:  self._account_idx  -= 1
-            if idx < self._admin_idx:    self._admin_idx    -= 1
-            if idx < self._tools_idx:    self._tools_idx    -= 1
+            # Shift static indices back  (V3.1.3 added _botmarket_idx)
+            if idx < self._morebots_idx:  self._morebots_idx  -= 1
+            if idx < self._botmarket_idx: self._botmarket_idx -= 1
+            if idx < self._universe_idx:  self._universe_idx  -= 1
+            if idx < self._makebot_idx:   self._makebot_idx   -= 1
+            if idx < self._friends_idx:   self._friends_idx   -= 1
+            if idx < self._account_idx:   self._account_idx   -= 1
+            if idx < self._admin_idx:     self._admin_idx     -= 1
+            if idx < self._tools_idx:     self._tools_idx     -= 1
             for hidden in (self._universe_idx, self._makebot_idx,
                            self._friends_idx, self._account_idx,
                            self._admin_idx, self._tools_idx):
@@ -1864,6 +1560,29 @@ class ApexWindow(QMainWindow):
                 ov.refresh_active_bots()
         except Exception as e:
             print(f"[overview sync] {e}")
+
+    # ── BOT MARKET show / hide ───────────────────────────────
+
+    def _open_bot_market(self):
+        """V3.1.3 — invoked from MoreBotsTab's '🛒 Open Bot Market'
+        button. Reveal the tab in the bar, switch focus to it, and ask
+        the market to refresh (so it shows fresh server data even if
+        the user opened it a long time after launch)."""
+        if hasattr(self, "_botmarket_idx"):
+            self.tabs.tabBar().setTabVisible(self._botmarket_idx, True)
+            self.tabs.setCurrentIndex(self._botmarket_idx)
+            try:
+                self.bot_market_tab.refresh()
+            except Exception as e:
+                print(f"[market] refresh on open: {e}")
+
+    def _close_bot_market(self):
+        """Called when the market tab's ✕ button is clicked."""
+        if hasattr(self, "_botmarket_idx"):
+            self.tabs.tabBar().setTabVisible(self._botmarket_idx, False)
+            # Send the user back to MORE BOTS, since that's where they
+            # entered from.
+            self.tabs.setCurrentIndex(self._morebots_idx)
 
     # ── CLOUD RESUME ─────────────────────────────────────────
 
