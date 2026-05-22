@@ -45,11 +45,19 @@ class RefreshWorker(QThread):
         try:
             import core.data as D
             positions = D.get_positions(self.side)
-            # Per-stock ATR/TP only matters for the long/short gauges;
-            # DAY uses its own bracket state (already has per-ticker TP).
-            meta = (D.position_meta(positions, self.side)
-                    if self.side in ("LONG", "SHORT") and positions
-                    else {})
+            # Per-stock ATR/TP for all sides:
+            #   LONG/SHORT — feeds the position-gauge chart.
+            #   DAY        — feeds the bracket-gauge fallback for
+            #                positions present on Alpaca but missing
+            #                from daybot_state.json's open_brackets.
+            if not positions:
+                meta = {}
+            elif self.side == "DAY":
+                sm, tm = D.get_day_atr_mults()
+                meta = D.position_meta(positions, "DAY",
+                                        stop_mult=sm, tp_mult=tm)
+            else:
+                meta = D.position_meta(positions, self.side)
             result = {
                 "account":       D.get_account(self.side),
                 "positions":     positions,

@@ -609,12 +609,12 @@ class BotTab(QWidget):
         self.sig_time_lbl.setText(ts)
 
     def _apply_gauge(self, data):
-        pos = data.get("positions", [])
+        pos  = data.get("positions", [])
+        meta = data.get("position_meta", {})
         if self.side == "DAY":
             st   = data.get("day_state", {})
-            html = CH.bracket_gauge(st.get("open_brackets",{}), pos)
+            html = CH.bracket_gauge(st.get("open_brackets",{}), pos, meta=meta)
         else:
-            meta = data.get("position_meta", {})
             html = CH.position_gauge(pos, self.side, meta=meta)
         self.gauge_chart.load_chart(html)
 

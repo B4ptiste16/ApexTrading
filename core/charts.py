@@ -345,25 +345,66 @@ def drawdown_chart(snaps: pd.DataFrame) -> str:
     return _make_html(data, layout)
 
 
-def bracket_gauge(brackets: dict, positions: list) -> str:
+def bracket_gauge(brackets: dict, positions: list,
+                   meta: dict | None = None) -> str:
     """
     Day bot: horizontal bracket visualiser.
     Green zone = take profit path, Red zone = stop loss path.
     Diamond = current price.
+
+    v1.2.2 — iterate over LIVE positions and pull the bracket levels
+    from (in order of preference):
+      1. `brackets` — daybot's saved open_brackets dict (real Alpaca
+         TP/SL orders the bot placed itself).
+      2. `meta`     — per-stock ATR-derived levels from data.position_meta()
+         (used when a position exists on Alpaca but isn't tracked in
+         daybot_state.json, e.g. it was bought manually or the state
+         hasn't synced since the bot last ran).
+      3. Fallback 2.5 % / +5 % bands if neither is available.
+    Brackets in state but whose position is gone (liquidated) are
+    dropped silently — previously they rendered as frozen "+0.0%"
+    diamonds because current price fell back to entry.
     """
-    if not brackets:
-        return empty_chart("No open brackets", 260)
+    if not positions:
+        return empty_chart("No open positions", 260)
 
     pos_map = {p["symbol"]: p for p in positions}
-    # v1.2.1 — only render brackets whose underlying position still
-    # exists on Alpaca. Liquidated positions linger in daybot_state.json
-    # until the bot's next sync_brackets_with_alpaca() cycle; without
-    # this filter the chart would show them frozen at "+0.0%" (current
-    # price falls back to entry when no live position is found).
-    brackets = {t: b for t, b in brackets.items() if t in pos_map}
-    if not brackets:
-        return empty_chart("No open brackets", 260)
+    meta = meta or {}
 
+    effective: dict = {}
+    for sym, pos in pos_map.items():
+        entry = float(pos.get("avg_entry_price", 0))
+        qty   = float(pos.get("qty", 0))
+        if entry <= 0:
+            continue
+        b = brackets.get(sym)
+        if b and b.get("stop") and b.get("tp"):
+            effective[sym] = {
+                "entry": float(b.get("entry", entry)),
+                "stop":  float(b["stop"]),
+                "tp":    float(b["tp"]),
+                "qty":   float(b.get("qty", qty)),
+            }
+        elif sym in meta:
+            m = meta[sym]
+            effective[sym] = {
+                "entry": entry,
+                "stop":  float(m.get("stop_price", entry * 0.975)),
+                "tp":    float(m.get("tp_price",   entry * 1.025)),
+                "qty":   qty,
+            }
+        else:
+            effective[sym] = {
+                "entry": entry,
+                "stop":  round(entry * 0.975, 2),
+                "tp":    round(entry * 1.025, 2),
+                "qty":   qty,
+            }
+
+    if not effective:
+        return empty_chart("No open positions", 260)
+
+    brackets = effective
     data    = []
     tickers = list(brackets.keys())
     n       = len(tickers)
