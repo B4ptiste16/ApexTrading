@@ -114,6 +114,12 @@ def signup(data: SignupRequest):
     auto_verify = not email_send.is_configured()
     user = database.create_user(username, email, hashed, display_name,
                                 is_verified=1 if auto_verify else 0)
+    # V3.1.4 — welcome bonus so the user can try MAKE BOT → "Free via
+    # APEX" without immediately hitting the credit wall.
+    try:
+        credits_mod.grant(user["id"], SIGNUP_BONUS_CREDITS, "signup bonus")
+    except Exception as e:
+        print(f"[signup] credit bonus failed: {e}", flush=True)
     if not auto_verify:
         _send_verification_email(user)
     token = auth.create_token(user["id"], user["email"])
@@ -192,6 +198,12 @@ def auth_google_exchange(payload: dict):
                 # Google already proved they own the address.
                 is_verified=1 if info.get("email_verified") else 0,
             )
+            # V3.1.4 — same welcome bonus as the email/password signup
+            try:
+                credits_mod.grant(user["id"], SIGNUP_BONUS_CREDITS,
+                                   "signup bonus (Google)")
+            except Exception as e:
+                print(f"[google-signup] credit bonus failed: {e}", flush=True)
 
     token = auth.create_token(user["id"], user["email"])
     return {"token": token, "user": _public(user)}
@@ -652,6 +664,8 @@ _MAKEBOT_RATE: dict = {}                # user_id -> [timestamps]
 _MAKEBOT_RATE_LOCK = _threading.Lock()
 _MAKEBOT_RATE_WINDOW = 3600             # 1 hour
 _MAKEBOT_RATE_LIMIT  = 5                # 5 calls per hour per user
+MAKEBOT_COST_CREDITS = 10               # V3.1.4 — credits charged per "Free via APEX" generation
+SIGNUP_BONUS_CREDITS = 100              # V3.1.4 — every new signup gets a starting balance
 
 
 def _check_makebot_rate(user_id: int) -> int:
@@ -670,18 +684,34 @@ def _check_makebot_rate(user_id: int) -> int:
 @app.post("/api/makebot/generate")
 def api_makebot_generate(payload: dict,
                          authorization: str | None = Header(default=None)):
-    """Pooled Anthropic Haiku call. Bearer-auth, rate-limited."""
+    """V3.1.4 — Pooled Anthropic Haiku call gated by APEX credits.
+    Costs MAKEBOT_COST_CREDITS per successful generation. Bearer-auth.
+    Rate-limited as a secondary safeguard against runaway loops."""
     user = _current_user(authorization)
+
+    # 1. Pre-flight credit check
+    balance = credits_mod.get_balance(user["id"])
+    if balance < MAKEBOT_COST_CREDITS:
+        raise HTTPException(
+            402,                                   # Payment Required
+            f"Insufficient APEX credits — need {MAKEBOT_COST_CREDITS}, "
+            f"you have {balance}. Switch the MAKE BOT provider to "
+            f"Anthropic / OpenAI / OpenRouter with your own API key, "
+            f"or ask an admin to grant you more credits.")
+
+    # 2. Rate limit (defence-in-depth even after credits)
     if _check_makebot_rate(user["id"]) <= 0:
         raise HTTPException(
             429,
-            f"Free-AI rate limit reached: {_MAKEBOT_RATE_LIMIT} calls "
-            f"per hour per user. Wait a bit or paste your own API key.")
-    # Try APEX's pooled key first; fall back to this user's own
-    # synced Anthropic key if the server doesn't have a pooled one.
-    # Either way the user doesn't need to paste a key into the desktop
-    # app — "free" means "free of the paste-your-key step".
-    server_key = _os.environ.get("APEX_ANTHROPIC_KEY") or _os.environ.get("ANTHROPIC_API_KEY")
+            f"Rate limit reached: {_MAKEBOT_RATE_LIMIT} APEX-pooled calls "
+            f"per hour per user. Wait a bit or use your own API key.")
+
+    # 3. Find an Anthropic key — APEX-pooled first, then the user's
+    # own synced credential as a fallback (so the feature works even
+    # before the server admin sets APEX_ANTHROPIC_KEY).
+    server_key = (_os.environ.get("APEX_ANTHROPIC_KEY")
+                  or _os.environ.get("ANTHROPIC_API_KEY"))
+    used_pool = bool(server_key)
     if not server_key:
         try:
             stored = creds.load_credentials(user["id"]) or {}
@@ -691,9 +721,10 @@ def api_makebot_generate(payload: dict,
             server_key = ""
     if not server_key:
         raise HTTPException(503,
-            "Free AI not configured on this server, and no Anthropic key "
-            "synced to your APEX account. Sync your key from the desktop "
-            "Tools tab or paste a key into the form.")
+            "No Anthropic key available. Either ask the server admin to "
+            "set APEX_ANTHROPIC_KEY, or sync your own key via the desktop "
+            "Tools → ACCOUNT LINKING flow.")
+
     prompt = (payload or {}).get("prompt", "").strip()
     system = (payload or {}).get("system", "").strip()
     if not prompt or not system:
@@ -703,6 +734,8 @@ def api_makebot_generate(payload: dict,
     except ImportError:
         raise HTTPException(503,
             "Server missing 'anthropic' package. Run: pip install anthropic.")
+
+    # 4. Make the call
     try:
         client = anthropic.Anthropic(api_key=server_key)
         resp = client.messages.create(
@@ -712,9 +745,33 @@ def api_makebot_generate(payload: dict,
             messages=[{"role": "user", "content": prompt}],
         )
         text = "".join(getattr(p, "text", "") for p in resp.content)
-        return {"text": text}
     except Exception as e:
         raise HTTPException(500, f"Anthropic call failed: {e}")
+
+    # 5. Charge credits AFTER successful generation. Both pool + fallback
+    # paths charge — the "via APEX" pricing is the same regardless of
+    # which key the server happens to use under the hood.
+    result = credits_mod.grant(
+        user["id"], -MAKEBOT_COST_CREDITS,
+        f"make-bot generation ({'pool' if used_pool else 'fallback'})",
+    )
+    return {
+        "text":             text,
+        "credits_charged":  MAKEBOT_COST_CREDITS,
+        "new_balance":      result["balance"],
+        "key_source":       "pool" if used_pool else "user-fallback",
+    }
+
+
+@app.get("/api/makebot/price")
+def api_makebot_price(authorization: str | None = Header(default=None)):
+    """Lets the desktop know the current cost + the caller's balance so it
+    can render an accurate label on the 'Free via APEX' option."""
+    user = _current_user(authorization)
+    return {
+        "cost":    MAKEBOT_COST_CREDITS,
+        "balance": credits_mod.get_balance(user["id"]),
+    }
 
 
 # ──────────────────────────────────────────────────────────────────────────────

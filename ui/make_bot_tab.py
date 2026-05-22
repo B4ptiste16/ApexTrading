@@ -102,12 +102,12 @@ def _apex_free_extract(j: dict) -> str:
 
 
 PROVIDERS = {
-    "✨  Free  (via APEX, no key)": {
+    "✨  Via APEX  (uses your APEX credits)": {
         # Sentinel URL — the worker replaces it with the X-Apex-Endpoint
         # header value at request time (so the server URL is dynamic).
         "url":     "__apex_dynamic__",
         "models":  [
-            ("Claude Haiku  (APEX-hosted, free)", "apex-haiku"),
+            ("Claude Haiku  (APEX-hosted)", "apex-haiku"),
         ],
         "build":   _apex_free_build,
         "extract": _apex_free_extract,
@@ -240,10 +240,16 @@ class _GenerateWorker(QThread):
             self.done.emit(False, f"Network error: {e}")
             return
         if not r.ok:
+            # FastAPI/APEX returns {"detail": "..."}; most other APIs
+            # return {"error": {"message": "..."}}. Try both.
+            msg = r.text
             try:
-                msg = r.json().get("error", {}).get("message") or r.text
+                body = r.json()
+                msg  = (body.get("detail")
+                        or body.get("error", {}).get("message")
+                        or r.text)
             except Exception:
-                msg = r.text
+                pass
             self.done.emit(False, f"API error ({r.status_code}): {msg}")
             return
         try:
@@ -342,13 +348,15 @@ class MakeBotTab(QWidget):
         self._provider_combo.currentTextChanged.connect(self._on_provider_changed)
         fg.addWidget(self._provider_combo, 0, 1)
 
-        # FREE badge — purple → green gradient, only shown when "Free" provider is picked
-        self._free_badge = QLabel("FREE  ✨")
+        # APEX-credits badge — purple → green gradient, only shown when
+        # the "Via APEX" provider is picked. Shows live cost + balance
+        # (the worker refreshes balance after each successful generation).
+        self._free_badge = QLabel("◊ 10 / gen  ·  balance: —")
         self._free_badge.setStyleSheet(
             "background: qlineargradient(x1:0, y1:0, x2:1, y2:0,"
             f"  stop:0 {C['purple']}, stop:1 #2eea88);"
             f"color:#0c1018;font-weight:800;font-size:10px;"
-            "letter-spacing:2px;padding:4px 10px;border-radius:6px;"
+            "letter-spacing:1px;padding:4px 10px;border-radius:6px;"
         )
         self._free_badge.setVisible(False)
         fg.addWidget(self._free_badge, 0, 2)
@@ -492,18 +500,54 @@ class MakeBotTab(QWidget):
         # option is selected
         self._model_combo.currentIndexChanged.connect(self._refresh_custom_visibility)
         self._refresh_custom_visibility()
-        # Free-via-APEX: no key needed, hide the field. Badge appears.
+        # Via-APEX: no key needed, credits badge appears + balance is
+        # fetched from the server.
         is_free = bool(cfg.get("free"))
         self._free_badge.setVisible(is_free)
-        # _key_edit and _show_key may not exist yet during _build (this
-        # method is called once for the initial provider after they're
-        # created — protect with hasattr just in case).
         if hasattr(self, "_key_edit"):
             self._key_edit.setEnabled(not is_free)
             if is_free:
-                self._key_edit.setPlaceholderText("Not required for Free provider")
+                self._key_edit.setPlaceholderText(
+                    "Not required — generation costs APEX credits")
             else:
                 self._key_edit.setPlaceholderText("")
+        if is_free:
+            self._refresh_credit_balance()
+
+    def _refresh_credit_balance(self):
+        """Fetch /api/makebot/price so the badge shows live cost + balance."""
+        from PyQt6.QtCore import QThread as _QT, pyqtSignal as _Sig
+        from ui.login import load_auth, load_server_url
+        tok = (load_auth() or {}).get("token") or ""
+        url = f"{load_server_url()}/api/makebot/price"
+
+        class _BalWorker(_QT):
+            done = _Sig(int, int)   # cost, balance
+            def run(self_):
+                import requests
+                try:
+                    r = requests.get(url,
+                        headers={"Authorization": f"Bearer {tok}"} if tok else None,
+                        timeout=6)
+                    if r.ok:
+                        d = r.json()
+                        self_.done.emit(int(d.get("cost", 10)),
+                                        int(d.get("balance", 0)))
+                    else:
+                        self_.done.emit(10, -1)
+                except Exception:
+                    self_.done.emit(10, -1)
+
+        def _on(cost, balance):
+            if balance < 0:
+                self._free_badge.setText(f"◊ {cost} / gen  ·  balance: ?")
+            else:
+                self._free_badge.setText(
+                    f"◊ {cost} / gen  ·  balance: {balance:,}")
+
+        self._bal_worker = _BalWorker()
+        self._bal_worker.done.connect(_on)
+        self._bal_worker.start()
 
     def _on_mode_changed(self, _idx: int):
         mode = self._mode_combo.currentData()
@@ -633,6 +677,12 @@ class MakeBotTab(QWidget):
         self._status.setText("Done — review the code below.")
         self._status.setStyleSheet(f"color:{C['green']};font-size:11px;")
         self._code.setPlainText(payload)
+        # V3.1.4 — if we used the APEX-credits provider, refresh the
+        # badge so the user sees the updated balance immediately.
+        prov = self._provider_combo.currentText()
+        cfg  = PROVIDERS.get(prov) or {}
+        if cfg.get("free"):
+            self._refresh_credit_balance()
 
     # ── Save / publish ───────────────────────────────────────────────
 
