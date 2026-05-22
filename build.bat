@@ -52,6 +52,18 @@ if exist dist        rmdir /s /q dist
 if exist APEX.spec   del   /q APEX.spec
 for /d /r %%d in (__pycache__) do if exist "%%d" rmdir /s /q "%%d"
 
+REM --- Step 1c: bake version.json into core/_version.py ---
+REM v3.1.6 — eliminates the recurring "header shows v1.0.0" regression
+REM by skipping the runtime file lookup entirely. The Python constant
+REM gets bundled the same way every other module does.
+echo  [1c/4] Embedding version into core/_version.py...
+python tools\embed_version.py
+if errorlevel 1 (
+    echo  ERROR: embed_version.py failed. Check version.json is valid JSON.
+    if not defined APEX_NOPAUSE pause
+    exit /b 1
+)
+
 REM --- Step 2: build the exe ---
 REM Note: pandas/numpy/matplotlib are handled by PyInstaller's built-in
 REM hooks - do NOT --collect-all them (huge + can hang the build).
