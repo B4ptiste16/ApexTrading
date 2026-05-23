@@ -842,6 +842,42 @@ class MoreBotsTab(QWidget):
             return
 
         blob = Path(path).read_bytes()
+        # V3.3.0 — similarity gate. Run a pre-flight check against
+        # every existing published bot. Block ≥85%, warn ≥60%.
+        try:
+            import requests as _rq
+            r = _rq.post(
+                f"{load_server_url()}/bots/check-similarity",
+                headers={"Authorization": f"Bearer {token}"},
+                files={"file": ("bot.py", blob, "text/x-python")},
+                timeout=20)
+            if r.ok:
+                matches = r.json().get("matches", [])
+                top = matches[0] if matches else None
+                if top and top["score"] >= 0.85:
+                    QMessageBox.critical(
+                        self, "Too similar — cannot publish",
+                        f"Your bot is <b>{int(top['score']*100)}% similar</b> "
+                        f"to <code>{top['slug']}</code>. APEX rejects "
+                        f"near-duplicates to keep the marketplace useful.<br>"
+                        f"<br>Consider building on top of "
+                        f"<code>{top['slug']}</code> rather than re-publishing.")
+                    return
+                if top and top["score"] >= 0.60:
+                    msg = ("Your bot is <b>{:.0%}</b> similar to "
+                           "<code>{}</code>.<br>That's high enough to "
+                           "publish but worth a heads-up — buyers may "
+                           "complain it's a re-skin.<br><br>"
+                           "Publish anyway?").format(top["score"], top["slug"])
+                    if QMessageBox.question(
+                            self, "Similarity warning", msg,
+                            QMessageBox.StandardButton.Yes
+                            | QMessageBox.StandardButton.No
+                    ) != QMessageBox.StandardButton.Yes:
+                        return
+        except Exception as e:
+            # Network/server problems shouldn't block publishing — just log.
+            print(f"[publish] similarity check failed: {e}")
         name, ok = QInputDialog.getText(
             self, "Bot name", "Display name:", text=Path(path).stem)
         if not ok or not name.strip():
@@ -1129,6 +1165,9 @@ class ApexWindow(QMainWindow):
         self._meta_timer = QTimer()
         self._meta_timer.timeout.connect(self._refresh_user_meta)
         self._meta_timer.start(60_000)
+        # V3.3.0 — pull any bots removed by moderation that we used to
+        # have installed, and delete them locally.
+        QTimer.singleShot(4500, self._sync_revocations)
 
         # V7.1.1: accept .py drops anywhere in the window so a user can
         # drag a bot script in and we'll offer to install it locally or
@@ -1842,6 +1881,78 @@ class ApexWindow(QMainWindow):
         self._meta_workers = getattr(self, "_meta_workers", [])
         self._meta_workers.append(w)
         w.start()
+
+    def _sync_revocations(self):
+        """V3.3.0 — ask the server which of our installed bots have been
+        removed by moderation, delete them locally."""
+        class _W(QThread):
+            done = pyqtSignal(list)
+            def run(self_):
+                import requests
+                from ui.login import load_auth, load_server_url
+                tok = (load_auth() or {}).get("token") or ""
+                if not tok:
+                    self_.done.emit([])
+                    return
+                try:
+                    r = requests.get(
+                        f"{load_server_url()}/bots/mine/revocations",
+                        headers={"Authorization": f"Bearer {tok}"},
+                        timeout=8)
+                    if r.ok:
+                        self_.done.emit(r.json().get("revoked_slugs", []) or [])
+                    else:
+                        self_.done.emit([])
+                except Exception:
+                    self_.done.emit([])
+
+        w = _W()
+        w.done.connect(self._apply_revocations)
+        self._rev_workers = getattr(self, "_rev_workers", [])
+        self._rev_workers.append(w)
+        w.finished.connect(
+            lambda _w=w: self._rev_workers.remove(_w)
+                          if _w in self._rev_workers else None)
+        w.start()
+
+    def _apply_revocations(self, slugs: list):
+        if not slugs:
+            return
+        from core.paths import DATA_DIR
+        from pathlib import Path as _P
+        # Remove from filesystem
+        for slug in slugs:
+            for ext in (".py", ".apex"):
+                p = DATA_DIR / "bots" / f"{slug}{ext}"
+                try:
+                    p.unlink(missing_ok=True)
+                except Exception:
+                    pass
+        # Remove from bot_registry
+        try:
+            s = D.load_settings()
+            reg = s.get("bot_registry",
+                        {"active": [], "silenced": [], "custom": []})
+            reg["custom"] = [c for c in reg.get("custom", [])
+                              if c.get("id") not in slugs]
+            reg["active"] = [a for a in reg.get("active", [])
+                              if a not in slugs]
+            reg["silenced"] = [a for a in reg.get("silenced", [])
+                                if a not in slugs]
+            s["bot_registry"] = reg
+            with open(D.SETTINGS_FILE, "w", encoding="utf-8") as f:
+                json.dump(s, f, indent=2)
+        except Exception as e:
+            print(f"[revocations] registry update: {e}")
+        # Toast
+        QMessageBox.information(
+            self, "Bots removed by moderation",
+            f"{len(slugs)} bot{'s' if len(slugs)!=1 else ''} you had "
+            f"installed were removed by APEX moderators and have been "
+            f"deleted from your library:\n\n  · "
+            + "\n  · ".join(slugs) +
+            "\n\nIf they were paid bots, the credits have been refunded "
+            "to your APEX balance.")
 
     def _on_user_meta_loaded(self, me: dict, balance: int):
         # Credits chip — always update

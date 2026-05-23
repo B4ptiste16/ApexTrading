@@ -70,6 +70,12 @@ def init_marketplace_table() -> None:
             "ALTER TABLE public_bots ADD COLUMN active_users INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE public_bots ADD COLUMN runtime_hours REAL   NOT NULL DEFAULT 0",
             "ALTER TABLE public_bots ADD COLUMN visibility   TEXT    NOT NULL DEFAULT 'public'",  # public | friends_only
+            # V3.3.0 — moderation
+            "ALTER TABLE public_bots ADD COLUMN status         TEXT    NOT NULL DEFAULT 'active'",  # active | flagged | removed
+            "ALTER TABLE public_bots ADD COLUMN flagged_reason TEXT",
+            "ALTER TABLE public_bots ADD COLUMN flagged_by     INTEGER",
+            "ALTER TABLE public_bots ADD COLUMN flagged_at     TEXT",
+            "CREATE INDEX IF NOT EXISTS idx_public_bots_status ON public_bots(status)",
         ):
             try:
                 c.execute(ddl)
@@ -135,7 +141,8 @@ def list_bots(*, q: str = "", tag: str = "",
               owner_id: Optional[int] = None,
               sort: str = "downloads", # downloads | rating | win_rate | newest | cheapest
               limit: int = 50, offset: int = 0) -> list[dict]:
-    sql = "SELECT * FROM public_bots WHERE visibility='public'"
+    # V3.3.0 — hide flagged + removed bots from every browse path.
+    sql = "SELECT * FROM public_bots WHERE visibility='public' AND status='active'"
     params: list = []
     if q:
         sql += " AND (name LIKE ? OR description LIKE ?)"

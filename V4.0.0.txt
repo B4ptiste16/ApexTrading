@@ -6,3 +6,11 @@ V4.0.0
 
 - Is it possible to link a bank account like a revolute account to the app or not?
 
+- Tabs on the right still not aligned with the ones on the left in terms of height coordinate.
+
+- Have a simpler manual version of the website where you can deactivate a bot to use an account to trade against friends for example. have a toggle switch to switch modes.
+
+- have the friend's info appear under their name in the friends list and for unshared info show not sharing info (for specific info only not for general info)
+
+
+

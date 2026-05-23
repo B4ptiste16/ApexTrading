@@ -18,7 +18,8 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from . import (auth, database, credentials as creds,
                bots as marketplace, web, bot_runner, scheduler,
                friends, oauth as google_oauth, email_send,
-               credits as credits_mod)
+               credits as credits_mod,
+               similarity, moderation)
 from .schemas import SignupRequest, LoginRequest
 
 
@@ -31,6 +32,7 @@ async def _lifespan(app: FastAPI):
     marketplace.init_marketplace_table()
     friends.init_friends_db()
     credits_mod.init_credits_tables()
+    moderation.init_purchases_table()
     promoted = database.bootstrap_boss_admin()
     if promoted:
         print(f"[bootstrap] promoted user_id={promoted} to BOSS_ADMIN",
@@ -422,11 +424,27 @@ def get_public_bot(slug: str):
 
 
 @app.get("/bots/{slug}/download")
-def download_public_bot(slug: str):
+def download_public_bot(slug: str,
+                        authorization: str | None = Header(default=None)):
+    """V3.3.0 — also records a purchase row + refuses to serve flagged
+    or removed bots. Records the buyer's user_id when an auth header
+    is supplied so moderation refunds know who to credit."""
+    bot = marketplace.get_bot(slug)
+    if not bot or bot.get("status") in ("flagged", "removed"):
+        raise HTTPException(404, "Bot not available (may have been removed).")
     data = marketplace.read_bot_file(slug)
     if data is None:
         raise HTTPException(404, "Bot file not found.")
     marketplace.increment_downloads(slug)
+    # Log purchase if we can identify the buyer
+    try:
+        if authorization:
+            user = _current_user(authorization)
+            moderation.record_purchase(
+                user["id"], slug,
+                credits_paid=int(bot.get("price_credits", 0)))
+    except Exception:
+        pass
     return Response(
         content=data, media_type="text/x-python",
         headers={"Content-Disposition": f'attachment; filename="{slug}.py"'},
@@ -445,7 +463,27 @@ async def upload_public_bot(
     authorization: str | None = Header(default=None),
 ):
     user = _current_user(authorization)
+    # V3.3.0 — enforce publish-ban window from a previous moderation removal
+    banned, until = moderation.is_user_publish_banned(user["id"])
+    if banned:
+        raise HTTPException(
+            403,
+            f"You're currently publish-banned (a previous bot was removed "
+            f"by moderation). Ban lifts on {until}. "
+            f"This doesn't affect bots you've already published — they "
+            f"stay live.")
     blob = await file.read()
+    # V3.3.0 — similarity gate (block ≥85 %, warn ≥60 %).
+    src_text = blob.decode("utf-8", errors="replace")
+    matches = similarity.compare_against_marketplace(
+        src_text, marketplace.MARKETPLACE_DIR)
+    if matches and matches[0]["score"] >= 0.85:
+        raise HTTPException(
+            409,
+            f"Too similar to '{matches[0]['slug']}' "
+            f"(score {matches[0]['score']:.0%}). "
+            f"Consider basing yours on that bot rather than re-publishing "
+            f"a near-duplicate.")
     try:
         row = marketplace.upload_bot(
             owner_id=user["id"],
@@ -459,7 +497,80 @@ async def upload_public_bot(
         )
     except ValueError as e:
         raise HTTPException(400, str(e))
+    # Attach the similarity warning band when score >= 60 % but < 85 %
+    if matches:
+        row["similarity_warning"] = matches
     return row
+
+
+@app.post("/bots/check-similarity")
+async def check_similarity(
+    file: UploadFile = File(...),
+    skip_slug: str = Form(""),
+    authorization: str | None = Header(default=None),
+):
+    """Standalone pre-flight: hand a candidate .py to the server, get
+    back the top matches without actually publishing. Used by the
+    desktop's publish dialog to show a warning before uploading."""
+    _current_user(authorization)
+    blob = await file.read()
+    src_text = blob.decode("utf-8", errors="replace")
+    matches = similarity.compare_against_marketplace(
+        src_text, marketplace.MARKETPLACE_DIR,
+        skip_slug=skip_slug.strip() or None)
+    return {"matches": matches}
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# V3.3.0 — Moderation endpoints (admin-only) + revocation sync (any user)
+# ──────────────────────────────────────────────────────────────────────────────
+
+
+@app.post("/admin/bots/{slug}/flag")
+def api_admin_flag_bot(slug: str, payload: dict,
+                       authorization: str | None = Header(default=None)):
+    user = _current_user(authorization)
+    _require_admin(user)
+    reason = (payload or {}).get("reason", "").strip() or "(no reason given)"
+    result = moderation.flag_bot(slug, reason=reason, moderator_id=user["id"])
+    if not result.get("ok"):
+        raise HTTPException(404, "Bot not found or already removed.")
+    return result
+
+
+@app.post("/admin/bots/{slug}/unflag")
+def api_admin_unflag_bot(slug: str,
+                         authorization: str | None = Header(default=None)):
+    user = _current_user(authorization)
+    _require_admin(user)
+    result = moderation.unflag_bot(slug)
+    if not result.get("ok"):
+        raise HTTPException(404, "Bot not currently flagged.")
+    return result
+
+
+@app.post("/admin/bots/{slug}/remove")
+def api_admin_remove_bot(slug: str, payload: dict,
+                          authorization: str | None = Header(default=None)):
+    user = _current_user(authorization)
+    _require_admin(user)
+    reason = (payload or {}).get("reason", "").strip() or "(no reason given)"
+    result = moderation.remove_bot(slug, reason=reason, moderator_id=user["id"])
+    if not result.get("ok"):
+        raise HTTPException(400, result.get("detail", "Removal failed."))
+    return result
+
+
+@app.get("/bots/mine/revocations")
+def api_my_revocations(authorization: str | None = Header(default=None)):
+    """Desktop polls this on startup. Returns slugs the user had
+    installed but were removed by moderation. The desktop removes
+    them from the local registry + DATA_DIR/bots/{slug}.py(.apex).
+    Each slug is returned exactly once — subsequent calls return [].
+    """
+    user = _current_user(authorization)
+    slugs = moderation.list_revocations_for_user(user["id"])
+    return {"revoked_slugs": slugs}
 
 
 @app.delete("/bots/{slug}")

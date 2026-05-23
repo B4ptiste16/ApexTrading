@@ -55,6 +55,8 @@ def init_db() -> None:
             "CREATE INDEX IF NOT EXISTS idx_users_google_sub ON users(google_sub)",
             "CREATE INDEX IF NOT EXISTS idx_users_verif_token ON users(verification_token)",
             "CREATE INDEX IF NOT EXISTS idx_users_role         ON users(role)",
+            # V3.3.0 — moderation: per-user publish ban window
+            "ALTER TABLE users ADD COLUMN publish_ban_until    TEXT",
         ):
             try:
                 c.execute(ddl)

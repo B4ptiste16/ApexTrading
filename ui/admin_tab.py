@@ -248,6 +248,66 @@ class AdminTab(QWidget):
         self._classify_section_frame = classify_frame
         s.add(classify_frame)
 
+        # ─── MODERATION (V3.3.0) ──────────────────────────────
+        self._mod_section = SectionHeader("MODERATION", C["red"])
+        s.add(self._mod_section)
+        mod_frame = QFrame()
+        mod_frame.setStyleSheet(
+            f"background:{C['panel']};border:1px solid {C['border']};"
+            f"border-radius:8px;border-left:3px solid {C['red']};")
+        mf = QGridLayout(mod_frame)
+        mf.setContentsMargins(16, 14, 16, 14)
+        mf.setHorizontalSpacing(12)
+        mf.setVerticalSpacing(10)
+
+        mod_intro = QLabel(
+            "<b>FLAG</b> hides a bot from the marketplace listings but "
+            "leaves existing installs untouched.<br>"
+            "<b>REMOVE</b> deletes the bot, refunds every buyer the "
+            "credits they paid, fines the publisher 500 ◊, and bans "
+            "them from publishing new bots for 7 days. Existing approved "
+            "bots from the same publisher stay live.")
+        mod_intro.setStyleSheet(f"color:{C['muted']};font-size:11px;line-height:1.6;")
+        mod_intro.setWordWrap(True)
+        mf.addWidget(mod_intro, 0, 0, 1, 3)
+
+        mf.addWidget(self._lbl("Bot slug"), 1, 0)
+        self._mod_slug = QLineEdit()
+        self._mod_slug.setStyleSheet(self._input_css())
+        self._mod_slug.setPlaceholderText("e.g. spy-momentum")
+        mf.addWidget(self._mod_slug, 1, 1, 1, 2)
+
+        mf.addWidget(self._lbl("Reason"), 2, 0)
+        self._mod_reason = QLineEdit()
+        self._mod_reason.setStyleSheet(self._input_css())
+        self._mod_reason.setPlaceholderText(
+            "Why is this bot being moderated?")
+        mf.addWidget(self._mod_reason, 2, 1, 1, 2)
+
+        btn_row = QHBoxLayout()
+        flag_btn = QPushButton("🚩  Flag (hide)")
+        flag_btn.setObjectName("toolBtn")
+        flag_btn.clicked.connect(lambda: self._do_moderate("flag"))
+        unflag_btn = QPushButton("✓  Unflag")
+        unflag_btn.setObjectName("toolBtn")
+        unflag_btn.clicked.connect(lambda: self._do_moderate("unflag"))
+        remove_btn = QPushButton("⚠  Remove + refund")
+        remove_btn.setObjectName("dangerBtn")
+        remove_btn.clicked.connect(lambda: self._do_moderate("remove"))
+        btn_row.addWidget(flag_btn)
+        btn_row.addWidget(unflag_btn)
+        btn_row.addWidget(remove_btn)
+        btn_row.addStretch()
+        brw = QWidget(); brw.setLayout(btn_row)
+        mf.addWidget(brw, 3, 0, 1, 3)
+
+        self._mod_msg = QLabel("")
+        self._mod_msg.setStyleSheet(f"color:{C['green']};font-size:10px;")
+        self._mod_msg.setWordWrap(True)
+        mf.addWidget(self._mod_msg, 4, 0, 1, 3)
+        self._mod_section_frame = mod_frame
+        s.add(mod_frame)
+
         s.add_stretch()
 
         # Default: hide everything until /auth/me confirms admin
@@ -291,7 +351,7 @@ class AdminTab(QWidget):
             self._gate_msg.setVisible(False)
         self._role_lbl.setText(f"YOUR ROLE: {role}")
         for w in (self._users_table, self._grant_section_frame,
-                  self._classify_section_frame):
+                  self._classify_section_frame, self._mod_section_frame):
             w.setVisible(visible)
         # Role assignment is BOSS_ADMIN-only
         boss = role == "BOSS_ADMIN"
@@ -411,6 +471,53 @@ class AdminTab(QWidget):
         state = "ON" if new_val else "OFF"
         self._toast(self._classify_msg,
                     f"✓ {slug} · {flag.upper()} is now {state}")
+
+    # ── V3.3.0 — moderation ─────────────────────────────────
+
+    def _do_moderate(self, action: str):
+        slug   = self._mod_slug.text().strip()
+        reason = self._mod_reason.text().strip()
+        if not slug:
+            self._toast(self._mod_msg, "Enter a bot slug.", err=True)
+            return
+        if action == "remove":
+            if QMessageBox.question(
+                self, "Remove + refund?",
+                f"Hard-remove '{slug}'?\n\n"
+                f"• Every buyer gets their credits refunded\n"
+                f"• Every installed copy is revoked (deleted from "
+                f"their library on next launch)\n"
+                f"• Publisher fined 500 credits + 7-day publish ban\n\n"
+                f"Other approved bots from the same publisher stay live.",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            ) != QMessageBox.StandardButton.Yes:
+                return
+        path = {
+            "flag":   f"/admin/bots/{slug}/flag",
+            "unflag": f"/admin/bots/{slug}/unflag",
+            "remove": f"/admin/bots/{slug}/remove",
+        }[action]
+        payload = {"reason": reason} if action in ("flag", "remove") else {}
+        w = _HttpWorker("POST", path, payload=payload)
+        self._spawn(w, lambda ok, body, a=action:
+                    self._on_moderate_done(ok, body, a, slug))
+
+    def _on_moderate_done(self, ok: bool, body: dict, action: str, slug: str):
+        if not ok:
+            self._toast(self._mod_msg, body.get("detail", "Failed."), err=True)
+            return
+        if action == "remove":
+            self._toast(
+                self._mod_msg,
+                f"✓ '{slug}' removed. {body.get('refunded_users', 0)} "
+                f"users refunded {body.get('refunded_credits', 0)} ◊; "
+                f"publisher fined {body.get('fine_credits', 0)} ◊ + "
+                f"banned until {body.get('publish_ban_until', '?')[:10]}.")
+        elif action == "flag":
+            self._toast(self._mod_msg,
+                        f"✓ '{slug}' flagged. Hidden from marketplace.")
+        else:
+            self._toast(self._mod_msg, f"✓ '{slug}' unflagged.")
 
     def _toast(self, label: QLabel, msg: str, *, err: bool = False,
                 transient: bool = True):
