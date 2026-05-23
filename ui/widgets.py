@@ -335,7 +335,36 @@ class BotProcessWidget(QWidget):
         except Exception:
             return False
 
+    def _has_alpaca_key_for_side(self) -> bool:
+        """V4.0.2 — return True iff an Alpaca API+secret pair is currently
+        wired to this bot's side via the Tools tab slot dropdowns. Looks
+        up ALPACA_API_KEY_{SIDE} + ALPACA_SECRET_KEY_{SIDE} in .env."""
+        try:
+            from core import data as _D
+            env = _D.read_env_keys()
+            side_up = (self.side or "").upper()
+            return bool(env.get(f"ALPACA_API_KEY_{side_up}", "").strip()
+                        and env.get(f"ALPACA_SECRET_KEY_{side_up}", "").strip())
+        except Exception:
+            return True  # don't false-positive — let the underlying error surface
+
     def start_bot(self):
+        # V4.0.2 — pre-flight: refuse to start without an Alpaca key
+        # assigned to this bot. Surfaces 'MUST ASSIGN API KEY IN TOOLS'
+        # instead of letting the bot die opaquely on its first Alpaca
+        # call. Applies BEFORE the cloud-mode branch so the warning is
+        # the same regardless of where the bot will run.
+        if not self._has_alpaca_key_for_side():
+            from PyQt6.QtWidgets import QMessageBox as _QMB
+            _QMB.warning(
+                self.window(),
+                "MUST ASSIGN API KEY IN TOOLS",
+                f"No Alpaca API key is assigned to the <b>{self.side}</b> "
+                f"bot.<br><br>Open <b>Tools → ALPACA · API KEYS</b>, paste "
+                f"a key + secret into one of the slots, set its 'Assigned' "
+                f"dropdown to <b>{self.side}</b>, click <b>Save slots</b>, "
+                f"and try again.")
+            return
         # V7.1.13: route to the cloud path when this bot is in
         # cloud_bots. Local QProcess code only runs for laptop bots.
         if self._is_cloud_mode():
@@ -473,6 +502,13 @@ class BotProcessWidget(QWidget):
         self._cloud_call("GET", f"/bots/{self.side}/status", _on)
 
     def _cloud_start(self):
+        # V4.0.2 — if this is a CUSTOM bot (not LONG/SHORT/DAY) we have
+        # to push the local .py to Oracle's private-bots dir before
+        # asking the server to start it, otherwise bot_runner can't
+        # find the script.
+        if self.side.upper() not in ("LONG", "SHORT", "DAY"):
+            self._cloud_upload_then_start()
+            return
         self._log("☁  Asking Oracle to start bot…", C["muted"])
         def _on(ok, body):
             if ok:
@@ -486,6 +522,86 @@ class BotProcessWidget(QWidget):
                 self._log(f"Cloud start failed: {detail}", C["red"])
                 self._set_running(False)
         self._cloud_call("POST", f"/bots/{self.side}/start", _on)
+
+    def _cloud_upload_then_start(self):
+        """Custom-bot cloud start: upload the local .py (decrypt if
+        the library is locked), then trigger /bots/{side}/start."""
+        from pathlib import Path as _P
+        if not self.script_path or not _P(self.script_path).exists():
+            # If the script_path is .py but library is locked, look for .apex
+            alt = None
+            if self.script_path:
+                alt = _P(self.script_path).with_suffix(".apex")
+                if alt.exists():
+                    try:
+                        from core import secure
+                        blob = secure.decrypt_file(alt)
+                    except Exception as e:
+                        self._log(f"Could not decrypt {alt.name}: {e}", C["red"])
+                        return
+                else:
+                    self._log(f"Local script missing: {self.script_path}", C["red"])
+                    return
+            else:
+                self._log("Custom bot has no script path.", C["red"])
+                return
+        else:
+            blob = _P(self.script_path).read_bytes()
+
+        from PyQt6.QtCore import QThread as _QT, pyqtSignal as _Sig
+        from ui.login import load_auth, load_server_url
+
+        slug = self.side.lower()
+
+        class _UploadStart(_QT):
+            done = _Sig(bool, str)
+            def run(self_):
+                import requests
+                tok = (load_auth() or {}).get("token") or ""
+                base = load_server_url()
+                hdr  = {"Authorization": f"Bearer {tok}"}
+                try:
+                    # 1) Upload
+                    up = requests.post(
+                        f"{base}/bots/private/upload",
+                        headers=hdr,
+                        data={"slug": slug},
+                        files={"file": ("bot.py", blob, "text/x-python")},
+                        timeout=20)
+                    if not up.ok:
+                        self_.done.emit(False,
+                            up.json().get("detail", up.text) if up.headers.get(
+                                "content-type","").startswith("application/json")
+                            else up.text)
+                        return
+                    # 2) Start
+                    st = requests.post(
+                        f"{base}/bots/{slug.upper()}/start",
+                        headers=hdr, timeout=15)
+                    if not st.ok:
+                        self_.done.emit(False,
+                            st.json().get("detail", st.text) if st.headers.get(
+                                "content-type","").startswith("application/json")
+                            else st.text)
+                        return
+                    body = st.json()
+                    self_.done.emit(True, str(body.get("pid", "?")))
+                except Exception as e:
+                    self_.done.emit(False, str(e))
+
+        self._log("☁  Uploading custom bot to Oracle…", C["muted"])
+        self._upload_worker = _UploadStart()
+        def _on_done(ok, msg):
+            if ok:
+                self._cloud_running = True
+                self._log(f"☁  Running on Oracle  ·  pid {msg}", C["green"])
+                self._set_running(True)
+                self._start_cloud_polling()
+            else:
+                self._log(f"Cloud start failed: {msg}", C["red"])
+                self._set_running(False)
+        self._upload_worker.done.connect(_on_done)
+        self._upload_worker.start()
 
     def _cloud_stop(self):
         self._log("☁  Asking Oracle to stop bot…", C["muted"])

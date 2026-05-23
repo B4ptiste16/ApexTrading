@@ -141,8 +141,27 @@ def _pid_alive(pid: int) -> bool:
 
 
 def _bot_module(side: str) -> Optional[str]:
-    """Resolve a side identifier to the Python module name to invoke."""
-    return _BUILTIN_MODULES.get(side.upper())   # custom bots — to be added
+    """Resolve a side identifier to the Python module name to invoke.
+    Only built-ins. Custom bots are resolved via _custom_bot_path()
+    and run from an absolute path rather than `import <module>`."""
+    return _BUILTIN_MODULES.get(side.upper())
+
+
+def _custom_bot_path(user_id: int, side: str) -> Optional[Path]:
+    """V4.0.2 — return the .py file path for a user's privately-uploaded
+    custom bot (created in MAKE BOT, locally tested, then uploaded to
+    Oracle for cloud-run without going through the public marketplace).
+    Files live at /opt/apex_users/user_<id>/private_bots/<slug>.py."""
+    private_dir = _user_data_dir(user_id) / "private_bots"
+    cand = private_dir / f"{side.lower()}.py"
+    return cand if cand.exists() else None
+
+
+def private_bots_dir(user_id: int) -> Path:
+    """Public accessor — used by the upload endpoint."""
+    p = _user_data_dir(user_id) / "private_bots"
+    p.mkdir(parents=True, exist_ok=True)
+    return p
 
 
 def _build_env(user_id: int, side: str) -> dict[str, str]:
@@ -210,9 +229,17 @@ def start_bot(user_id: int, side: str) -> dict:
                         else _read_pid_file(user_id, s))
         return {"ok": True, "already_running": True, "pid": existing_pid}
 
+    # V4.0.2 — try built-in first; fall back to a privately-uploaded
+    # custom bot's .py file. Custom bots are run from an absolute path
+    # rather than `import M as bot` because their module name may
+    # collide with stdlib / 3rd-party packages.
     module = _bot_module(side)
-    if module is None:
-        return {"ok": False, "detail": f"Unknown bot side: {side}"}
+    custom_path: Optional[Path] = None if module else _custom_bot_path(user_id, side)
+    if module is None and custom_path is None:
+        return {"ok": False,
+                "detail": f"Unknown bot side: {side}. "
+                          f"For custom bots, upload the .py first via "
+                          f"POST /bots/private/upload."}
 
     # Validate that we have keys for this bot
     blob = creds.load_credentials(user_id) or {}
@@ -220,14 +247,11 @@ def start_bot(user_id: int, side: str) -> dict:
     if not (blob.get(f"ALPACA_API_KEY_{s}") and
             blob.get(f"ALPACA_SECRET_KEY_{s}")):
         return {"ok": False,
-                "detail": f"No Alpaca keys synced for {side}. "
-                          "Upload them from the desktop app's "
-                          "Tools → ACCOUNT LINKING."}
+                "detail": f"MUST ASSIGN API KEY IN TOOLS. No Alpaca "
+                          f"keys synced for {side}. Open Tools → "
+                          f"ACCOUNT LINKING and Sync your slot keys to "
+                          f"the APEX server."}
 
-    bot_file = BOTS_DIR / f"{module}.py"
-    if not bot_file.exists():
-        return {"ok": False,
-                "detail": f"Bot script not deployed yet: {bot_file}"}
     if not VENV_PYTHON.exists():
         return {"ok": False,
                 "detail": f"Python venv not found at {VENV_PYTHON}."}
@@ -235,12 +259,19 @@ def start_bot(user_id: int, side: str) -> dict:
     log_path = _log_path(user_id, side)
     env      = _build_env(user_id, side)
 
-    # Invoke as:   /opt/apex_venv/bin/python -c "import M; M.main()"
-    # so the bot's existing main() entry point is reused unmodified.
-    cmd = [
-        str(VENV_PYTHON), "-u", "-c",
-        f"import {module} as bot; bot.main()",
-    ]
+    if module is not None:
+        bot_file = BOTS_DIR / f"{module}.py"
+        if not bot_file.exists():
+            return {"ok": False,
+                    "detail": f"Bot script not deployed yet: {bot_file}"}
+        # Invoke as:   /opt/apex_venv/bin/python -c "import M; M.main()"
+        cmd = [str(VENV_PYTHON), "-u", "-c",
+               f"import {module} as bot; bot.main()"]
+    else:
+        # Custom bot — run the .py directly. We DON'T `import` it
+        # because the slug could collide with a real package name and
+        # private_bots/ is not on sys.path globally.
+        cmd = [str(VENV_PYTHON), "-u", str(custom_path)]
 
     log_fh = open(log_path, "a", buffering=1, encoding="utf-8")
     log_fh.write(f"\n=== bot start {time.strftime('%Y-%m-%d %H:%M:%S')} "

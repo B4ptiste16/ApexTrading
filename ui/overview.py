@@ -618,10 +618,22 @@ class ToolsTab(QWidget):
         fl.setVerticalSpacing(8)
 
         from PyQt6.QtWidgets import QComboBox as _QCombo
+        # V4.0.2 — slot dropdown includes the user's custom bots so an
+        # Alpaca key can be assigned to e.g. a 'crypto' bot, not just
+        # the three built-ins.
         SIDE_OPTIONS = [("__none__", "Unassigned"),
                         ("LONG",    "LONG bot"),
                         ("SHORT",   "SHORT bot"),
                         ("DAY",     "DAY bot")]
+        try:
+            reg = D.load_settings().get("bot_registry", {})
+            for c in reg.get("custom", []):
+                slug = str(c.get("id", "")).upper()
+                if slug and slug not in {s for s, _ in SIDE_OPTIONS}:
+                    SIDE_OPTIONS.append(
+                        (slug, c.get("label", slug) + " bot"))
+        except Exception:
+            pass
 
         for i, (assigned, k_val, s_val) in enumerate(existing_pairs):
             slot_lbl = QLabel(f"API SLOT {i+1}")

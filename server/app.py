@@ -554,6 +554,61 @@ async def check_similarity(
 # ──────────────────────────────────────────────────────────────────────────────
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# V4.0.2 — Private bot upload (custom bots → cloud-run without publishing)
+# ──────────────────────────────────────────────────────────────────────────────
+
+
+@app.post("/bots/private/upload")
+async def api_private_bot_upload(
+    slug:   str        = Form(...),
+    file:   UploadFile = File(...),
+    authorization: str | None = Header(default=None),
+):
+    """Upload a .py file to the user's private cloud-bot folder. Lets
+    locally-created custom bots run on Oracle without first going
+    through the public marketplace. The file is stored at
+    /opt/apex_users/user_<id>/private_bots/<slug>.py and used by
+    bot_runner when start_bot() is called with the same slug."""
+    user = _current_user(authorization)
+    slug_clean = slug.strip().lower()
+    if not slug_clean or not slug_clean.replace("-", "").replace("_", "").isalnum():
+        raise HTTPException(400,
+            "Slug must be alphanumeric (plus - and _).")
+    if slug_clean.upper() in ("LONG", "SHORT", "DAY"):
+        raise HTTPException(400,
+            "Slug collides with a built-in bot — pick a different name.")
+    blob = await file.read()
+    if len(blob) > 1_000_000:
+        raise HTTPException(400, "Bot script too large (max 1 MB).")
+    if not blob.lstrip().startswith((b"#", b"\"\"\"", b"'''", b"import",
+                                       b"from", b"def", b"class")):
+        raise HTTPException(400, "File doesn't look like a Python script.")
+    dest_dir = bot_runner.private_bots_dir(user["id"])
+    dest = dest_dir / f"{slug_clean}.py"
+    dest.write_bytes(blob)
+    return {"ok": True, "slug": slug_clean,
+            "size_bytes": len(blob), "stored_at": str(dest)}
+
+
+@app.get("/bots/private")
+def api_private_bot_list(authorization: str | None = Header(default=None)):
+    user = _current_user(authorization)
+    d = bot_runner.private_bots_dir(user["id"])
+    return {"bots": [p.stem for p in sorted(d.glob("*.py"))]}
+
+
+@app.delete("/bots/private/{slug}")
+def api_private_bot_delete(slug: str,
+                            authorization: str | None = Header(default=None)):
+    user = _current_user(authorization)
+    p = bot_runner.private_bots_dir(user["id"]) / f"{slug.lower()}.py"
+    if p.exists():
+        p.unlink()
+        return {"ok": True}
+    return {"ok": False, "detail": "Not found."}
+
+
 @app.post("/admin/bots/{slug}/flag")
 def api_admin_flag_bot(slug: str, payload: dict,
                        authorization: str | None = Header(default=None)):
