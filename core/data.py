@@ -772,14 +772,56 @@ def read_env_keys() -> dict:
     return out
 
 
+def delete_env_keys(names: list[str]) -> None:
+    """V4.0.3 — remove the named env vars from .env outright. Used by
+    the Tools slot UI when a user reassigns a slot to 'Unassigned' —
+    write_env_keys can't do this since it intentionally ignores empty
+    values."""
+    if not names:
+        return
+    targets = set(n for n in names if n)
+    try:
+        existing = open(ENV_FILE, "r", encoding="utf-8").read().splitlines()
+    except Exception:
+        return
+    out = []
+    for line in existing:
+        s = line.strip()
+        if s and not s.startswith("#") and "=" in s:
+            k = s.split("=", 1)[0].strip()
+            if k in targets:
+                continue  # drop this line
+        out.append(line)
+    try:
+        ROOT.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        pass
+    with open(ENV_FILE, "w", encoding="utf-8") as f:
+        f.write("\n".join(out).strip() + "\n")
+    try:
+        from dotenv import load_dotenv as _ld
+        _ld(dotenv_path=str(ENV_FILE), override=True)
+    except Exception:
+        pass
+
+
 def write_env_keys(values: dict) -> None:
     """
     Merge the given keys into the data-folder .env (other lines preserved),
     then reload them and reconnect the Alpaca clients — no restart needed.
     Empty values are ignored so a blank field never wipes an existing key.
     """
+    # V4.0.3 — allow custom-bot slot keys (ALPACA_API_KEY_<SLUG> /
+    # ALPACA_SECRET_KEY_<SLUG>) in addition to the static ENV_KEYS
+    # allowlist, otherwise saving a slot for a 'crypto' bot would
+    # silently drop the new key.
+    def _allow(k: str) -> bool:
+        if k in ENV_KEYS:
+            return True
+        return (k.startswith("ALPACA_API_KEY_")
+                or k.startswith("ALPACA_SECRET_KEY_"))
     vals = {k: str(v).strip() for k, v in values.items()
-            if k in ENV_KEYS and str(v).strip()}
+            if _allow(k) and str(v).strip()}
     if not vals:
         return
     try:

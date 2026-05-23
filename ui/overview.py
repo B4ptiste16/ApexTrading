@@ -731,17 +731,15 @@ class ToolsTab(QWidget):
         s.add(ai_frame)
 
     def _save_alpaca_slots(self):
-        """Translate the slot→bot dropdown assignments into the
-        ALPACA_API_KEY_{LONG/SHORT/DAY} env vars the bot code already
-        reads. Slots with 'Unassigned' simply don't write anything."""
+        """V4.0.3 — translate slot dropdown assignments into ALPACA_*
+        env vars. Three steps: (1) collect new mappings, (2) delete every
+        possible side's keys from .env so stale assignments don't leak,
+        (3) write the new ones. write_env_keys ignores empty values so
+        we can't use it for the 'clear' step — that's what delete_env_keys
+        is for."""
         from PyQt6.QtCore import QTimer as _QT
-        env_patch: dict[str, str] = {}
-        # Clear every Alpaca slot first so reassigning bot X away from a
-        # slot doesn't leave the old key behind.
-        for side in ("LONG", "SHORT", "DAY"):
-            env_patch[f"ALPACA_API_KEY_{side}"]    = ""
-            env_patch[f"ALPACA_SECRET_KEY_{side}"] = ""
-        seen_sides = set()
+        new_writes: dict[str, str] = {}
+        seen_sides: set[str] = set()
         for slot in self._alpaca_slot_edits:
             side = slot["assign"].currentData()
             if side == "__none__":
@@ -754,21 +752,35 @@ class ToolsTab(QWidget):
                     f"color:{C['orange']};font-size:11px;")
                 continue
             seen_sides.add(side)
-            env_patch[f"ALPACA_API_KEY_{side}"]    = slot["key"].text()
-            env_patch[f"ALPACA_SECRET_KEY_{side}"] = slot["secret"].text()
-        # Preserve any keys not in the Alpaca set (Anthropic etc.)
-        full = D.read_env_keys()
-        full.update(env_patch)
-        D.update_env_keys(full)
+            new_writes[f"ALPACA_API_KEY_{side}"]    = slot["key"].text()
+            new_writes[f"ALPACA_SECRET_KEY_{side}"] = slot["secret"].text()
+
+        # 1. Wipe ALL existing Alpaca slot entries for any side we know
+        # about (built-ins + every custom bot in the registry). This
+        # guarantees a slot that was just re-pointed to 'Unassigned'
+        # doesn't leave a stale key behind.
+        candidate_sides = ["LONG", "SHORT", "DAY"]
+        try:
+            reg = D.load_settings().get("bot_registry", {})
+            candidate_sides += [str(c.get("id", "")).upper()
+                                 for c in reg.get("custom", [])]
+        except Exception:
+            pass
+        to_delete = []
+        for side in candidate_sides:
+            for prefix in ("ALPACA_API_KEY_", "ALPACA_SECRET_KEY_"):
+                to_delete.append(f"{prefix}{side}")
+        D.delete_env_keys(to_delete)
+
+        # 2. Write the new assignments
+        D.write_env_keys(new_writes)
         self.keys_msg.setText("✓ Slots saved — bots use new keys on next start")
         self.keys_msg.setStyleSheet(f"color:{C['green']};font-size:11px;")
         _QT.singleShot(4000, lambda: self.keys_msg.setText(""))
 
     def _save_ai_key(self):
         from PyQt6.QtCore import QTimer as _QT
-        full = D.read_env_keys()
-        full["ANTHROPIC_API_KEY"] = self._anthropic_edit.text()
-        D.update_env_keys(full)
+        D.write_env_keys({"ANTHROPIC_API_KEY": self._anthropic_edit.text()})
         self._ai_save_msg.setText("✓ Anthropic key saved")
         self._ai_save_msg.setStyleSheet(f"color:{C['green']};font-size:11px;")
         _QT.singleShot(4000, lambda: self._ai_save_msg.setText(""))
