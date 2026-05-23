@@ -114,41 +114,7 @@ _FOOTER = """
 """
 
 
-def tos_page() -> HTMLResponse:
-    """V4.0.1 — public T&C page. Linked from every footer + the cookie
-    banner. Matches the text returned by GET /auth/tos but rendered
-    as HTML for readability."""
-    body = f"""<!DOCTYPE html>
-<html lang="en"><head>
-<meta charset="utf-8">
-<title>BAPTOU - Terms &amp; Conditions</title>
-<style>
-  :root {{ --bg:#0c0f16; --panel:#10141b; --border:#2a3447; --text:#d6dce6;
-           --muted:#5a6478; --green:#3eb8a4; }}
-  * {{ box-sizing:border-box; }}
-  body {{ margin:0; background:var(--bg); color:var(--text);
-          font-family:'JetBrains Mono',monospace; font-size:13px; line-height:1.8; }}
-  nav {{ display:flex; align-items:center; padding:18px 32px;
-         border-bottom:1px solid var(--border); }}
-  .brand {{ font-family:'Syne',sans-serif; font-weight:800;
-            color:var(--green); letter-spacing:4px; font-size:14px;
-            text-decoration:none; }}
-  main {{ max-width:760px; margin:40px auto; padding:0 32px; }}
-  h1 {{ font-family:'Syne',sans-serif; letter-spacing:4px; font-size:24px;
-        color:var(--text); margin-bottom:6px; }}
-  h2 {{ color:var(--green); font-size:14px; letter-spacing:3px;
-        margin-top:32px; margin-bottom:8px; }}
-  pre {{ white-space:pre-wrap; word-wrap:break-word;
-         background:var(--panel); border:1px solid var(--border);
-         padding:24px; border-radius:8px; color:var(--text); }}
-</style>
-</head><body>
-  <nav><a class="brand" href="/">◈ BAPTOU</a></nav>
-  <main>
-    <h1>TERMS &amp; CONDITIONS</h1>
-    <p style="color:var(--muted);">v1.0  ·  Effective immediately for every account</p>
-    <pre>{__import__('html').escape('''\
-BAPTOU TRADING PLATFORM - TERMS & CONDITIONS  (v1.0)
+_TOS_BODY = '''BAPTOU TRADING PLATFORM - TERMS & CONDITIONS  (v1.0)
 
 By using BAPTOU Trading Platform (the "App"), you agree to the following:
 
@@ -202,14 +168,49 @@ local machine and (when cloud-running) on the App's server.
 9. GOVERNING LAW
 These terms are governed by the laws of the user's home jurisdiction
 where mandatory, otherwise by the laws of the App operator's home
-country.''')}</pre>
+country.'''
+
+
+def tos_page() -> HTMLResponse:
+    """V4.0.1 — public T&C page. Linked from every footer + the cookie
+    banner. Plain str.format so we don't hit Python 3.11's
+    f-string-no-backslash rule."""
+    import html as _html
+    body = """<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<title>BAPTOU - Terms &amp; Conditions</title>
+<style>
+  :root { --bg:#0c0f16; --panel:#10141b; --border:#2a3447; --text:#d6dce6;
+           --muted:#5a6478; --green:#3eb8a4; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text);
+          font-family:'JetBrains Mono',monospace; font-size:13px; line-height:1.8; }
+  nav { display:flex; align-items:center; padding:18px 32px;
+         border-bottom:1px solid var(--border); }
+  .brand { font-family:'Syne',sans-serif; font-weight:800;
+            color:var(--green); letter-spacing:4px; font-size:14px;
+            text-decoration:none; }
+  main { max-width:760px; margin:40px auto; padding:0 32px; }
+  h1 { font-family:'Syne',sans-serif; letter-spacing:4px; font-size:24px;
+        color:var(--text); margin-bottom:6px; }
+  pre { white-space:pre-wrap; word-wrap:break-word;
+         background:var(--panel); border:1px solid var(--border);
+         padding:24px; border-radius:8px; color:var(--text); }
+</style>
+</head><body>
+  <nav><a class="brand" href="/">""" + "◈" + """ BAPTOU</a></nav>
+  <main>
+    <h1>TERMS &amp; CONDITIONS</h1>
+    <p style="color:var(--muted);">v1.0  &middot;  Effective immediately for every account</p>
+    <pre>""" + _html.escape(_TOS_BODY) + """</pre>
     <p style="color:var(--muted);margin-top:24px;">
       By using the desktop app you accept these terms via a modal on
       first launch. By using the web dashboard you accept them implicitly
       while signed in. <a href="/" style="color:var(--green);">Back to home</a>.
     </p>
   </main>
-  {_FOOTER}
+  """ + _FOOTER + """
 </body></html>"""
     return HTMLResponse(body)
 
