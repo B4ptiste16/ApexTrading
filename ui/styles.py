@@ -2,25 +2,79 @@
 APEX UI Styles — V7
 """
 
-COLORS = {
-    # V7.1.6 — softer accent palette, lighter dark backgrounds.
-    # The previous teal-green and coral-red looked a touch neon at
-    # standard monitor brightness; these are desaturated by ~25 %.
-    # Backgrounds also moved one step lighter so the gradient feels
-    # less cave-like.
-    "green":  "#7ab5a2",   # was #5fa68f → softer sage-teal
-    "red":    "#c28e97",   # was #b66f7a → lighter rose
-    "orange": "#c8a070",   # was #c89060 → lighter amber
-    "yellow": "#cdc578",   # was #d6c95e
-    "purple": "#8a93c9",   # kept — already soft
-    "bg":     "#161a26",   # gradient start  (was #0c0f16)
-    "bg2":    "#1d2336",   # gradient end    (was #131a2a)
-    "panel":  "#1a1f2d",   # card / row bg   (was #111622)
-    "panel2": "#222837",   # nested bg       (was #181f2e)
-    "border": "#2a3447",   # 1px frames      (was #232d40)
-    "text":   "#d8dde8",   # body text       (kept)
-    "muted":  "#6a7894",   # secondary text  (was #5c6b82)
+# V3.1.6 — theme presets. apply_theme() at startup mutates the COLORS
+# dict in-place so widgets that reference C[...] at module-load time
+# pick up the chosen scheme.
+THEMES: dict = {
+    "Default (dark teal)": {
+        "green":  "#7ab5a2", "red":    "#c28e97", "orange": "#c8a070",
+        "yellow": "#cdc578", "purple": "#8a93c9",
+        "bg":     "#161a26", "bg2":    "#1d2336",
+        "panel":  "#1a1f2d", "panel2": "#222837", "border": "#2a3447",
+        "text":   "#d8dde8", "muted":  "#6a7894",
+    },
+    "Midnight Blue": {
+        "green":  "#67a8d6", "red":    "#d68f9c", "orange": "#d6a36a",
+        "yellow": "#d8d27a", "purple": "#9ba5e0",
+        "bg":     "#0f1320", "bg2":    "#161d34",
+        "panel":  "#141a2c", "panel2": "#1c2440", "border": "#2a3960",
+        "text":   "#dfe5f0", "muted":  "#6f7da0",
+    },
+    "Forest": {
+        "green":  "#a3c98a", "red":    "#c9928a", "orange": "#d2a973",
+        "yellow": "#e2d986", "purple": "#a8b1d3",
+        "bg":     "#161c19", "bg2":    "#1e2922",
+        "panel":  "#1c2620", "panel2": "#243029", "border": "#2f3d34",
+        "text":   "#dde5dc", "muted":  "#7a8a7d",
+    },
+    "Cyberpunk": {
+        "green":  "#3eea88", "red":    "#ff5c93", "orange": "#ffae54",
+        "yellow": "#ffe14c", "purple": "#b164ff",
+        "bg":     "#0c0820", "bg2":    "#190f33",
+        "panel":  "#140e2a", "panel2": "#1e1538", "border": "#382562",
+        "text":   "#ede5ff", "muted":  "#7c70a8",
+    },
+    "Solarized Dark": {
+        "green":  "#859900", "red":    "#dc322f", "orange": "#cb4b16",
+        "yellow": "#b58900", "purple": "#6c71c4",
+        "bg":     "#002b36", "bg2":    "#04323d",
+        "panel":  "#073642", "panel2": "#0c4252", "border": "#1f5b6c",
+        "text":   "#eee8d5", "muted":  "#586e75",
+    },
 }
+
+
+COLORS = dict(THEMES["Default (dark teal)"])
+
+# v3.1.6 — Read the user's saved theme BEFORE DARK_STYLESHEET is built
+# below. The stylesheet is a baked f-string, so once it's constructed
+# it can't pick up a theme change without an app restart. By doing the
+# read up here we make the active theme take effect on every launch.
+try:
+    import json as _json, os as _os
+    from pathlib import Path as _Path
+    _stg = _Path(_os.environ.get(
+        "APEX_DATA_DIR",
+        _os.path.expandvars(r"%LocalAppData%\APEX Trading Platform")
+    )) / "apex_settings.json"
+    if _stg.exists():
+        _saved = _json.loads(_stg.read_text(encoding="utf-8")).get("theme")
+        if _saved and _saved in THEMES:
+            COLORS.update(THEMES[_saved])
+except Exception:
+    pass
+
+
+def apply_theme(name: str) -> bool:
+    """Mutate COLORS in-place so already-imported `C = COLORS` refs see
+    the new palette. Returns True if the theme was applied. NB: the
+    DARK_STYLESHEET f-string is already baked — applying a theme at
+    runtime only updates inline-styled widgets, not the global stylesheet.
+    The user needs to restart APEX to fully see a theme change."""
+    if name not in THEMES:
+        return False
+    COLORS.update(THEMES[name])
+    return True
 
 C = COLORS
 

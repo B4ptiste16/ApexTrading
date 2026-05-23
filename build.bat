@@ -90,6 +90,7 @@ python -m PyInstaller ^
     --hidden-import daybot ^
     --hidden-import universe_manager ^
     --hidden-import dotenv ^
+    --hidden-import apex_version ^
     --collect-all PyQt6 ^
     --collect-all yfinance ^
     --collect-all anthropic ^

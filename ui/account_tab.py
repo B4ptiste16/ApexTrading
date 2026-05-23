@@ -88,6 +88,10 @@ class AccountTab(QWidget):
         s.add(SectionHeader("PROFILE", C["green"]))
         s.add(self._build_profile_form())
 
+        # ─── APPEARANCE (V3.1.6) ─────────────────────────────────
+        s.add(SectionHeader("APPEARANCE", C["purple"]))
+        s.add(self._build_theme_picker())
+
         # ─── PASSWORD ────────────────────────────────────────────
         s.add(SectionHeader("PASSWORD", C["yellow"]))
         s.add(self._build_password_form())
@@ -180,6 +184,102 @@ class AccountTab(QWidget):
         sw = QWidget(); sw.setLayout(save_row)
         g.addWidget(sw, 2, 0, 1, 2)
         return frame
+
+    def _build_theme_picker(self) -> QFrame:
+        from ui.styles import THEMES
+        frame = QFrame()
+        frame.setStyleSheet(
+            f"background:{C['panel']};border:1px solid {C['border']};"
+            f"border-radius:8px;")
+        g = QGridLayout(frame)
+        g.setContentsMargins(16, 14, 16, 14)
+        g.setHorizontalSpacing(12)
+        g.setVerticalSpacing(10)
+
+        intro = QLabel(
+            "Pick a colour palette for the whole app. Changes apply "
+            "after restarting APEX (the stylesheet is baked at launch).")
+        intro.setStyleSheet(f"color:{C['muted']};font-size:11px;")
+        intro.setWordWrap(True)
+        g.addWidget(intro, 0, 0, 1, 2)
+
+        g.addWidget(self._lbl("Theme"), 1, 0)
+        self._theme_combo = QComboBox()
+        for name in THEMES:
+            self._theme_combo.addItem(name)
+        # Pre-select current
+        try:
+            from core import data as _D
+            current = _D.load_settings().get("theme", "Default (dark teal)")
+            idx = self._theme_combo.findText(current)
+            if idx >= 0:
+                self._theme_combo.setCurrentIndex(idx)
+        except Exception:
+            pass
+        g.addWidget(self._theme_combo, 1, 1)
+
+        # Inline preview row — 5 swatches showing the colours of the
+        # currently-selected theme so you can see what you're picking.
+        self._theme_preview = QHBoxLayout()
+        self._theme_preview.setContentsMargins(0, 4, 0, 0)
+        self._theme_preview.setSpacing(6)
+        pw = QWidget(); pw.setLayout(self._theme_preview)
+        g.addWidget(self._lbl("Preview"), 2, 0)
+        g.addWidget(pw, 2, 1)
+        self._refresh_theme_preview()
+        self._theme_combo.currentTextChanged.connect(
+            lambda _t: self._refresh_theme_preview())
+
+        row = QHBoxLayout()
+        btn = QPushButton("🎨  Apply theme  (restart required)")
+        btn.setObjectName("toolBtn")
+        btn.clicked.connect(self._apply_theme)
+        self._theme_msg = QLabel("")
+        self._theme_msg.setStyleSheet(f"color:{C['green']};font-size:10px;")
+        row.addWidget(btn)
+        row.addWidget(self._theme_msg)
+        row.addStretch()
+        rw = QWidget(); rw.setLayout(row)
+        g.addWidget(rw, 3, 0, 1, 2)
+        return frame
+
+    def _refresh_theme_preview(self):
+        # Clear
+        while self._theme_preview.count():
+            item = self._theme_preview.takeAt(0)
+            if item and item.widget():
+                item.widget().deleteLater()
+        # Build new swatches
+        from ui.styles import THEMES
+        name = self._theme_combo.currentText()
+        palette = THEMES.get(name, {})
+        for key in ("bg", "panel", "green", "red", "orange", "purple", "yellow"):
+            sw = QLabel()
+            sw.setFixedSize(22, 22)
+            sw.setStyleSheet(
+                f"background:{palette.get(key, '#000')};"
+                f"border:1px solid rgba(255,255,255,0.1);border-radius:4px;")
+            sw.setToolTip(f"{key}: {palette.get(key, '?')}")
+            self._theme_preview.addWidget(sw)
+        self._theme_preview.addStretch()
+
+    def _apply_theme(self):
+        name = self._theme_combo.currentText()
+        try:
+            from core import data as _D
+            s = _D.load_settings()
+            s["theme"] = name
+            import json as _json
+            with open(_D.SETTINGS_FILE, "w", encoding="utf-8") as f:
+                _json.dump(s, f, indent=2)
+        except Exception as e:
+            self._theme_msg.setText(f"Save failed: {e}")
+            self._theme_msg.setStyleSheet(f"color:{C['red']};font-size:10px;")
+            return
+        self._theme_msg.setText(
+            f"✓ {name} saved — restart APEX to see it.")
+        self._theme_msg.setStyleSheet(f"color:{C['green']};font-size:10px;")
+        QTimer.singleShot(6000, lambda: self._theme_msg.setText(""))
 
     def _build_password_form(self) -> QFrame:
         frame = QFrame()

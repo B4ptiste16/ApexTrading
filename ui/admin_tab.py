@@ -205,6 +205,49 @@ class AdminTab(QWidget):
         self._role_section_frame = role_frame
         s.add(role_frame)
 
+        # ─── BOT CLASSIFY (V3.1.7) ────────────────────────────
+        self._classify_section = SectionHeader(
+            "FEATURE / RECOMMEND BOTS", C["green"])
+        s.add(self._classify_section)
+        classify_frame = QFrame()
+        classify_frame.setStyleSheet(
+            f"background:{C['panel']};border:1px solid {C['border']};"
+            f"border-radius:8px;")
+        cf = QGridLayout(classify_frame)
+        cf.setContentsMargins(16, 14, 16, 14)
+        cf.setHorizontalSpacing(12)
+        cf.setVerticalSpacing(10)
+
+        intro = QLabel(
+            "Toggle the ⭐ FEATURED or ✦ RECOMMENDED flags on any bot in "
+            "the marketplace. Picks show up at the top of the BOT MARKET "
+            "tab for every user.")
+        intro.setStyleSheet(f"color:{C['muted']};font-size:11px;")
+        intro.setWordWrap(True)
+        cf.addWidget(intro, 0, 0, 1, 3)
+
+        cf.addWidget(self._lbl("Bot slug"), 1, 0)
+        self._classify_slug = QLineEdit()
+        self._classify_slug.setStyleSheet(self._input_css())
+        self._classify_slug.setPlaceholderText("e.g. spy-momentum")
+        cf.addWidget(self._classify_slug, 1, 1, 1, 2)
+
+        feat_btn = QPushButton("⭐  Toggle FEATURED")
+        feat_btn.setObjectName("toolBtn")
+        feat_btn.clicked.connect(lambda: self._do_classify("featured"))
+        cf.addWidget(feat_btn, 2, 0)
+
+        reco_btn = QPushButton("✦  Toggle RECOMMENDED")
+        reco_btn.setObjectName("toolBtn")
+        reco_btn.clicked.connect(lambda: self._do_classify("recommended"))
+        cf.addWidget(reco_btn, 2, 1)
+
+        self._classify_msg = QLabel("")
+        self._classify_msg.setStyleSheet(f"color:{C['green']};font-size:10px;")
+        cf.addWidget(self._classify_msg, 3, 0, 1, 3)
+        self._classify_section_frame = classify_frame
+        s.add(classify_frame)
+
         s.add_stretch()
 
         # Default: hide everything until /auth/me confirms admin
@@ -247,7 +290,8 @@ class AdminTab(QWidget):
         else:
             self._gate_msg.setVisible(False)
         self._role_lbl.setText(f"YOUR ROLE: {role}")
-        for w in (self._users_table, self._grant_section_frame):
+        for w in (self._users_table, self._grant_section_frame,
+                  self._classify_section_frame):
             w.setVisible(visible)
         # Role assignment is BOSS_ADMIN-only
         boss = role == "BOSS_ADMIN"
@@ -332,6 +376,41 @@ class AdminTab(QWidget):
             return
         self._toast(self._role_msg, f"✓ Role applied.")
         self._refresh_users()
+
+    def _do_classify(self, flag: str):
+        """Toggle the featured/recommended flag on a bot. We don't know
+        the bot's current state from here, so we fetch it first → flip
+        → write back."""
+        slug = self._classify_slug.text().strip()
+        if not slug:
+            self._toast(self._classify_msg, "Enter a bot slug.", err=True)
+            return
+        # First fetch the current state
+        getter = _HttpWorker("GET", f"/bots/{slug}")
+        self._spawn(getter, lambda ok, body:
+                    self._classify_step2(ok, body, slug, flag))
+
+    def _classify_step2(self, ok: bool, body: dict, slug: str, flag: str):
+        if not ok:
+            self._toast(self._classify_msg,
+                        body.get("detail", "Bot not found."), err=True)
+            return
+        current = bool(body.get(flag, 0))
+        new_val = not current
+        worker = _HttpWorker("PUT", f"/admin/bots/{slug}/classify",
+                              payload={flag: new_val})
+        self._spawn(worker, lambda ok, body:
+                    self._on_classify_done(ok, body, slug, flag, new_val))
+
+    def _on_classify_done(self, ok: bool, body: dict, slug: str,
+                          flag: str, new_val: bool):
+        if not ok:
+            self._toast(self._classify_msg,
+                        body.get("detail", "Failed."), err=True)
+            return
+        state = "ON" if new_val else "OFF"
+        self._toast(self._classify_msg,
+                    f"✓ {slug} · {flag.upper()} is now {state}")
 
     def _toast(self, label: QLabel, msg: str, *, err: bool = False,
                 transient: bool = True):

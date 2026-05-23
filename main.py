@@ -52,6 +52,31 @@ C = COLORS
 
 
 # ─────────────────────────────────────────
+# WINDOW ICON
+# ─────────────────────────────────────────
+
+def _app_icon() -> QIcon:
+    """v3.1.6 — return the APEX icon for the title bar.
+    Tries the frozen-bundle location first (sys._MEIPASS/assets), falls
+    back to the source-tree location for dev runs. If neither exists,
+    returns a blank QIcon so setWindowIcon doesn't crash."""
+    candidates = []
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        candidates.append(Path(meipass) / "assets" / "icon.ico")
+    exe_dir = Path(sys.executable).parent
+    candidates.append(exe_dir / "_internal" / "assets" / "icon.ico")
+    candidates.append(Path(__file__).parent / "assets" / "icon.ico")
+    for p in candidates:
+        try:
+            if p.exists():
+                return QIcon(str(p))
+        except Exception:
+            continue
+    return QIcon()
+
+
+# ─────────────────────────────────────────
 # SINGLE INSTANCE
 # ─────────────────────────────────────────
 
@@ -977,6 +1002,7 @@ class ApexWindow(QMainWindow):
         self.setMinimumSize(1280, 800)
         self.resize(1440, 900)
         self.setStyleSheet(DARK_STYLESHEET)
+        self.setWindowIcon(_app_icon())   # v3.1.6 — fixes the exe-style window icon
 
         # State
         self._bot_tabs:   dict[str, BotTab]            = {}
@@ -2236,6 +2262,7 @@ def main():
     app = QApplication(sys.argv)
     app.setApplicationName("APEX Trading Platform")
     app.setApplicationVersion(get_current_version())
+    app.setWindowIcon(_app_icon())          # v3.1.6 — default for every window
     app.setQuitOnLastWindowClosed(False)
 
     from ui.widgets import WheelGuard
