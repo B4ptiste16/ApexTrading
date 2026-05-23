@@ -1044,6 +1044,40 @@ class ToolsTab(QWidget):
         exe_info.setWordWrap(True)
         s.add(exe_info)
 
+        # ── V4.0.1 — STAY UPDATED  (bottom of Tools) ───────────
+        # User-requested prominent CTA at the bottom of Tools because
+        # the auto-update banner sometimes doesn't fire (transient
+        # network blip, GitHub API rate-limit, etc.).
+        s.add(SectionHeader("STAY UPDATED", C["green"]))
+        stay_frame = QFrame()
+        stay_frame.setStyleSheet(
+            f"background:{C['panel']};border:1px solid {C['border']};"
+            f"border-radius:10px;border-left:3px solid {C['green']};")
+        sv = QVBoxLayout(stay_frame)
+        sv.setContentsMargins(20, 16, 20, 16)
+        sv.setSpacing(8)
+        stay_lbl = QLabel(
+            "BAPTOU checks for new releases on startup and once an "
+            "hour, but if the auto-banner hasn't fired and you want "
+            "to confirm you're on the latest, force a check here.")
+        stay_lbl.setStyleSheet(f"color:{C['muted']};font-size:11px;line-height:1.6;")
+        stay_lbl.setWordWrap(True)
+        sv.addWidget(stay_lbl)
+        big_check = QPushButton("⟳   CHECK FOR UPDATES NOW")
+        big_check.setObjectName("addBotBtn")
+        big_check.setFixedHeight(46)
+        big_check.setMinimumWidth(280)
+        big_check.clicked.connect(self._check_update_now)
+        self._stay_msg = QLabel("")
+        self._stay_msg.setStyleSheet(f"color:{C['green']};font-size:11px;")
+        row = QHBoxLayout()
+        row.addWidget(big_check)
+        row.addWidget(self._stay_msg)
+        row.addStretch()
+        rw = QWidget(); rw.setLayout(row)
+        sv.addWidget(rw)
+        s.add(stay_frame)
+
         s.add_stretch()
 
     def refresh(self):

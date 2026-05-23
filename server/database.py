@@ -57,6 +57,9 @@ def init_db() -> None:
             "CREATE INDEX IF NOT EXISTS idx_users_role         ON users(role)",
             # V3.3.0 — moderation: per-user publish ban window
             "ALTER TABLE users ADD COLUMN publish_ban_until    TEXT",
+            # V4.0.1 — Terms of Service acceptance timestamp (ISO 8601);
+            # NULL means the user hasn't accepted the current version yet.
+            "ALTER TABLE users ADD COLUMN accepted_tos_at      TEXT",
         ):
             try:
                 c.execute(ddl)
@@ -191,6 +194,15 @@ def update_user_password(user_id: int, hashed_password: str) -> None:
     with _conn() as c:
         c.execute("UPDATE users SET hashed_password=? WHERE id=?",
                   (hashed_password, user_id))
+        c.commit()
+
+
+def mark_tos_accepted(user_id: int) -> None:
+    """V4.0.1 — stamp the current UTC time so the client knows the
+    user has explicitly accepted the T&C."""
+    with _conn() as c:
+        c.execute("UPDATE users SET accepted_tos_at=? WHERE id=?",
+                  (datetime.now(timezone.utc).isoformat(), user_id))
         c.commit()
 
 

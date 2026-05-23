@@ -589,6 +589,101 @@ def api_admin_remove_bot(slug: str, payload: dict,
     return result
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# V4.0.1 — Terms of Service acceptance
+# Desktop pops a modal on first launch + after each rebrand bump; the user
+# must accept before the app unlocks. Server is the source of truth.
+# ──────────────────────────────────────────────────────────────────────────────
+
+TOS_VERSION = "1.0"
+TOS_TEXT = """\
+BAPTOU TRADING PLATFORM — TERMS & CONDITIONS  (v1.0)
+
+By using BAPTOU Trading Platform (the "App"), you agree to the following:
+
+1. AS-IS SERVICE
+The App is provided as-is, without warranty of any kind. Trading bot
+performance is not a guarantee of future results. Markets are volatile;
+past performance is not indicative of future returns.
+
+2. ASSUMPTION OF RISK
+You assume all risk for trades executed by bots running through your
+linked broker accounts. You authorise the App to place orders on your
+behalf in accordance with each bot's logic. You are solely responsible
+for monitoring your bots and your broker account.
+
+3. NO LIABILITY FOR LOSSES (general rule)
+Neither the App, its creators, contributors, hosts, nor any affiliated
+parties shall be liable for any monetary losses, missed gains, slippage,
+broker downtime, or other financial damages incurred while using the
+App or any bot purchased / downloaded through it. This includes losses
+caused by a bot's strategy, code defects, market conditions, broker
+outages, or any third-party API issue.
+
+4. MODERATION REFUND POLICY (the one exception)
+If a published bot is flagged and removed by App moderators for
+misrepresenting its behaviour, every buyer of that bot is refunded
+the credits they paid for it. **This refund covers the purchase price
+only.** The App is NOT liable for trading losses incurred while
+running such a bot before its removal — only for the sale itself.
+
+5. CREDITS
+APEX / BAPTOU credits are a virtual currency used internally for
+marketplace transactions. 1 credit conventionally = US $0.01. Credits
+are not yet redeemable for real money; cash-out becomes available
+when the App connects to a real banking provider in a future release.
+Credit balances are kept on the App's centralised server.
+
+6. PUBLISHER OBLIGATIONS
+If you publish a bot, you warrant that:
+  - You own or have the right to distribute the code
+  - Your published description matches the bot's actual behaviour
+  - You do not knowingly distribute malicious code
+
+Misrepresentation may result in moderation removal, refunds to buyers,
+a publish ban, and a fixed credit fine.
+
+7. ACCOUNT TERMINATION
+The App reserves the right to suspend or terminate accounts that
+violate these terms or applicable laws.
+
+8. PRIVACY
+The App stores email, username, hashed password, optional Google
+sub identifier, optional phone, and your encrypted broker API keys.
+Your bot code, AI generation prompts, and trade logs are stored on
+your local machine and (when cloud-running) on the App's server.
+
+9. GOVERNING LAW
+These terms are governed by the laws of the user's home jurisdiction
+where mandatory, otherwise by the laws of the App operator's home
+country.
+
+By clicking "I Accept", you confirm that you have read, understood,
+and agreed to the above.
+"""
+
+
+@app.get("/auth/tos")
+def auth_tos_get(authorization: str | None = Header(default=None)):
+    """Returns the current T&C text + the version + whether THIS user
+    has accepted the current version. Desktop hits this on launch."""
+    user = _current_user(authorization)
+    accepted_at = user.get("accepted_tos_at")
+    return {
+        "version":     TOS_VERSION,
+        "text":        TOS_TEXT,
+        "accepted_at": accepted_at,
+        "needs_accept": not bool(accepted_at),
+    }
+
+
+@app.post("/auth/tos/accept")
+def auth_tos_accept(authorization: str | None = Header(default=None)):
+    user = _current_user(authorization)
+    database.mark_tos_accepted(user["id"])
+    return {"ok": True, "version": TOS_VERSION}
+
+
 @app.get("/admin/revenue-split")
 def api_revenue_split_get(authorization: str | None = Header(default=None)):
     """Any admin can SEE the split. Only BOSS_ADMIN can change it."""
@@ -652,6 +747,12 @@ def web_root(request: Request):
     right. /web/login and /web/dashboard remain reachable directly."""
     user = web.user_from_cookie(request)
     return web.landing_page(user)
+
+
+@app.get("/web/tos", include_in_schema=False)
+def web_tos_page():
+    """V4.0.1 — public T&C page, linked from every footer + cookie banner."""
+    return web.tos_page()
 
 
 @app.get("/web/login", include_in_schema=False)

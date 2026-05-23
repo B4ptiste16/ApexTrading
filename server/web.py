@@ -86,6 +86,134 @@ a       { color: var(--purple); }
 """
 
 
+# V4.0.1 — footer injected on every page. Single auth cookie banner +
+# T&C link + copyright. The banner dismisses with a localStorage flag.
+_FOOTER = """
+<div id="cookie-banner" style="
+     position:fixed;left:0;right:0;bottom:0;background:rgba(10,13,18,0.96);
+     border-top:1px solid #2a3447;color:#d8dde8;
+     font-family:'JetBrains Mono',monospace;font-size:11px;line-height:1.5;
+     padding:12px 18px;display:none;z-index:9999;">
+  <span>This site uses a single auth cookie (<code>apex_token</code>) to keep you signed in. No tracking.
+        See our <a href="/web/tos" style="color:#3eb8a4;">Terms &amp; Conditions</a>.</span>
+  <button onclick="document.getElementById('cookie-banner').style.display='none';
+                   localStorage.setItem('baptou_cookies_ack','1');"
+          style="float:right;background:#3eb8a4;color:#0c0f16;border:none;
+                 padding:5px 14px;border-radius:4px;font-weight:700;
+                 cursor:pointer;letter-spacing:2px;font-size:10px;">GOT IT</button>
+</div>
+<footer style="text-align:center;padding:30px 16px 60px;color:#5a6478;
+        font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:2px;">
+  BAPTOU TRADING PLATFORM  ·  <a href="/web/tos" style="color:#5a6478;">TERMS &amp; CONDITIONS</a>  ·  © 2026
+</footer>
+<script>
+  if (!localStorage.getItem('baptou_cookies_ack')) {
+    document.getElementById('cookie-banner').style.display = 'block';
+  }
+</script>
+"""
+
+
+def tos_page() -> HTMLResponse:
+    """V4.0.1 — public T&C page. Linked from every footer + the cookie
+    banner. Matches the text returned by GET /auth/tos but rendered
+    as HTML for readability."""
+    body = f"""<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<title>BAPTOU - Terms &amp; Conditions</title>
+<style>
+  :root {{ --bg:#0c0f16; --panel:#10141b; --border:#2a3447; --text:#d6dce6;
+           --muted:#5a6478; --green:#3eb8a4; }}
+  * {{ box-sizing:border-box; }}
+  body {{ margin:0; background:var(--bg); color:var(--text);
+          font-family:'JetBrains Mono',monospace; font-size:13px; line-height:1.8; }}
+  nav {{ display:flex; align-items:center; padding:18px 32px;
+         border-bottom:1px solid var(--border); }}
+  .brand {{ font-family:'Syne',sans-serif; font-weight:800;
+            color:var(--green); letter-spacing:4px; font-size:14px;
+            text-decoration:none; }}
+  main {{ max-width:760px; margin:40px auto; padding:0 32px; }}
+  h1 {{ font-family:'Syne',sans-serif; letter-spacing:4px; font-size:24px;
+        color:var(--text); margin-bottom:6px; }}
+  h2 {{ color:var(--green); font-size:14px; letter-spacing:3px;
+        margin-top:32px; margin-bottom:8px; }}
+  pre {{ white-space:pre-wrap; word-wrap:break-word;
+         background:var(--panel); border:1px solid var(--border);
+         padding:24px; border-radius:8px; color:var(--text); }}
+</style>
+</head><body>
+  <nav><a class="brand" href="/">◈ BAPTOU</a></nav>
+  <main>
+    <h1>TERMS &amp; CONDITIONS</h1>
+    <p style="color:var(--muted);">v1.0  ·  Effective immediately for every account</p>
+    <pre>{__import__('html').escape('''\
+BAPTOU TRADING PLATFORM - TERMS & CONDITIONS  (v1.0)
+
+By using BAPTOU Trading Platform (the "App"), you agree to the following:
+
+1. AS-IS SERVICE
+The App is provided as-is, without warranty of any kind. Trading bot
+performance is not a guarantee of future results. Markets are volatile;
+past performance is not indicative of future returns.
+
+2. ASSUMPTION OF RISK
+You assume all risk for trades executed by bots running through your
+linked broker accounts. You authorise the App to place orders on your
+behalf in accordance with each bot's logic. You are solely responsible
+for monitoring your bots and your broker account.
+
+3. NO LIABILITY FOR LOSSES (general rule)
+Neither the App, its creators, contributors, hosts, nor any affiliated
+parties shall be liable for any monetary losses, missed gains, slippage,
+broker downtime, or other financial damages incurred while using the
+App or any bot purchased / downloaded through it.
+
+4. MODERATION REFUND POLICY (the one exception)
+If a published bot is flagged and removed by App moderators for
+misrepresenting its behaviour, every buyer of that bot is refunded
+the credits they paid for it. This refund covers the purchase price
+only. The App is NOT liable for trading losses incurred while running
+such a bot before its removal -- only for the sale itself.
+
+5. CREDITS
+APEX / BAPTOU credits are a virtual currency used internally for
+marketplace transactions. 1 credit conventionally = US $0.01. Cash-out
+becomes available when the App connects to a real banking provider
+in a future release.
+
+6. PUBLISHER OBLIGATIONS
+If you publish a bot, you warrant that you own or have the right to
+distribute the code, that your published description matches the bot's
+actual behaviour, and that you do not knowingly distribute malicious
+code. Misrepresentation may result in moderation removal, refunds to
+buyers, a publish ban, and a fixed credit fine.
+
+7. ACCOUNT TERMINATION
+The App reserves the right to suspend or terminate accounts that
+violate these terms or applicable laws.
+
+8. PRIVACY
+The App stores email, username, hashed password, optional Google sub
+identifier, optional phone, and your encrypted broker API keys. Your
+bot code, AI generation prompts, and trade logs are stored on your
+local machine and (when cloud-running) on the App's server.
+
+9. GOVERNING LAW
+These terms are governed by the laws of the user's home jurisdiction
+where mandatory, otherwise by the laws of the App operator's home
+country.''')}</pre>
+    <p style="color:var(--muted);margin-top:24px;">
+      By using the desktop app you accept these terms via a modal on
+      first launch. By using the web dashboard you accept them implicitly
+      while signed in. <a href="/" style="color:var(--green);">Back to home</a>.
+    </p>
+  </main>
+  {_FOOTER}
+</body></html>"""
+    return HTMLResponse(body)
+
+
 def landing_page(signed_in_user: dict | None = None) -> HTMLResponse:
     """
     V7.1.14: public marketing homepage at /. Pre-V7.1.14 the bare URL
@@ -120,7 +248,7 @@ def landing_page(signed_in_user: dict | None = None) -> HTMLResponse:
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#0c0f16">
-  <title>APEX — Trading platform</title>
+  <title>BAPTOU — Trading platform</title>
   <style>{_BASE_CSS}
     nav      {{ display:flex; align-items:center; gap:10px;
                 padding: 14px 20px; }}
@@ -184,22 +312,23 @@ def landing_page(signed_in_user: dict | None = None) -> HTMLResponse:
   </style>
 </head><body>
   <nav>
-    <div style="font-family:'Syne',sans-serif;font-weight:800;
-                color:var(--green);letter-spacing:4px;font-size:14px;">
-      ◈ APEX
-    </div>
+    <a href="/" style="font-family:'Syne',sans-serif;font-weight:800;
+                color:var(--green);letter-spacing:4px;font-size:14px;
+                text-decoration:none;">
+      ◈ BAPTOU
+    </a>
     <div class="sp"></div>
     {topright}
   </nav>
 
   <section class="hero">
-    <div class="brand">◈ APEX</div>
+    <a class="brand" href="/" style="text-decoration:none;color:inherit;">◈ BAPTOU</a>
     <div class="sub">TRADING PLATFORM</div>
 
     <h1>AI-driven automated trading,<br>on your desktop and the cloud.</h1>
-    <p>APEX bundles Claude-powered long, short and day strategies
+    <p>BAPTOU bundles Claude-powered long, short and day strategies
        into one desktop app. Bots can run locally on your machine
-       or on the APEX cloud server — 24/7, even with your laptop off.
+       or on the BAPTOU cloud server — 24/7, even with your laptop off.
        Bring your own Alpaca keys, your own AI keys, your own bots.</p>
 
     <a class="download"
@@ -219,7 +348,7 @@ def landing_page(signed_in_user: dict | None = None) -> HTMLResponse:
     </div>
     <div class="feat">
       <h3>CLOUD OR LOCAL</h3>
-      <p>Tick "Run on Oracle 24/7" per bot. The APEX server runs
+      <p>Tick "Run on Oracle 24/7" per bot. The BAPTOU server runs
          them with your encrypted broker credentials and keeps them
          alive even when the desktop app is closed.</p>
     </div>
@@ -236,6 +365,7 @@ def landing_page(signed_in_user: dict | None = None) -> HTMLResponse:
     · <a href="/web/login">Sign in</a>
     · <a href="/web/signup">Sign up</a>
   </footer>
+{_FOOTER}
 </body></html>"""
     return HTMLResponse(body)
 
@@ -247,11 +377,11 @@ def login_page(error: str | None = None) -> HTMLResponse:
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#0c0f16">
-  <title>APEX — Sign in</title>
+  <title>BAPTOU — Sign in</title>
   <style>{_BASE_CSS}</style>
 </head><body>
   <div class="wrap">
-    <div class="brand">◈  APEX</div>
+    <a class="brand" href="/" style="text-decoration:none;color:inherit;">◈ BAPTOU</a>
     <div class="sub">TRADING PLATFORM</div>
     <div class="card">
       <h2>SIGN IN</h2>
@@ -269,6 +399,7 @@ def login_page(error: str | None = None) -> HTMLResponse:
       </p>
     </div>
   </div>
+{_FOOTER}
 </body></html>"""
     return HTMLResponse(body, status_code=401 if error else 200)
 
@@ -282,11 +413,11 @@ def signup_page(error: str | None = None,
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#0c0f16">
-  <title>APEX — Create account</title>
+  <title>BAPTOU — Create account</title>
   <style>{_BASE_CSS}</style>
 </head><body>
   <div class="wrap">
-    <div class="brand">◈  APEX</div>
+    <a class="brand" href="/" style="text-decoration:none;color:inherit;">◈ BAPTOU</a>
     <div class="sub">TRADING PLATFORM</div>
     <div class="card">
       <h2>CREATE ACCOUNT</h2>
@@ -314,6 +445,7 @@ def signup_page(error: str | None = None,
       </p>
     </div>
   </div>
+{_FOOTER}
 </body></html>"""
     return HTMLResponse(body, status_code=400 if error else 200)
 
@@ -383,12 +515,12 @@ def dashboard_page(user: dict, tab: str = "overview") -> HTMLResponse:
         '<a href="/web/logout">Sign out</a></p></div>'
         '<div class="card"><h2>API KEYS</h2>'
         '<p class="hint">Broker / Anthropic keys are stored encrypted '
-        "on the APEX server. Manage them from the desktop app's "
-        '<b>Tools → ACCOUNT LINKING</b> section (Sync keys to APEX '
+        "on the BAPTOU server. Manage them from the desktop app's "
+        '<b>Tools → ACCOUNT LINKING</b> section (Sync keys to BAPTOU '
         'server). Web-side editing coming soon.</p></div>'
         '<div class="card"><h2>DOWNLOAD APP</h2>'
         '<p class="hint">For the full desktop experience: '
-        '<a href="/">Download APEX for Windows →</a></p></div>'
+        '<a href="/">Download BAPTOU for Windows →</a></p></div>'
     )
     tab_html = {
         "overview": overview_html,
@@ -402,7 +534,7 @@ def dashboard_page(user: dict, tab: str = "overview") -> HTMLResponse:
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#0c0f16">
-  <title>APEX — Dashboard</title>
+  <title>BAPTOU — Dashboard</title>
   <style>{_BASE_CSS}{_SAFE_AREA_CSS}
     .tabbar  {{ display:flex; gap:0; overflow-x:auto;
                  border-bottom: 1px solid var(--border);
@@ -463,7 +595,7 @@ def dashboard_page(user: dict, tab: str = "overview") -> HTMLResponse:
   </style>
 </head><body>
   <div class="wrap">
-    <div class="brand">◈  APEX</div>
+    <a class="brand" href="/" style="text-decoration:none;color:inherit;">◈ BAPTOU</a>
     <div class="sub">TRADING PLATFORM</div>
 
     <div class="tabbar">{tabs_html}</div>
@@ -633,7 +765,7 @@ def dashboard_page(user: dict, tab: str = "overview") -> HTMLResponse:
           <div class="card">
             <h2>NO BROKER LINKED</h2>
             <p class="hint">Open the desktop app → Tools → API Keys, fill
-            in your Alpaca keys, then click <b>Sync keys to APEX server</b>
+            in your Alpaca keys, then click <b>Sync keys to BAPTOU server</b>
             under ACCOUNT LINKING. Refresh this page once that's done.</p>
           </div>`);
       }}
@@ -734,6 +866,7 @@ def dashboard_page(user: dict, tab: str = "overview") -> HTMLResponse:
     refresh();
     setInterval(refresh, 30000);
   </script>
+{_FOOTER}
 </body></html>"""
     return HTMLResponse(body)
 

@@ -1187,6 +1187,9 @@ class ApexWindow(QMainWindow):
         # V3.3.0 — pull any bots removed by moderation that we used to
         # have installed, and delete them locally.
         QTimer.singleShot(4500, self._sync_revocations)
+        # V4.0.1 — show the T&C acceptance modal if the user hasn't
+        # ticked it yet. Defer so the main window has time to paint.
+        QTimer.singleShot(2000, self._check_tos_acceptance)
         # V4.0.0 — apply the saved broker mode AFTER the tabs are wired
         # so the stack is fully populated before we switch pages.
         QTimer.singleShot(0, lambda: self._apply_broker_mode(
@@ -1977,6 +1980,101 @@ class ApexWindow(QMainWindow):
                           if _w in getattr(self, "_meta_workers", []) else None)
         self._meta_workers = getattr(self, "_meta_workers", [])
         self._meta_workers.append(w)
+        w.start()
+
+    # ── V4.0.1 — Terms of Service acceptance ─────────────────
+
+    def _check_tos_acceptance(self):
+        """Hit /auth/tos and pop a modal if the user hasn't accepted yet.
+        The modal blocks (modal exec) until the user explicitly clicks
+        I Accept — Decline closes the app via _sign_out."""
+        class _W(QThread):
+            done = pyqtSignal(dict)
+            def run(self_):
+                import requests
+                from ui.login import load_auth, load_server_url
+                tok = (load_auth() or {}).get("token") or ""
+                if not tok:
+                    self_.done.emit({})
+                    return
+                try:
+                    r = requests.get(f"{load_server_url()}/auth/tos",
+                        headers={"Authorization": f"Bearer {tok}"},
+                        timeout=10)
+                    self_.done.emit(r.json() if r.ok else {})
+                except Exception:
+                    self_.done.emit({})
+
+        w = _W()
+        w.done.connect(self._on_tos_loaded)
+        self._tos_workers = getattr(self, "_tos_workers", [])
+        self._tos_workers.append(w)
+        w.finished.connect(
+            lambda _w=w: self._tos_workers.remove(_w)
+                          if _w in self._tos_workers else None)
+        w.start()
+
+    def _on_tos_loaded(self, body: dict):
+        if not body or not body.get("needs_accept"):
+            return
+        from PyQt6.QtWidgets import (
+            QDialog, QDialogButtonBox, QPlainTextEdit, QVBoxLayout,
+        )
+        dlg = QDialog(self)
+        dlg.setWindowTitle(f"Terms & Conditions  v{body.get('version','?')}")
+        dlg.setModal(True)
+        dlg.setMinimumSize(640, 540)
+        lv = QVBoxLayout(dlg)
+        intro = QLabel(
+            "<b>Please read and accept BAPTOU's Terms & Conditions "
+            "before continuing.</b>")
+        intro.setStyleSheet(f"color:{COLORS['text']};font-size:12px;padding:6px;")
+        intro.setWordWrap(True)
+        lv.addWidget(intro)
+        body_box = QPlainTextEdit()
+        body_box.setReadOnly(True)
+        body_box.setPlainText(body.get("text", "(T&C text missing.)"))
+        body_box.setStyleSheet(
+            f"background:{COLORS['panel2']};color:{COLORS['text']};"
+            f"border:1px solid {COLORS['border']};border-radius:6px;"
+            f"padding:10px;font-family:'JetBrains Mono';font-size:11px;")
+        lv.addWidget(body_box, 1)
+        btns = QDialogButtonBox()
+        accept = btns.addButton("I Accept", QDialogButtonBox.ButtonRole.AcceptRole)
+        decline = btns.addButton("Decline & sign out",
+                                  QDialogButtonBox.ButtonRole.RejectRole)
+        btns.accepted.connect(dlg.accept)
+        btns.rejected.connect(dlg.reject)
+        lv.addWidget(btns)
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            self._send_tos_acceptance()
+        else:
+            # User declined → sign out so they can re-think
+            self.statusBar().showMessage("T&C declined. Signing out.")
+            QTimer.singleShot(800, self._sign_out)
+
+    def _send_tos_acceptance(self):
+        class _W(QThread):
+            done = pyqtSignal(bool)
+            def run(self_):
+                import requests
+                from ui.login import load_auth, load_server_url
+                tok = (load_auth() or {}).get("token") or ""
+                try:
+                    r = requests.post(f"{load_server_url()}/auth/tos/accept",
+                        headers={"Authorization": f"Bearer {tok}"},
+                        timeout=10)
+                    self_.done.emit(r.ok)
+                except Exception:
+                    self_.done.emit(False)
+
+        w = _W()
+        w.done.connect(lambda ok: print(f"[tos] accept ok={ok}"))
+        self._tos_workers = getattr(self, "_tos_workers", [])
+        self._tos_workers.append(w)
+        w.finished.connect(
+            lambda _w=w: self._tos_workers.remove(_w)
+                          if _w in self._tos_workers else None)
         w.start()
 
     def _sync_revocations(self):
