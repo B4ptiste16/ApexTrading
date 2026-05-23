@@ -1063,6 +1063,15 @@ class ApexWindow(QMainWindow):
         # Header
         root_layout.addWidget(self._build_header())
 
+        # V4.0.0 — content body is a QStackedWidget so we can swap the
+        # entire window between the Alpaca tabbed UI and the
+        # "coming-very-soon" placeholder for not-yet-supported brokers
+        # (IBKR / TradingView). The header stays visible in both modes
+        # so the broker-mode chip is always reachable.
+        from PyQt6.QtWidgets import QStackedWidget as _QStack
+        self._content_stack = _QStack()
+        root_layout.addWidget(self._content_stack, 1)
+
         # ── TAB WIDGET ──────────────────────────────────────
         self.tabs = QTabWidget()
         self.tabs.setTabPosition(QTabWidget.TabPosition.North)
@@ -1076,7 +1085,11 @@ class ApexWindow(QMainWindow):
         self.tabs.setMovable(True)
         self.tabs.tabBar().tabMoved.connect(self._on_tab_moved)
         self._suppress_tab_move = False
-        root_layout.addWidget(self.tabs)
+        # V4.0.0 — page 0 of the stack is the full Alpaca tabbed UI
+        self._content_stack.addWidget(self.tabs)
+        # Page 1 — the "coming soon" placeholder used by IBKR / TradingView
+        self._coming_soon_page = self._build_coming_soon_page()
+        self._content_stack.addWidget(self._coming_soon_page)
 
         # ── STATIC TABS ─────────────────────────────────────
         self.overview_tab  = OverviewTab()
@@ -1174,6 +1187,10 @@ class ApexWindow(QMainWindow):
         # V3.3.0 — pull any bots removed by moderation that we used to
         # have installed, and delete them locally.
         QTimer.singleShot(4500, self._sync_revocations)
+        # V4.0.0 — apply the saved broker mode AFTER the tabs are wired
+        # so the stack is fully populated before we switch pages.
+        QTimer.singleShot(0, lambda: self._apply_broker_mode(
+            self._current_broker_mode()))
 
         # V7.1.1: accept .py drops anywhere in the window so a user can
         # drag a bot script in and we'll offer to install it locally or
@@ -1402,6 +1419,80 @@ class ApexWindow(QMainWindow):
                 self.tools_tab.rebuild_for_mode(mode)
         except Exception as e:
             print(f"[broker-mode] tools rebuild: {e}")
+        # V4.0.0 — flip the whole content stack so non-Alpaca modes get
+        # the coming-soon placeholder instead of stale Alpaca data.
+        self._apply_broker_mode(mode)
+
+    def _build_coming_soon_page(self) -> QWidget:
+        """The full-window placeholder shown when broker_mode is anything
+        other than 'alpaca'. Stays minimal — title, mode, a description,
+        and a 'switch back to Alpaca' hint."""
+        wrap = QFrame()
+        wrap.setStyleSheet(f"background:transparent;border:none;")
+        v = QVBoxLayout(wrap)
+        v.setContentsMargins(60, 80, 60, 80)
+        v.setSpacing(18)
+        v.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        icon = QLabel("🚧")
+        icon.setStyleSheet("font-size:72px;background:transparent;")
+        icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        v.addWidget(icon)
+
+        self._coming_soon_title = QLabel("COMING VERY SOON")
+        self._coming_soon_title.setStyleSheet(
+            f"font-family:'Syne',sans-serif;font-size:34px;font-weight:800;"
+            f"color:{COLORS['text']};letter-spacing:6px;background:transparent;")
+        self._coming_soon_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        v.addWidget(self._coming_soon_title)
+
+        self._coming_soon_sub = QLabel("")
+        self._coming_soon_sub.setStyleSheet(
+            f"font-family:'JetBrains Mono';font-size:13px;"
+            f"color:{COLORS['muted']};letter-spacing:2px;"
+            f"background:transparent;")
+        self._coming_soon_sub.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        v.addWidget(self._coming_soon_sub)
+
+        v.addSpacing(20)
+        desc = QLabel(
+            "BAPTOU bots currently route orders through Alpaca's paper-"
+            "trading API. The account model, key structure, and order "
+            "flow are completely different per broker, so each integration "
+            "needs its own end-to-end wiring.<br><br>"
+            "Switch back to <b>Alpaca</b> via the mode chip in the header "
+            "to manage your bots, keys, and live trading data.")
+        desc.setStyleSheet(
+            f"font-family:'JetBrains Mono';font-size:12px;line-height:1.7;"
+            f"color:{COLORS['muted']};background:transparent;")
+        desc.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        desc.setWordWrap(True)
+        desc.setMaximumWidth(640)
+        v.addWidget(desc, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        # "Switch back" button — one click to return to Alpaca
+        back = QPushButton("⛁  Switch back to Alpaca")
+        back.setObjectName("addBotBtn")
+        back.setFixedHeight(44)
+        back.setMinimumWidth(260)
+        back.clicked.connect(lambda: self._set_broker_mode("alpaca"))
+        v.addWidget(back, alignment=Qt.AlignmentFlag.AlignCenter)
+        return wrap
+
+    def _apply_broker_mode(self, mode: str):
+        """Swap the central stack page based on broker mode. Page 0 is
+        the Alpaca tabbed UI; page 1 is the placeholder."""
+        if not hasattr(self, "_content_stack"):
+            return
+        if mode == "alpaca":
+            self._content_stack.setCurrentIndex(0)
+        else:
+            label = self.BROKER_MODES.get(mode, (mode.title(), "coming"))[0]
+            self._coming_soon_title.setText(
+                f"{label.upper()}  —  COMING VERY SOON")
+            self._coming_soon_sub.setText(
+                f"Mode: {label}    ·    Not yet wired end-to-end")
+            self._content_stack.setCurrentIndex(1)
 
     def _show_broker_menu(self):
         menu = QMenu(self)
