@@ -1281,6 +1281,18 @@ class ApexWindow(QMainWindow):
         self.quit_btn.clicked.connect(self._quit_app)
         layout.addWidget(self.quit_btn)
 
+        # V3.2.0 — broker-mode selector. Currently only Alpaca is wired
+        # end-to-end; IBKR and TradingView show "COMING VERY SOON" in
+        # the Tools tab so users can see where it's heading.
+        self._broker_mode_btn = QPushButton(self._current_broker_label())
+        self._broker_mode_btn.setObjectName("brokerModeBtn")
+        self._broker_mode_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self._broker_mode_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._broker_mode_btn.setToolTip(
+            "Switch the app between broker modes")
+        self._broker_mode_btn.clicked.connect(self._show_broker_menu)
+        layout.addWidget(self._broker_mode_btn)
+
         # V3 wave 5 — credit balance chip (visible to everyone)
         self.credits_chip = QLabel("◊  — credits")
         self.credits_chip.setObjectName("creditsChip")
@@ -1306,6 +1318,61 @@ class ApexWindow(QMainWindow):
             layout.addWidget(self.user_chip_btn)
 
         return header
+
+    # ── V3.2.0 — broker-mode selector ───────────────────────
+
+    BROKER_MODES = {
+        # value → (display label, status)
+        "alpaca":     ("Alpaca",      "active"),
+        "ibkr":       ("IBKR",        "coming"),
+        "tradingview":("TradingView", "coming"),
+    }
+
+    def _current_broker_mode(self) -> str:
+        try:
+            return D.load_settings().get("broker_mode", "alpaca")
+        except Exception:
+            return "alpaca"
+
+    def _current_broker_label(self) -> str:
+        mode = self._current_broker_mode()
+        label, _status = self.BROKER_MODES.get(mode, ("Alpaca", "active"))
+        return f"⛁  {label}  ▾"
+
+    def _set_broker_mode(self, mode: str):
+        try:
+            s = D.load_settings()
+            s["broker_mode"] = mode
+            import json as _json
+            with open(D.SETTINGS_FILE, "w", encoding="utf-8") as f:
+                _json.dump(s, f, indent=2)
+        except Exception as e:
+            print(f"[broker-mode] save failed: {e}")
+            return
+        if hasattr(self, "_broker_mode_btn"):
+            self._broker_mode_btn.setText(self._current_broker_label())
+        # Re-render the Tools tab so the new mode's content shows
+        try:
+            if hasattr(self, "tools_tab") and hasattr(self.tools_tab, "rebuild_for_mode"):
+                self.tools_tab.rebuild_for_mode(mode)
+        except Exception as e:
+            print(f"[broker-mode] tools rebuild: {e}")
+
+    def _show_broker_menu(self):
+        menu = QMenu(self)
+        menu.setStyleSheet(self.styleSheet())
+        current = self._current_broker_mode()
+        for key, (label, status) in self.BROKER_MODES.items():
+            text = f"{'•  ' if key == current else '   '}{label}"
+            if status == "coming":
+                text += "    (coming very soon)"
+            act = QAction(text, self)
+            act.triggered.connect(
+                lambda _checked=False, m=key: self._set_broker_mode(m))
+            menu.addAction(act)
+        pos = self._broker_mode_btn.mapToGlobal(
+            QPoint(0, self._broker_mode_btn.height()))
+        menu.exec(pos)
 
     def _show_account_menu(self):
         """V3 wave 5 — drop-down anchored under the user chip. Lists any

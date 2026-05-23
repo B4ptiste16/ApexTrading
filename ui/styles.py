@@ -355,6 +355,24 @@ QPushButton#updateBtn {{
     padding: 6px 16px;
 }}
 
+/* V3.2.0 — broker-mode selector chip in the header */
+QPushButton#brokerModeBtn {{
+    background: rgba(138,147,201,0.08);
+    color: {C['purple']};
+    border: 1px solid {C['border']};
+    border-radius: 5px;
+    font-family: 'JetBrains Mono';
+    font-size: 10px;
+    letter-spacing: 1px;
+    font-weight: 600;
+    padding: 6px 12px;
+    margin-left: 6px;
+}}
+QPushButton#brokerModeBtn:hover {{
+    background: rgba(138,147,201,0.18);
+    border-color: {C['purple']};
+}}
+
 /* V3.0.1 — clickable user chip in the header (opens Account menu) */
 QPushButton#userChipBtn {{
     background: transparent;

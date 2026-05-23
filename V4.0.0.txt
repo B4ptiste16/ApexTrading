@@ -1,0 +1,8 @@
+V4.0.0
+
+- Have the BOSS ADMIN section be the only one with a split section allowing to decide app credit revenue split between admins and a running account collecting money to run the server api keys etc.…
+
+- Make sure credits are virtual money assigned to people or to the running title which means its assigned to the app's bank account which the real money is actually in. SO if someone buys a bot, 5% of credits will go to admin and running split and the rest will be attributed to seller (so the real money changed assigned ownership while staying in apps bank account)
+
+- Is it possible to link a bank account like a revolute account to the app or not?
+

@@ -513,70 +513,253 @@ class ToolsTab(QWidget):
         root.addWidget(self.scroll)
         self._build()
 
+    def rebuild_for_mode(self, mode: str):
+        """V3.2.0 — re-render the API-key section when broker mode changes."""
+        # Clear EVERYTHING and rebuild from scratch — easiest way to
+        # swap the entire mode-specific content.
+        layout = self.layout()
+        while layout.count():
+            it = layout.takeAt(0)
+            w = it.widget() if it else None
+            if w: w.deleteLater()
+        self.scroll = ScrollContent()
+        layout.addWidget(self.scroll)
+        self._build()
+
     def _build(self):
         s = self.scroll
+        mode = D.load_settings().get("broker_mode", "alpaca")
 
-        # ── API KEYS ─────────────────────────────────────
-        s.add(SectionHeader("API KEYS", C["green"]))
+        # ── BROKER MODE BANNER ──────────────────────────────
+        s.add(SectionHeader(
+            f"BROKER MODE  ·  {mode.upper()}", C["purple"]))
+        mode_info = QLabel(
+            "Switch the active broker via the chip in the top-right of "
+            "the app header. Each mode has its own Tools layout — "
+            "non-Alpaca modes are still being wired up.")
+        mode_info.setStyleSheet(f"color:{C['muted']};font-size:11px;")
+        mode_info.setWordWrap(True)
+        s.add(mode_info)
+
+        if mode == "alpaca":
+            self._build_alpaca_section(s)
+        else:
+            self._build_coming_soon_section(s, mode)
+
+        # ── ANTHROPIC + AUTOMATION are common to all modes ─
+        self._build_ai_key_section(s)
+
+    def _build_coming_soon_section(self, s, mode: str):
+        """Placeholder shown for IBKR / TradingView / etc. while we wire
+        up the actual integration."""
+        label = mode.upper() if mode != "tradingview" else "TRADINGVIEW"
+        s.add(SectionHeader(f"{label}  —  COMING VERY SOON", C["orange"]))
+        wrap = QFrame()
+        wrap.setStyleSheet(
+            f"background:{C['panel']};border:1px solid {C['border']};"
+            f"border-radius:10px;border-left:3px solid {C['orange']};")
+        v = QVBoxLayout(wrap)
+        v.setContentsMargins(24, 22, 24, 22)
+        v.setSpacing(8)
+        title = QLabel(f"🚧  {label} integration is on the way")
+        title.setStyleSheet(
+            f"font-family:'Syne',sans-serif;font-size:16px;"
+            f"font-weight:800;color:{C['text']};letter-spacing:2px;")
+        v.addWidget(title)
+        desc = QLabel(
+            f"APEX bots currently route orders through Alpaca's paper "
+            f"trading API. {label} support — including connection setup, "
+            f"key management, and per-bot account assignment — will land "
+            f"in a future release.\n\n"
+            f"Switch back to Alpaca via the broker-mode chip in the "
+            f"header to manage your live keys.")
+        desc.setStyleSheet(f"color:{C['muted']};font-size:11px;line-height:1.6;")
+        desc.setWordWrap(True)
+        v.addWidget(desc)
+        s.add(wrap)
+
+    def _build_alpaca_section(self, s):
+        """V3.2.0 — slot-based key layout. The user enters up to 3 API
+        key/secret pairs and assigns each to LONG / SHORT / DAY via a
+        dropdown. On save we translate the slot→bot mapping into the
+        underlying ALPACA_API_KEY_{LONG/SHORT/DAY} env vars so the
+        existing bot code keeps working unmodified."""
+        s.add(SectionHeader("ALPACA  ·  API KEYS", C["green"]))
         keys_info = QLabel(
-            "Enter your Alpaca paper keys (one API/secret pair per bot) and "
-            "your Anthropic (Claude) key. Stored only on this PC's data "
-            "folder; applied immediately — no restart needed.")
+            "Enter up to 3 Alpaca paper API key / secret pairs and "
+            "assign each to a built-in bot (LONG / SHORT / DAY). Each "
+            "bot needs its own Alpaca paper account because Alpaca only "
+            "allows one set of open positions per account.")
         keys_info.setStyleSheet(f"color:{C['muted']};font-size:11px;")
         keys_info.setWordWrap(True)
         s.add(keys_info)
 
         cur = D.read_env_keys()
-        self._key_edits = {}
+        # Reverse-look up which bot each existing pair belongs to. Bot
+        # name → (key, secret). Used to seed the slots.
+        existing_pairs = []
+        for side in ("LONG", "SHORT", "DAY"):
+            k = cur.get(f"ALPACA_API_KEY_{side}", "")
+            sk = cur.get(f"ALPACA_SECRET_KEY_{side}", "")
+            if k or sk:
+                existing_pairs.append((side, k, sk))
+        # Pad with empty slots so the user always sees 3
+        while len(existing_pairs) < 3:
+            existing_pairs.append(("__none__", "", ""))
+
+        self._alpaca_slot_edits: list[dict] = []
         form = QFrame()
         form.setStyleSheet(
             f"background:{C['panel']};border:1px solid {C['border']};"
             f"border-radius:8px;")
         fl = QGridLayout(form)
         fl.setContentsMargins(16, 14, 16, 14)
-        fl.setSpacing(8)
-        fields = [
-            ("ANTHROPIC_API_KEY",      "Claude (Anthropic) API key"),
-            ("ALPACA_API_KEY_LONG",    "Alpaca API key  —  LONG"),
-            ("ALPACA_SECRET_KEY_LONG", "Alpaca secret    —  LONG"),
-            ("ALPACA_API_KEY_SHORT",   "Alpaca API key  —  SHORT"),
-            ("ALPACA_SECRET_KEY_SHORT","Alpaca secret    —  SHORT"),
-            ("ALPACA_API_KEY_DAY",     "Alpaca API key  —  DAY"),
-            ("ALPACA_SECRET_KEY_DAY",  "Alpaca secret    —  DAY"),
-        ]
-        for i, (k, label) in enumerate(fields):
-            lb = QLabel(label)
-            lb.setStyleSheet(f"color:{C['text']};font-size:11px;")
-            ed = QLineEdit(cur.get(k, ""))
-            ed.setEchoMode(QLineEdit.EchoMode.Password)
-            ed.setStyleSheet(
+        fl.setHorizontalSpacing(10)
+        fl.setVerticalSpacing(8)
+
+        from PyQt6.QtWidgets import QComboBox as _QCombo
+        SIDE_OPTIONS = [("__none__", "Unassigned"),
+                        ("LONG",    "LONG bot"),
+                        ("SHORT",   "SHORT bot"),
+                        ("DAY",     "DAY bot")]
+
+        for i, (assigned, k_val, s_val) in enumerate(existing_pairs):
+            slot_lbl = QLabel(f"API SLOT {i+1}")
+            slot_lbl.setStyleSheet(
+                f"color:{C['muted']};font-size:9px;letter-spacing:2px;"
+                f"font-weight:700;")
+            fl.addWidget(slot_lbl, i*3 + 0, 0, 1, 4)
+
+            key_ed = QLineEdit(k_val)
+            key_ed.setEchoMode(QLineEdit.EchoMode.Password)
+            key_ed.setPlaceholderText("API key")
+            key_ed.setStyleSheet(
                 f"background:{C['panel2']};color:{C['text']};"
                 f"border:1px solid {C['border']};border-radius:4px;"
                 f"padding:5px;font-family:'JetBrains Mono';font-size:11px;")
-            fl.addWidget(lb, i, 0)
-            fl.addWidget(ed, i, 1)
-            self._key_edits[k] = ed
+            fl.addWidget(QLabel("Key"), i*3 + 1, 0)
+            fl.addWidget(key_ed,        i*3 + 1, 1, 1, 2)
 
+            sec_ed = QLineEdit(s_val)
+            sec_ed.setEchoMode(QLineEdit.EchoMode.Password)
+            sec_ed.setPlaceholderText("Secret")
+            sec_ed.setStyleSheet(key_ed.styleSheet())
+            fl.addWidget(QLabel("Secret"), i*3 + 2, 0)
+            fl.addWidget(sec_ed,            i*3 + 2, 1, 1, 2)
+
+            assign = _QCombo()
+            for val, lbl in SIDE_OPTIONS:
+                assign.addItem(lbl, val)
+            idx = next((j for j, (v, _) in enumerate(SIDE_OPTIONS)
+                        if v == assigned), 0)
+            assign.setCurrentIndex(idx)
+            fl.addWidget(QLabel("Assigned"), i*3 + 1, 3)
+            fl.addWidget(assign,              i*3 + 2, 3)
+
+            self._alpaca_slot_edits.append(
+                {"key": key_ed, "secret": sec_ed, "assign": assign})
+
+        last_row = len(existing_pairs) * 3
         show = QCheckBox("Show keys")
         show.setStyleSheet(f"color:{C['muted']};font-size:10px;")
-        show.toggled.connect(lambda on: [
-            e.setEchoMode(QLineEdit.EchoMode.Normal if on
-                          else QLineEdit.EchoMode.Password)
-            for e in self._key_edits.values()])
-        save_btn = QPushButton("Save keys")
+        def _on_show(on):
+            for slot in self._alpaca_slot_edits:
+                mode = QLineEdit.EchoMode.Normal if on else QLineEdit.EchoMode.Password
+                slot["key"].setEchoMode(mode)
+                slot["secret"].setEchoMode(mode)
+        show.toggled.connect(_on_show)
+        fl.addWidget(show, last_row, 0)
+
+        save_btn = QPushButton("Save slots")
         save_btn.setObjectName("toolBtn")
-        save_btn.clicked.connect(self._save_keys)
+        save_btn.clicked.connect(self._save_alpaca_slots)
         self.keys_msg = QLabel("")
         self.keys_msg.setStyleSheet(f"color:{C['green']};font-size:11px;")
-        fl.addWidget(show, len(fields), 0)
         brow = QHBoxLayout()
         brow.addWidget(save_btn)
         brow.addWidget(self.keys_msg)
         brow.addStretch()
-        bwrap = QWidget()
-        bwrap.setLayout(brow)
-        fl.addWidget(bwrap, len(fields) + 1, 0, 1, 2)
+        bwrap = QWidget(); bwrap.setLayout(brow)
+        fl.addWidget(bwrap, last_row + 1, 0, 1, 4)
         s.add(form)
+
+    def _build_ai_key_section(self, s):
+        """Anthropic key stays available regardless of broker mode — it's
+        used by every bot for the Claude Vision calls."""
+        s.add(SectionHeader("CLAUDE (ANTHROPIC) API KEY", C["yellow"]))
+        cur = D.read_env_keys()
+        ai_frame = QFrame()
+        ai_frame.setStyleSheet(
+            f"background:{C['panel']};border:1px solid {C['border']};"
+            f"border-radius:8px;")
+        afl = QGridLayout(ai_frame)
+        afl.setContentsMargins(16, 14, 16, 14)
+        afl.setSpacing(8)
+        self._anthropic_edit = QLineEdit(cur.get("ANTHROPIC_API_KEY", ""))
+        self._anthropic_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        self._anthropic_edit.setStyleSheet(
+            f"background:{C['panel2']};color:{C['text']};"
+            f"border:1px solid {C['border']};border-radius:4px;"
+            f"padding:5px;font-family:'JetBrains Mono';font-size:11px;")
+        afl.addWidget(QLabel("API key"), 0, 0)
+        afl.addWidget(self._anthropic_edit, 0, 1)
+        ai_show = QCheckBox("Show")
+        ai_show.setStyleSheet(f"color:{C['muted']};font-size:10px;")
+        ai_show.toggled.connect(lambda on:
+            self._anthropic_edit.setEchoMode(
+                QLineEdit.EchoMode.Normal if on else QLineEdit.EchoMode.Password))
+        afl.addWidget(ai_show, 1, 0)
+        ai_save = QPushButton("Save")
+        ai_save.setObjectName("toolBtn")
+        ai_save.clicked.connect(self._save_ai_key)
+        self._ai_save_msg = QLabel("")
+        self._ai_save_msg.setStyleSheet(f"color:{C['green']};font-size:11px;")
+        afl.addWidget(ai_save, 1, 1)
+        afl.addWidget(self._ai_save_msg, 2, 0, 1, 2)
+        s.add(ai_frame)
+
+    def _save_alpaca_slots(self):
+        """Translate the slot→bot dropdown assignments into the
+        ALPACA_API_KEY_{LONG/SHORT/DAY} env vars the bot code already
+        reads. Slots with 'Unassigned' simply don't write anything."""
+        from PyQt6.QtCore import QTimer as _QT
+        env_patch: dict[str, str] = {}
+        # Clear every Alpaca slot first so reassigning bot X away from a
+        # slot doesn't leave the old key behind.
+        for side in ("LONG", "SHORT", "DAY"):
+            env_patch[f"ALPACA_API_KEY_{side}"]    = ""
+            env_patch[f"ALPACA_SECRET_KEY_{side}"] = ""
+        seen_sides = set()
+        for slot in self._alpaca_slot_edits:
+            side = slot["assign"].currentData()
+            if side == "__none__":
+                continue
+            if side in seen_sides:
+                self.keys_msg.setText(
+                    f"⚠  Multiple slots assigned to {side}. "
+                    f"Only the first kept.")
+                self.keys_msg.setStyleSheet(
+                    f"color:{C['orange']};font-size:11px;")
+                continue
+            seen_sides.add(side)
+            env_patch[f"ALPACA_API_KEY_{side}"]    = slot["key"].text()
+            env_patch[f"ALPACA_SECRET_KEY_{side}"] = slot["secret"].text()
+        # Preserve any keys not in the Alpaca set (Anthropic etc.)
+        full = D.read_env_keys()
+        full.update(env_patch)
+        D.update_env_keys(full)
+        self.keys_msg.setText("✓ Slots saved — bots use new keys on next start")
+        self.keys_msg.setStyleSheet(f"color:{C['green']};font-size:11px;")
+        _QT.singleShot(4000, lambda: self.keys_msg.setText(""))
+
+    def _save_ai_key(self):
+        from PyQt6.QtCore import QTimer as _QT
+        full = D.read_env_keys()
+        full["ANTHROPIC_API_KEY"] = self._anthropic_edit.text()
+        D.update_env_keys(full)
+        self._ai_save_msg.setText("✓ Anthropic key saved")
+        self._ai_save_msg.setStyleSheet(f"color:{C['green']};font-size:11px;")
+        _QT.singleShot(4000, lambda: self._ai_save_msg.setText(""))
 
         # ── AUTOMATION  (V7.1.10) ────────────────────────
         s.add(SectionHeader("AUTOMATION", C["green"]))
