@@ -318,6 +318,9 @@ class FriendsTab(QWidget):
         for e in accepted:
             self._accepted_layout.addWidget(
                 self._make_friendship_row(e, action="view"))
+            # V4.0.0 — fetch each accepted friend's shared snapshot
+            # asynchronously and inject under the row when it arrives
+            self._fetch_friend_summary(e)
         for e in outgoing:
             self._outgoing_layout.addWidget(
                 self._make_friendship_row(e, action="cancel"))
@@ -351,15 +354,79 @@ class FriendsTab(QWidget):
             hl.addWidget(btn)
         return row
 
+    def _fetch_friend_summary(self, e: dict):
+        """V4.0.0 — pull the friend's profile in the background and
+        attach a one-line summary under their row in the FRIENDS list."""
+        peer = e.get("peer", {})
+        uname = peer.get("username")
+        if not uname:
+            return
+        w = _HttpWorker("GET", f"/users/{uname}/profile")
+        self._spawn(w, lambda ok, body, u=uname:
+                    self._inject_friend_summary(u, ok, body))
+
+    def _inject_friend_summary(self, username: str, ok: bool, body: dict):
+        if not ok:
+            return
+        shows = body.get("shows", {})
+        # Build a compact line: "TODAY +$45 · MONTH +$120 · Alpaca"
+        bits = []
+        pl = body.get("pl", {}) or {}
+        for label, key in (("Today", "daily"),
+                            ("Month", "monthly"),
+                            ("Year", "yearly")):
+            if shows.get(key) and key in pl:
+                d = pl[key]
+                sign = "+" if d["pl"] >= 0 else ""
+                color = C["green"] if d["pl"] >= 0 else C["red"]
+                bits.append(
+                    f"<span style='color:{color};'>{label} "
+                    f"{sign}${d['pl']:,.0f}</span>")
+            else:
+                bits.append(
+                    f"<span style='color:{C['muted']};'>{label} (not sharing)</span>")
+        if shows.get("broker"):
+            brokers = body.get("broker") or []
+            bits.append(f"<span style='color:{C['muted']};'>· "
+                        f"{', '.join(brokers) or '—'}</span>")
+        else:
+            bits.append(f"<span style='color:{C['muted']};'>· broker (not sharing)</span>")
+        line = "  ".join(bits)
+        # Find the matching accepted row and append the summary label
+        for i in range(self._accepted_layout.count()):
+            w = self._accepted_layout.itemAt(i).widget()
+            if not isinstance(w, QFrame):
+                continue
+            # Look for a QPushButton inside whose tooltip is @username
+            for btn in w.findChildren(QPushButton):
+                if btn.toolTip() == f"@{username}":
+                    summary = QLabel(line)
+                    summary.setStyleSheet(
+                        f"color:{C['muted']};font-size:10px;padding:4px 0 0 0;")
+                    summary.setTextFormat(Qt.TextFormat.RichText)
+                    summary.setWordWrap(True)
+                    # Add to the row's layout
+                    lay = w.layout()
+                    if lay is not None:
+                        lay.addWidget(summary)
+                    break
+
     def _make_friendship_row(self, e: dict, action: str) -> QWidget:
         peer = e["peer"]
         row = QFrame()
         row.setStyleSheet(
             f"background:{C['panel2']};border:1px solid {C['border']};"
             f"border-radius:8px;")
-        hl = QHBoxLayout(row)
-        hl.setContentsMargins(14, 8, 14, 8)
+        # V4.0.0 — outer layout is now VERTICAL so an async friend-summary
+        # line can stack underneath the header without breaking layout.
+        outer = QVBoxLayout(row)
+        outer.setContentsMargins(14, 8, 14, 8)
+        outer.setSpacing(4)
+        header = QWidget()
+        hl = QHBoxLayout(header)
+        hl.setContentsMargins(0, 0, 0, 0)
         hl.setSpacing(10)
+        outer.addWidget(header)
 
         meta = QVBoxLayout()
         title = QLabel(peer.get("display_name") or peer.get("username"))

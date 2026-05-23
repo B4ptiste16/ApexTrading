@@ -99,11 +99,13 @@ class OverviewTab(QWidget):
         cl.addWidget(self._sort_combo)
         s.add(SectionHeader("ALL ACCOUNTS", C["text"], controls=controls_w))
 
-        self._blocks_row = QHBoxLayout()
+        # V4.0.0 — switched from a single horizontal row to a wrapping
+        # grid (max 3 columns) so users with 4+ bots see them all.
+        self._blocks_row = QGridLayout()
         self._blocks_row.setSpacing(10)
+        for col in range(3):
+            self._blocks_row.setColumnStretch(col, 1)
         self.blocks = {}
-        # Cache of latest metrics per side — populated by refresh() and
-        # used by the sort dropdown to reorder without re-fetching.
         self._last_metrics: dict[str, dict] = {}
         self._blocks_container = QWidget()
         self._blocks_container.setLayout(self._blocks_row)
@@ -259,23 +261,22 @@ class OverviewTab(QWidget):
 
         bots = self._displayable_bots()
         if not bots:
-            # No active bots — show a friendly empty state instead of a
-            # blank row so the user knows to add a bot from MORE BOTS.
             empty = QLabel(
                 "  No active bots.  Open the MORE BOTS tab to add one.")
             empty.setStyleSheet(
                 f"color:{C['muted']};font-size:11px;padding:14px;"
                 f"background:{C['panel']};border:1px dashed {C['border']};"
                 f"border-radius:8px;")
-            self._blocks_row.addWidget(empty)
+            self._blocks_row.addWidget(empty, 0, 0, 1, 3)
             return
 
-        for meta in bots:
+        # V4.0.0 — wrapping grid: row = idx // 3, col = idx % 3
+        for idx, meta in enumerate(bots):
             block = self._account_block(meta["side"],
                                         label_text=meta["label"],
                                         color=meta["color"])
             self.blocks[meta["side"]] = block
-            self._blocks_row.addWidget(block)
+            self._blocks_row.addWidget(block, idx // 3, idx % 3)
 
     # Public alias for main.py to call after registry mutations.
     def refresh_active_bots(self):
@@ -293,13 +294,12 @@ class OverviewTab(QWidget):
         contents stay populated from the most recent refresh tick."""
         try:
             ordered_sides = [b["side"] for b in self._displayable_bots()]
-            # Remove all blocks (widgets persist), then re-add in order.
             for side, w in list(self.blocks.items()):
                 self._blocks_row.removeWidget(w)
-            for side in ordered_sides:
+            for idx, side in enumerate(ordered_sides):
                 w = self.blocks.get(side)
                 if w is not None:
-                    self._blocks_row.addWidget(w)
+                    self._blocks_row.addWidget(w, idx // 3, idx % 3)
         except Exception as e:
             print(f"[overview reorder] {e}")
 

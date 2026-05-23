@@ -19,7 +19,8 @@ from . import (auth, database, credentials as creds,
                bots as marketplace, web, bot_runner, scheduler,
                friends, oauth as google_oauth, email_send,
                credits as credits_mod,
-               similarity, moderation)
+               similarity, moderation,
+               revenue)
 from .schemas import SignupRequest, LoginRequest
 
 
@@ -33,6 +34,7 @@ async def _lifespan(app: FastAPI):
     friends.init_friends_db()
     credits_mod.init_credits_tables()
     moderation.init_purchases_table()
+    revenue.init_revenue_table()
     promoted = database.bootstrap_boss_admin()
     if promoted:
         print(f"[bootstrap] promoted user_id={promoted} to BOSS_ADMIN",
@@ -56,7 +58,7 @@ async def _lifespan(app: FastAPI):
 app = FastAPI(
     title="APEX Auth Server",
     version="1.0.0",
-    description="Authentication backend for APEX Trading Platform",
+    description="Authentication backend for BAPTOU Trading Platform",
     lifespan=_lifespan,
 )
 
@@ -435,16 +437,42 @@ def download_public_bot(slug: str,
     data = marketplace.read_bot_file(slug)
     if data is None:
         raise HTTPException(404, "Bot file not found.")
+    # V4.0.0 — pre-flight balance check for PAID bots
+    price = int(bot.get("price_credits", 0))
+    if price > 0:
+        if not authorization:
+            raise HTTPException(401, "Sign in to purchase paid bots.")
+        try:
+            user = _current_user(authorization)
+        except Exception:
+            raise HTTPException(401, "Sign in to purchase paid bots.")
+        bal = credits_mod.get_balance(user["id"])
+        if bal < price:
+            raise HTTPException(
+                402,
+                f"Insufficient credits — this bot costs {price} ◊, "
+                f"you have {bal}. Top up first.")
     marketplace.increment_downloads(slug)
-    # Log purchase if we can identify the buyer
+    # Log purchase + distribute revenue if we can identify the buyer
     try:
         if authorization:
-            user = _current_user(authorization)
-            moderation.record_purchase(
-                user["id"], slug,
-                credits_paid=int(bot.get("price_credits", 0)))
-    except Exception:
-        pass
+            user  = _current_user(authorization)
+            price = int(bot.get("price_credits", 0))
+            moderation.record_purchase(user["id"], slug, credits_paid=price)
+            # V4.0.0 — fan out the buyer's credits across the split
+            if price > 0:
+                revenue.distribute_purchase(
+                    seller_id=int(bot["owner_id"]),
+                    total_credits=price,
+                    bot_slug=slug,
+                )
+                # Also debit the buyer (currently no charge logic exists
+                # on the free /bots/{slug}/download path — paid bots use
+                # this same endpoint). credits.grant with negative delta:
+                from . import credits as _cr
+                _cr.grant(user["id"], -price, f"purchase: {slug}")
+    except Exception as _e:
+        print(f"[purchase] {slug}: {_e}", flush=True)
     return Response(
         content=data, media_type="text/x-python",
         headers={"Content-Disposition": f'attachment; filename="{slug}.py"'},
@@ -559,6 +587,36 @@ def api_admin_remove_bot(slug: str, payload: dict,
     if not result.get("ok"):
         raise HTTPException(400, result.get("detail", "Removal failed."))
     return result
+
+
+@app.get("/admin/revenue-split")
+def api_revenue_split_get(authorization: str | None = Header(default=None)):
+    """Any admin can SEE the split. Only BOSS_ADMIN can change it."""
+    user = _current_user(authorization)
+    _require_admin(user)
+    return {
+        "split":           revenue.get_split(),
+        "running_balance": revenue.get_running_balance(),
+        "fixed_cost_note": "Running balance grows from every paid bot "
+                            "sale and represents the pool that funds "
+                            "APEX_*_KEY env vars + server hosting.",
+    }
+
+
+@app.put("/admin/revenue-split")
+def api_revenue_split_set(payload: dict,
+                          authorization: str | None = Header(default=None)):
+    user = _current_user(authorization)
+    _require_admin(user, min_role="BOSS_ADMIN")
+    try:
+        new = revenue.set_split(
+            seller_pct  = int(payload.get("seller_pct",  90)),
+            admin_pct   = int(payload.get("admin_pct",   5)),
+            running_pct = int(payload.get("running_pct", 5)),
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return {"ok": True, "split": new}
 
 
 @app.get("/bots/mine/revocations")

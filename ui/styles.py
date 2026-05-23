@@ -6,8 +6,13 @@ APEX UI Styles — V7
 # dict in-place so widgets that reference C[...] at module-load time
 # pick up the chosen scheme.
 THEMES: dict = {
-    "Default (dark teal)": {
-        "green":  "#7ab5a2", "red":    "#c28e97", "orange": "#c8a070",
+    # V4.0.0 — BAPTOU brand palette. The traditional green-as-outline
+    # is gone; the "green" slot is now a clear teal-cyan that still
+    # reads as "positive / active" without screaming "stock-broker
+    # generic". P/L numbers still use red for losses, but profits now
+    # render in the same teal so the brand is consistent end-to-end.
+    "Default (BAPTOU teal)": {
+        "green":  "#3eb8a4", "red":    "#c28e97", "orange": "#c8a070",
         "yellow": "#cdc578", "purple": "#8a93c9",
         "bg":     "#161a26", "bg2":    "#1d2336",
         "panel":  "#1a1f2d", "panel2": "#222837", "border": "#2a3447",
@@ -44,7 +49,7 @@ THEMES: dict = {
 }
 
 
-COLORS = dict(THEMES["Default (dark teal)"])
+COLORS = dict(THEMES["Default (BAPTOU teal)"])
 
 # v3.1.6 — Read the user's saved theme BEFORE DARK_STYLESHEET is built
 # below. The stylesheet is a baked f-string, so once it's constructed

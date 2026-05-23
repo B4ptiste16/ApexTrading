@@ -308,6 +308,66 @@ class AdminTab(QWidget):
         self._mod_section_frame = mod_frame
         s.add(mod_frame)
 
+        # ─── REVENUE SPLIT (V4.0.0 — BOSS_ADMIN only) ─────────
+        self._split_section = SectionHeader(
+            "REVENUE SPLIT  ·  BOSS_ADMIN only", C["purple"])
+        s.add(self._split_section)
+        split_frame = QFrame()
+        split_frame.setStyleSheet(
+            f"background:{C['panel']};border:1px solid {C['border']};"
+            f"border-radius:8px;border-left:3px solid {C['purple']};")
+        sf = QGridLayout(split_frame)
+        sf.setContentsMargins(16, 14, 16, 14)
+        sf.setHorizontalSpacing(12)
+        sf.setVerticalSpacing(10)
+
+        split_intro = QLabel(
+            "Every paid bot sale gets split three ways. "
+            "<b>SELLER %</b> goes to the bot's publisher; "
+            "<b>ADMIN %</b> is split equally among every user with an "
+            "admin role; <b>RUNNING %</b> goes to a virtual platform "
+            "balance that covers Anthropic / Gemini keys + server "
+            "costs. Total must = 100 %.")
+        split_intro.setStyleSheet(f"color:{C['muted']};font-size:11px;line-height:1.6;")
+        split_intro.setWordWrap(True)
+        sf.addWidget(split_intro, 0, 0, 1, 4)
+
+        for col, (label, key) in enumerate(
+                (("SELLER %", "seller"),
+                 ("ADMIN %",  "admin"),
+                 ("RUNNING %", "running"))):
+            sf.addWidget(self._lbl(label), 1, col)
+            spin = QSpinBox()
+            spin.setRange(0, 100)
+            spin.setSuffix(" %")
+            spin.setFixedWidth(100)
+            setattr(self, f"_split_{key}_spin", spin)
+            sf.addWidget(spin, 2, col)
+
+        self._running_balance_lbl = QLabel("Running balance: —")
+        self._running_balance_lbl.setStyleSheet(
+            f"color:{C['yellow']};font-size:11px;font-weight:700;")
+        sf.addWidget(self._running_balance_lbl, 3, 0, 1, 3)
+
+        split_row = QHBoxLayout()
+        load_btn = QPushButton("⟳  Load current")
+        load_btn.setObjectName("toolBtn")
+        load_btn.clicked.connect(self._load_revenue_split)
+        save_btn = QPushButton("💾  Save split")
+        save_btn.setObjectName("addBotBtn")
+        save_btn.clicked.connect(self._save_revenue_split)
+        self._split_msg = QLabel("")
+        self._split_msg.setStyleSheet(f"color:{C['green']};font-size:10px;")
+        split_row.addWidget(load_btn)
+        split_row.addWidget(save_btn)
+        split_row.addWidget(self._split_msg)
+        split_row.addStretch()
+        srw = QWidget(); srw.setLayout(split_row)
+        sf.addWidget(srw, 4, 0, 1, 4)
+
+        self._split_section_frame = split_frame
+        s.add(split_frame)
+
         s.add_stretch()
 
         # Default: hide everything until /auth/me confirms admin
@@ -353,9 +413,13 @@ class AdminTab(QWidget):
         for w in (self._users_table, self._grant_section_frame,
                   self._classify_section_frame, self._mod_section_frame):
             w.setVisible(visible)
-        # Role assignment is BOSS_ADMIN-only
+        # Role assignment + revenue split are BOSS_ADMIN-only
         boss = role == "BOSS_ADMIN"
         self._role_section_frame.setVisible(boss)
+        if hasattr(self, "_split_section_frame"):
+            self._split_section_frame.setVisible(boss)
+        if boss:
+            self._load_revenue_split()
 
     # ── Users table ────────────────────────────────────────
 
@@ -518,6 +582,48 @@ class AdminTab(QWidget):
                         f"✓ '{slug}' flagged. Hidden from marketplace.")
         else:
             self._toast(self._mod_msg, f"✓ '{slug}' unflagged.")
+
+    # ── V4.0.0 — Revenue split ──────────────────────────────
+
+    def _load_revenue_split(self):
+        w = _HttpWorker("GET", "/admin/revenue-split")
+        self._spawn(w, self._on_split_loaded)
+
+    def _on_split_loaded(self, ok: bool, body: dict):
+        if not ok:
+            self._toast(self._split_msg,
+                        body.get("detail", "Failed."), err=True)
+            return
+        split = body.get("split", {})
+        self._split_seller_spin.setValue(int(split.get("seller_pct", 90)))
+        self._split_admin_spin.setValue(int(split.get("admin_pct", 5)))
+        self._split_running_spin.setValue(int(split.get("running_pct", 5)))
+        bal = body.get("running_balance", 0)
+        self._running_balance_lbl.setText(
+            f"Running balance: {int(bal):,} ◊  "
+            f"(= ${int(bal)/100:,.2f} at 1 ◊ = $0.01)")
+
+    def _save_revenue_split(self):
+        seller  = int(self._split_seller_spin.value())
+        admin   = int(self._split_admin_spin.value())
+        running = int(self._split_running_spin.value())
+        total = seller + admin + running
+        if total != 100:
+            self._toast(self._split_msg,
+                        f"Must sum to 100 % (got {total})", err=True)
+            return
+        w = _HttpWorker("PUT", "/admin/revenue-split",
+                        payload={"seller_pct":  seller,
+                                  "admin_pct":   admin,
+                                  "running_pct": running})
+        self._spawn(w, self._on_split_saved)
+
+    def _on_split_saved(self, ok: bool, body: dict):
+        if not ok:
+            self._toast(self._split_msg,
+                        body.get("detail", "Failed."), err=True)
+            return
+        self._toast(self._split_msg, "✓ Split saved")
 
     def _toast(self, label: QLabel, msg: str, *, err: bool = False,
                 transient: bool = True):

@@ -12,5 +12,15 @@ V4.0.0
 
 - have the friend's info appear under their name in the friends list and for unshared info show not sharing info (for specific info only not for general info)
 
+- when there are more than three bots in the overview the 4rth bot is not visible entirely so have them stack by rows of 3.
 
+- There is only a bot publication button for after generation in the make bot bar. However I would like to be able to make it test it then publish it so I also want a publish Button in more bots.
+
+- Make the pause/play/stop button maybe twice as big on the tabs and have them show even when not hovering
+
+- GET RID OF THE TRADITIONAL GREEN USED IN THE APP AS OUTLINES AND LOGO AND USE A MORE SUITING COLOR.
+
+- NEW LOGO REPRESENTING A MOVING STOCK FORMING A B FOR THE NEW NAME OF THE APP (have a green top part representing profit and red bottom part to represent loss and I want more win than loss). Make sure to change all logos everywhere they might be.
+
+- Change app name to BAPTOU Trading Platform. (means you'll have to change all file names and url for example if possible and oracle server name also if possible)
 

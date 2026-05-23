@@ -230,19 +230,25 @@ class BotProcessWidget(QWidget):
             f"font-weight:600;"
         )
 
+        # V4.0.0 — bigger always-visible play/stop/restart buttons.
+        # Roughly double their previous size + bumped font-weight so
+        # they're impossible to miss without hovering.
         self.run_btn = QPushButton("▶  RUN BOT")
         self.run_btn.setObjectName("runBtn")
-        self.run_btn.setFixedHeight(32)
+        self.run_btn.setFixedHeight(54)
+        self.run_btn.setMinimumWidth(140)
         self.run_btn.clicked.connect(self.start_bot)
 
         self.stop_btn = QPushButton("■  STOP")
         self.stop_btn.setObjectName("stopBtn")
-        self.stop_btn.setFixedHeight(32)
+        self.stop_btn.setFixedHeight(54)
+        self.stop_btn.setMinimumWidth(120)
         self.stop_btn.setEnabled(False)
         self.stop_btn.clicked.connect(self.stop_bot)
 
         self.restart_btn = QPushButton("↺  RESTART")
-        self.restart_btn.setFixedHeight(32)
+        self.restart_btn.setFixedHeight(54)
+        self.restart_btn.setMinimumWidth(140)
         self.restart_btn.setEnabled(False)
         self.restart_btn.clicked.connect(self.restart_bot)
 

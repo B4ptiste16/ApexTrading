@@ -10,7 +10,7 @@ from pathlib import Path
 
 try:
     if sys.stdout is not None:
-        print("Starting APEX Trading Platform...", flush=True)
+        print("Starting BAPTOU Trading Platform...", flush=True)
 except Exception:
     pass
 
@@ -350,10 +350,16 @@ class MoreBotsTab(QWidget):
         skel_btn = QPushButton("📖  Open skeleton guide")
         skel_btn.setObjectName("toolBtn")
         skel_btn.clicked.connect(self._open_skeleton_guide)
+        # V4.0.0 — explicit Publish button so the user can test a bot
+        # locally first, then publish without going through BOT MARKET.
+        publish_btn = QPushButton("⬆  Publish to marketplace")
+        publish_btn.setObjectName("addBotBtn")
+        publish_btn.clicked.connect(self._publish_bot)
         self._upload_msg = QLabel("")
         self._upload_msg.setStyleSheet(f"color:{C['green']};font-size:11px;")
         upload_row.addWidget(upload_btn)
         upload_row.addWidget(skel_btn)
+        upload_row.addWidget(publish_btn)
         upload_row.addWidget(self._upload_msg)
         upload_row.addStretch()
         uw = QWidget()
@@ -1034,7 +1040,7 @@ class ApexWindow(QMainWindow):
     def __init__(self, user: dict = None):
         super().__init__()
         self._user = user or {}
-        self.setWindowTitle(f"APEX Trading Platform  v{get_current_version()}")
+        self.setWindowTitle(f"BAPTOU Trading Platform  v{get_current_version()}")
         self.setMinimumSize(1280, 800)
         self.resize(1440, 900)
         self.setStyleSheet(DARK_STYLESHEET)
@@ -2474,7 +2480,7 @@ def main():
 
     ensure_data_dir()
     app = QApplication(sys.argv)
-    app.setApplicationName("APEX Trading Platform")
+    app.setApplicationName("BAPTOU Trading Platform")
     app.setApplicationVersion(get_current_version())
     app.setWindowIcon(_app_icon())          # v3.1.6 — default for every window
     app.setQuitOnLastWindowClosed(False)

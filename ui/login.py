@@ -751,7 +751,7 @@ class LoginWindow(_GradWidget):
         vl.setContentsMargins(0, 8, 0, 24)
         vl.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        logo = QLabel("◈  APEX")
+        logo = QLabel("◈  BAPTOU")
         logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
         logo.setStyleSheet(
             f"font-family:'Syne',sans-serif;font-size:28px;font-weight:800;"
