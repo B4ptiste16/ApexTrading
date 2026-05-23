@@ -14,7 +14,7 @@ from typing import Optional
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame,
-    QLineEdit, QGridLayout, QMessageBox,
+    QLineEdit, QGridLayout, QMessageBox, QComboBox,
 )
 
 from ui.styles  import COLORS
