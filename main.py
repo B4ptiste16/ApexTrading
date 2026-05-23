@@ -2251,6 +2251,42 @@ def _run_bot(side: str) -> int:
 # ENTRY POINT
 # ─────────────────────────────────────────
 
+def _install_exception_handler():
+    """v3.1.9 — replace Python's default 'print to stderr and die'
+    behaviour with a friendly QMessageBox + writing the traceback to
+    DATA_DIR/apex_crash.log. The app keeps running afterwards."""
+    import traceback as _tb
+    def _handler(etype, value, tb):
+        try:
+            from core.paths import DATA_DIR
+            import datetime
+            text = "".join(_tb.format_exception(etype, value, tb))
+            log = DATA_DIR / "apex_crash.log"
+            DATA_DIR.mkdir(parents=True, exist_ok=True)
+            with open(log, "a", encoding="utf-8") as f:
+                f.write(f"\n=== {datetime.datetime.now().isoformat()} ===\n")
+                f.write(text)
+            # Try to show a dialog. If QApplication isn't up yet we
+            # silently fall through to the default print behaviour.
+            app = QApplication.instance()
+            if app:
+                short = f"{etype.__name__}: {value}"
+                box = QMessageBox()
+                box.setWindowTitle("APEX hit an unexpected error")
+                box.setIcon(QMessageBox.Icon.Warning)
+                box.setText(f"<b>{short}</b><br><br>"
+                            "APEX caught this exception so it doesn't crash. "
+                            "Details (and a full traceback) were saved to:"
+                            f"<br><code>{log}</code><br><br>"
+                            "If this is reproducible, send me that file.")
+                box.setDetailedText(text)
+                box.setStandardButtons(QMessageBox.StandardButton.Ok)
+                box.exec()
+        except Exception:
+            _tb.print_exception(etype, value, tb)
+    sys.excepthook = _handler
+
+
 def main():
     if len(sys.argv) >= 3 and sys.argv[1] == "--run-bot":
         sys.exit(_run_bot(sys.argv[2]))
@@ -2264,6 +2300,7 @@ def main():
     app.setApplicationVersion(get_current_version())
     app.setWindowIcon(_app_icon())          # v3.1.6 — default for every window
     app.setQuitOnLastWindowClosed(False)
+    _install_exception_handler()
 
     from ui.widgets import WheelGuard
     app._wheel_guard = WheelGuard()

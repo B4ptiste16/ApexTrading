@@ -430,17 +430,15 @@ class MakeBotTab(QWidget):
         self._custom_model_edit.setStyleSheet(self._input_css())
         fg.addWidget(self._custom_model_edit, 1, 2)
 
-        # API key
+        # API key — V3.1.9: per-provider key memory. Each provider has
+        # its own slot in settings → switching from Gemini to Claude
+        # and back restores each one's key without retyping.
         fg.addWidget(self._lbl("API key"), 2, 0)
         self._key_edit = QLineEdit()
         self._key_edit.setEchoMode(QLineEdit.EchoMode.Password)
         self._key_edit.setStyleSheet(self._input_css())
-        # Pre-fill Anthropic key from the user's .env if we have one.
-        try:
-            cur = D.read_env_keys()
-            self._key_edit.setText(cur.get("ANTHROPIC_API_KEY", ""))
-        except Exception:
-            pass
+        # Remember key on every edit
+        self._key_edit.editingFinished.connect(self._save_current_key)
         fg.addWidget(self._key_edit, 2, 1)
         self._show_key = QCheckBox("show")
         self._show_key.setStyleSheet(f"color:{C['muted']};font-size:10px;")
@@ -547,6 +545,42 @@ class MakeBotTab(QWidget):
 
     # ── Provider-driven model list ────────────────────────────────────
 
+    def _provider_slot(self, name: str) -> str:
+        """Stable settings key per provider. The settings file has one
+        slot per provider so each is remembered independently."""
+        return "makebot_keys::" + name
+
+    def _load_key_for(self, provider: str) -> str:
+        try:
+            s = D.load_settings().get("makebot_keys", {})
+            if s.get(provider):
+                return s[provider]
+        except Exception:
+            pass
+        # Back-compat: if no per-provider entry exists yet, fall back to
+        # the user's synced Anthropic key for the Anthropic provider.
+        if "Anthropic" in provider:
+            try:
+                return D.read_env_keys().get("ANTHROPIC_API_KEY", "") or ""
+            except Exception:
+                pass
+        return ""
+
+    def _save_current_key(self):
+        try:
+            prov = self._provider_combo.currentText()
+            cfg = PROVIDERS.get(prov) or {}
+            if cfg.get("credits"):
+                return  # via-APEX has no key to save
+            key = self._key_edit.text().strip()
+            s = D.load_settings()
+            s.setdefault("makebot_keys", {})[prov] = key
+            import json as _json
+            with open(D.SETTINGS_FILE, "w", encoding="utf-8") as f:
+                _json.dump(s, f, indent=2)
+        except Exception as e:
+            print(f"[make-bot] save key failed: {e}")
+
     def _on_provider_changed(self, name: str):
         self._model_combo.clear()
         cfg = PROVIDERS.get(name) or {}
@@ -556,6 +590,9 @@ class MakeBotTab(QWidget):
         # option is selected
         self._model_combo.currentIndexChanged.connect(self._refresh_custom_visibility)
         self._refresh_custom_visibility()
+        # V3.1.9 — restore the saved key for this provider
+        if hasattr(self, "_key_edit"):
+            self._key_edit.setText(self._load_key_for(name))
         # V3.1.5 — three flavours of "free":
         #   • APEX-credits  (cfg.credits=True)  → no key needed, badge
         #     shows current credit balance, charged 10 ◊ per gen

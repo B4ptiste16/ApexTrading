@@ -61,8 +61,12 @@ class BotTab(QWidget):
     def __init__(self, side: str, parent=None):
         super().__init__(parent)
         self.side    = side
-        self.color   = BOT_COLOR[side]
-        self.script  = D.BOT_SCRIPTS[side]
+        # v3.1.9 — custom bots don't have a BOT_COLOR entry. Fall back to
+        # the colour the registry recorded for them (set when the user
+        # imported / published the bot), else a neutral purple.
+        self.color = BOT_COLOR.get(side) or self._resolve_custom_color(side)
+        # Same defensive lookup for the script path
+        self.script = D.BOT_SCRIPTS.get(side) or self._resolve_custom_script(side)
         self._worker = None          # keep reference so GC doesn't kill it
         self._cached = {}            # last fetched data
 
@@ -71,6 +75,39 @@ class BotTab(QWidget):
         self.scroll = ScrollContent()
         root.addWidget(self.scroll)
         self._build_ui()
+
+    @staticmethod
+    def _resolve_custom_color(side: str) -> str:
+        """Look up the colour the user picked when they imported a
+        custom bot. Returns C['purple'] if the entry can't be found."""
+        try:
+            reg = D.load_settings().get("bot_registry", {})
+            for c in reg.get("custom", []):
+                if str(c.get("id", "")).upper() == side.upper():
+                    return c.get("color") or COLORS["purple"]
+        except Exception:
+            pass
+        return COLORS["purple"]
+
+    @staticmethod
+    def _resolve_custom_script(side: str):
+        """Where the bot's .py / .apex lives on disk."""
+        from pathlib import Path as _P
+        try:
+            reg = D.load_settings().get("bot_registry", {})
+            for c in reg.get("custom", []):
+                if str(c.get("id", "")).upper() == side.upper():
+                    p = _P(c.get("script", ""))
+                    if p.exists():
+                        return p
+                    # Maybe the user toggled the library lock — look for the sibling
+                    for ext in (".apex", ".py"):
+                        alt = p.with_suffix(ext)
+                        if alt.exists():
+                            return alt
+        except Exception:
+            pass
+        return None
 
     # ── BUILD ────────────────────────────────────────────────
 
