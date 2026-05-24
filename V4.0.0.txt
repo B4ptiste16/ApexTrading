@@ -24,3 +24,33 @@ V4.0.0
 
 - Change app name to BAPTOU Trading Platform. (means you'll have to change all file names and url for example if possible and oracle server name also if possible)
 
+
+
+TO IMPROVE
+
+- I asked for a remake of the colour,fonts and entire style of the website, it needs to look more sober with less lines around text and less outlines. Also the styles and themes we created, I want them to execute and show straight when clicking and to never have to restart the app ever when changing a setting.
+
+- I wanted in addition to the themes different layouts as well as a create custom layout option where you can drag and move graphs around, remove them (store as can be re added), add from stored and then save the layout on the bottom of the page (Only for overview and bot pages or general pages with trading info like in the manual trading mode) And have users give names to custom layout so they can reupload them if changed.
+
+- Manual trading mode is still not instored. I want to activate it with a switch (like the wifi switch in the iPhone settings)
+
+- In the market also oblige to have the AI model used to make the Bot as well as the Ai used to run it (have a Created by "logo1" AI name1 and then a Runs with "logo2" Ai name2, it can be same runner and creator. also add which Broker it works with with the same logo + name design on the bot card). Bots in the market must appear esthetically like in the more bots section. There is only 1 market for all broker chosen.
+
+- I want to start having access to IBKR so start preparing this page using exactly the same structure as Alpaca.
+
+- fix the bug where the new bot I created with the app wont start as it says no api key assigned despite assigning a key and pressing save key.
+
+- GENERAL RULE, THIS IS NO INSULT BUT IT DOES FEEL LIKE SOMETIMES YOU DO NOT TRY TO UNDERSTAND WHERE I AM TRYING TO GET WITH MY APP. WHAT MIGHT DRAW PEOPLE IS THE FACT YOU CAN TRADE MANUALLY AGAINST YOUR FRIENDS (AND ONCE THIS WORKS WELL THEN YOU CAN MAKE MONEY BY SELLING BOTS ON THE MARKET)
+
+- Give me a way to monetise my app as users start arriving as I dont want to finance everyones api use and stuff. (I dont like ads it might push people away)
+
+- Make sure my app's security is foolproof by locking all bots all files giving info about app structure, No access to the apps downloaded folder, to the  api keys or to code and file structure of any kind.
+
+- What am I allowed to sell on this app, can I sell credits or worst case in terms of rules can I have them leave bank details in the app so the money is never held on the apps account but only drawn when in-app transactions are made.
+
+- The tabs on the right are still not aligned with the apps on the left
+
+- Alpaca is easy for bot switch as they all have their own "bank account", however on IBKR have a way to sperate and allocate money to different bots and take into account that shortbots might use negative value stocks (because its shorting). Maybe if possible also add possibility of transferring money from alpaca to IBKR if real money is used. (Try and detect if an Alpaca key or IB gateway is using real money so it can label it in the overview and specific bot portfolio, or in manual portfolio. (Istead of bot tabs in manual portfolio have virtual and real portfolio with fake and real money respectively) Make sure The friend list shows clear info and gives a sense of fun and rivalry. (maybe addd notifications when a friend has a big win inciting you to beat them or if they have a big loss then incite you to keep going strong)
+
+- Have a Main standing out Stocks Tab Where you are taken to the place where you can observe all the stock in the market like in every app. There will be top movers, Watchlist with option to add to watchlist for every stock and a search bar to search for a stock. I will later setup api keys for every ai but every stock will have a rating out of 10 by each ai models (allowing 9.13/10 for example) and when you click o them they will give a detailed breakdown. Ai models  wold rate stocks once a week and specially a second time specifically for a stock if a major event like earnings report is sometime during the week then the app will  have each model rate the stock again a few minutes after the event (or a few hours you decide what's best)
+

@@ -744,6 +744,13 @@ class LoginWindow(_GradWidget):
         return w
 
     def _branding(self) -> QWidget:
+        """V4.1.0 — display assets/baptou_logo.png (the B graphic + the
+        BAPTOU / TRADING text underneath, the user's actual logo) when
+        the file exists. Falls back to a typographic version that
+        matches the same aesthetic (big bold BAPTOU + thin -- TRADING --
+        subtitle with green bracket lines)."""
+        from pathlib import Path as _P
+        from PyQt6.QtGui import QPixmap as _QPx
         w = QWidget()
         w.setStyleSheet("background:transparent;")
         vl = QVBoxLayout(w)
@@ -751,21 +758,58 @@ class LoginWindow(_GradWidget):
         vl.setContentsMargins(0, 8, 0, 24)
         vl.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        logo = QLabel("◈  BAPTOU")
+        # Locate the logo PNG — works in both dev (source root) and
+        # frozen builds (sys._MEIPASS / assets/).
+        import sys as _sys
+        candidates = []
+        meipass = getattr(_sys, "_MEIPASS", None)
+        if meipass:
+            candidates.append(_P(meipass) / "assets" / "baptou_logo.png")
+        exe_dir = _P(_sys.executable).parent
+        candidates.append(exe_dir / "_internal" / "assets" / "baptou_logo.png")
+        candidates.append(_P(__file__).parent.parent / "assets" / "baptou_logo.png")
+
+        logo_path = next((p for p in candidates if p.exists()), None)
+        if logo_path is not None:
+            pic = QLabel()
+            pix = _QPx(str(logo_path))
+            if not pix.isNull():
+                # Scale to a sensible height; preserve aspect.
+                pic.setPixmap(pix.scaledToHeight(
+                    220, Qt.TransformationMode.SmoothTransformation))
+            pic.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            pic.setStyleSheet("background:transparent;")
+            vl.addWidget(pic)
+            return w
+
+        # Typographic fallback — matches the new logo's styling
+        logo = QLabel("BAPTOU")
         logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
         logo.setStyleSheet(
-            f"font-family:'Syne',sans-serif;font-size:28px;font-weight:800;"
-            f"color:{C['green']};letter-spacing:6px;background:transparent;"
-        )
+            f"font-family:'Syne',sans-serif;font-size:42px;font-weight:900;"
+            f"color:#ffffff;letter-spacing:6px;background:transparent;")
         vl.addWidget(logo)
-
-        sub = QLabel("TRADING PLATFORM")
-        sub.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        sub.setStyleSheet(
-            f"font-size:9px;color:{C['muted']};letter-spacing:5px;"
-            f"background:transparent;"
-        )
-        vl.addWidget(sub)
+        # Sub with the bracket-line style from the logo
+        sub_row = QHBoxLayout()
+        sub_row.setSpacing(8)
+        sub_row.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        for _ in range(2):
+            line = QFrame()
+            line.setFixedSize(34, 1)
+            line.setStyleSheet(
+                f"background:{C['green']};border:none;")
+            sub_row.addWidget(line)
+            if _ == 0:
+                sub_txt = QLabel("TRADING")
+                sub_txt.setStyleSheet(
+                    f"color:{C['green']};font-family:'JetBrains Mono';"
+                    f"font-size:11px;letter-spacing:6px;font-weight:700;"
+                    f"background:transparent;")
+                sub_row.addWidget(sub_txt)
+        sub_w = QWidget()
+        sub_w.setStyleSheet("background:transparent;")
+        sub_w.setLayout(sub_row)
+        vl.addWidget(sub_w)
         return w
 
     def _build_saved_accounts_section(self) -> QWidget:

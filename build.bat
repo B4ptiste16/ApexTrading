@@ -64,6 +64,13 @@ if errorlevel 1 (
     exit /b 1
 )
 
+REM --- Step 1d: regenerate the multi-size .ico from the source PNG ---
+REM v4.1.0 — picks up assets/icon.png (or assets/baptou_logo.png) and
+REM produces assets/icon.ico embedded with 16/32/48/64/128/256 sizes.
+REM Soft-fails if Pillow or the source PNG is missing.
+echo  [1d/4] Regenerating window icon...
+python tools\make_icon.py
+
 REM --- Step 2: build the exe ---
 REM Note: pandas/numpy/matplotlib are handled by PyInstaller's built-in
 REM hooks - do NOT --collect-all them (huge + can hang the build).
