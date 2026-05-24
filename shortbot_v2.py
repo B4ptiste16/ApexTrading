@@ -51,7 +51,7 @@ from matplotlib.patches import FancyBboxPatch
 import matplotlib.dates as mdates
 
 from dotenv import load_dotenv
-from core.ai_client import call_ai_vision, load_ai_config
+from core.ai_client import call_ai_vision, call_ai_text, load_ai_config
 
 from alpaca.trading.client import TradingClient
 from alpaca.trading.requests import MarketOrderRequest
@@ -165,8 +165,8 @@ UNIVERSE_FILE = "shortbot_universe.txt"  # managed by universe_manager.py
 load_dotenv()
 os.makedirs(CHART_DIR, exist_ok=True)
 
-_AI_PROVIDER, _AI_MODEL, _AI_KEY = load_ai_config()
-print(f"[ai] provider={_AI_PROVIDER}  model={_AI_MODEL}")
+_AI_PROVIDER, _AI_MODEL, _AI_KEY, _AI_MODE = load_ai_config()
+print(f"[ai] provider={_AI_PROVIDER}  model={_AI_MODEL}  mode={_AI_MODE}")
 
 trading_client   = TradingClient(
     os.getenv("ALPACA_API_KEY_SHORT"),
@@ -1060,6 +1060,50 @@ def ask_claude_vision(candidates: list, portfolio: dict,
                 "pattern_notes": {}}
 
 
+def ask_ai_text(candidates: list, portfolio: dict, regime: str) -> dict:
+    """Text-only AI path — no charts. Works with Groq and all providers."""
+    held = portfolio["positions"]
+    max_pos = MAX_POSITIONS
+
+    prompt = (
+        f"You are a SHORT-ONLY portfolio manager (you short stocks expecting them to fall).\n"
+        f"Market regime: {regime}.\n"
+        f"Analyse the following data for bearish setups and return a JSON allocation.\n\n"
+        f"CURRENT SHORT HOLDINGS:\n"
+        f"{json.dumps({k: {'weight': round(v['weight'], 3), 'pl': v['unrealized_pl'], 'entry': v['avg_entry_price']} for k, v in held.items()}, indent=2)}\n\n"
+        f"CANDIDATE STOCKS (numeric data — no charts available):\n"
+        f"{build_compact_table(candidates)}\n\n"
+        f"Return ONLY valid JSON. No markdown.\n\n"
+        f'{{"decision":"ALLOCATE",'
+        f'"target_portfolio":{{"TICKER":0.15,"CASH":0.10}},'
+        f'"confidence":0.0,'
+        f'"short_analysis":"one sentence",'
+        f'"pattern_notes":{{"TICKER":"indicator-based note"}}}}\n\n'
+        f"Rules:\n"
+        f"- decision: ALLOCATE or HOLD\n"
+        f"- Only short tickers from the candidate list\n"
+        f"- Max {max_pos} positions\n"
+        f"- Max single weight: {MAX_SINGLE_WEIGHT}\n"
+        f"- Min CASH: {MIN_CASH_WEIGHT}\n"
+        f"- Weights sum to ~1.0\n"
+        f"- Prefer: RSI overbought + negative momentum + weak fundamentals\n"
+        f"- In BULL regime: only take highest-conviction shorts\n"
+        f"- confidence between 0 and 1\n"
+        f"- If no strong bearish setup: HOLD"
+    )
+
+    raw = call_ai_text(prompt, _AI_PROVIDER, _AI_MODEL, _AI_KEY, MAX_TOKENS)
+    raw = raw.replace("```json", "").replace("```", "").strip()
+    print(f"RAW {_AI_PROVIDER.upper()} (text):", raw[:500])
+
+    try:
+        return json.loads(raw)
+    except Exception as e:
+        print(f"JSON parse error: {e}")
+        return {"decision": "HOLD", "target_portfolio": {}, "confidence": 0.0,
+                "short_analysis": "JSON error.", "pattern_notes": {}}
+
+
 # =========================================================
 # SIGNAL VALIDATION
 # =========================================================
@@ -1444,30 +1488,32 @@ def run_once():
     if stop_actions:
         print(f"  Stop actions: {stop_actions}")
 
-    # -- Generate charts for top candidates --
-    print(f"  Generating {len(candidates)} charts...")
-    charts    = {}   # ticker -> base64 PNG
-    saved     = []
+    # -- AI Signal (vision or text mode) --
+    if _AI_MODE == "text":
+        print(f"  Calling {_AI_PROVIDER} (text mode — no charts)...")
+        raw_signal = ask_ai_text(candidates, before, regime)
+        signal     = validate_signal(raw_signal, candidates, regime)
+    else:
+        # Vision mode: generate charts then send to AI
+        print(f"  Generating {len(candidates)} charts...")
+        charts = {}
+        saved  = []
+        for c in candidates:
+            try:
+                png   = generate_chart(c)
+                b64   = chart_to_b64(png)
+                charts[c["ticker"]] = b64
+                path = os.path.join(CHART_DIR, f"{c['ticker']}.png")
+                with open(path, "wb") as f:
+                    f.write(png)
+                saved.append(c["ticker"])
+            except Exception as e:
+                print(f"  [chart] {c['ticker']}: {e}")
 
-    for c in candidates:
-        try:
-            png   = generate_chart(c)
-            b64   = chart_to_b64(png)
-            charts[c["ticker"]] = b64
-            # Also save to disk for debugging / dashboard
-            path = os.path.join(CHART_DIR, f"{c['ticker']}.png")
-            with open(path, "wb") as f:
-                f.write(png)
-            saved.append(c["ticker"])
-        except Exception as e:
-            print(f"  [chart] {c['ticker']}: {e}")
-
-    print(f"  Charts ready: {saved}")
-
-    # -- Layer 2: Claude Vision --
-    print("  Calling Claude Vision...")
-    raw_signal = ask_claude_vision(candidates, before, regime, charts)
-    signal     = validate_signal(raw_signal, candidates, regime)
+        print(f"  Charts ready: {saved}")
+        print(f"  Calling {_AI_PROVIDER} Vision...")
+        raw_signal = ask_claude_vision(candidates, before, regime, charts)
+        signal     = validate_signal(raw_signal, candidates, regime)
 
     print(f"  Decision: {signal['decision']} | "
           f"Confidence: {signal.get('confidence', 0):.0%}")

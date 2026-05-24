@@ -749,8 +749,10 @@ ENV_KEYS = [
     "ANTHROPIC_API_KEY",
     "GOOGLE_AI_API_KEY",
     "XAI_API_KEY",
+    "GROQ_API_KEY",
     "AI_PROVIDER",
     "AI_MODEL",
+    "AI_MODE",
     # Alpaca (built-in bots)
     "ALPACA_API_KEY_LONG",  "ALPACA_SECRET_KEY_LONG",
     "ALPACA_API_KEY_SHORT", "ALPACA_SECRET_KEY_SHORT",

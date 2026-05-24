@@ -57,7 +57,7 @@ import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 
 from dotenv import load_dotenv
-from core.ai_client import call_ai_vision, load_ai_config
+from core.ai_client import call_ai_vision, call_ai_text, load_ai_config
 
 from alpaca.trading.client import TradingClient
 from alpaca.trading.requests import MarketOrderRequest, ClosePositionRequest
@@ -224,8 +224,8 @@ UNIVERSE_FILE = "longbot_universe.txt"   # managed by universe_manager.py
 load_dotenv()
 os.makedirs(CHART_DIR, exist_ok=True)
 
-_AI_PROVIDER, _AI_MODEL, _AI_KEY = load_ai_config()
-print(f"[ai] provider={_AI_PROVIDER}  model={_AI_MODEL}")
+_AI_PROVIDER, _AI_MODEL, _AI_KEY, _AI_MODE = load_ai_config()
+print(f"[ai] provider={_AI_PROVIDER}  model={_AI_MODEL}  mode={_AI_MODE}")
 
 trading_client   = TradingClient(
     os.getenv("ALPACA_API_KEY_LONG", os.getenv("ALPACA_API_KEY")),
@@ -1091,6 +1091,53 @@ def ask_claude_vision(candidates: list, portfolio: dict,
                 "short_analysis": "JSON error.", "pattern_notes": {}}
 
 
+def ask_ai_text(candidates: list, portfolio: dict, regime: str) -> dict:
+    """Text-only AI path — no charts generated. Works with any provider
+    including Groq (free, text-only). The AI receives the same numeric
+    summary as in vision mode and returns the same JSON format."""
+    held = portfolio["positions"]
+    max_pos = BEAR_REGIME_MAX_POS if regime == "BEAR" else BULL_REGIME_MAX_POS
+
+    prompt = (
+        f"You are a LONG-ONLY portfolio manager.\n"
+        f"Market regime: {regime}.\n"
+        f"Analyse the following data for bullish setups and return a JSON allocation.\n\n"
+        f"CURRENT HOLDINGS:\n"
+        f"{json.dumps({k: {'weight': round(v['weight'], 3), 'pl': v['unrealized_pl'], 'entry': v['avg_entry_price']} for k, v in held.items()}, indent=2)}\n\n"
+        f"CANDIDATE STOCKS (numeric data — no charts available):\n"
+        f"{build_compact_table(candidates)}\n\n"
+        f"Return ONLY valid JSON. No markdown.\n\n"
+        f'{{"decision":"ALLOCATE",'
+        f'"target_portfolio":{{"TICKER":0.15,"CASH":0.03}},'
+        f'"confidence":0.0,'
+        f'"short_analysis":"one sentence",'
+        f'"pattern_notes":{{"TICKER":"indicator-based note"}}}}\n\n'
+        f"Rules:\n"
+        f"- decision: ALLOCATE or HOLD\n"
+        f"- Only long tickers from the candidate list\n"
+        f"- Max {max_pos} positions (regime is {regime})\n"
+        f"- Max single stock: {MAX_SINGLE_WEIGHT}, Max ETF: {MAX_ETF_WEIGHT}\n"
+        f"- Min CASH: {MIN_CASH_WEIGHT}\n"
+        f"- Weights sum to ~1.0\n"
+        f"- Prefer: RSI oversold + positive revenue growth + strong momentum\n"
+        f"- In BEAR regime: be defensive, prefer ETFs or cash-heavy\n"
+        f"- In BULL regime: be aggressive, tilt toward momentum\n"
+        f"- confidence between 0 and 1\n"
+        f"- If no strong setup: HOLD"
+    )
+
+    raw = call_ai_text(prompt, _AI_PROVIDER, _AI_MODEL, _AI_KEY, MAX_TOKENS)
+    raw = raw.replace("```json", "").replace("```", "").strip()
+    print(f"RAW {_AI_PROVIDER.upper()} (text):", raw[:500])
+
+    try:
+        return json.loads(raw)
+    except Exception as e:
+        print(f"JSON parse error: {e}")
+        return {"decision": "HOLD", "target_portfolio": {}, "confidence": 0.0,
+                "short_analysis": "JSON error.", "pattern_notes": {}}
+
+
 # =========================================================
 # SIGNAL VALIDATION
 # =========================================================
@@ -1462,15 +1509,21 @@ def run_once():
     if stop_actions:
         print(f"  Stop actions: {stop_actions}")
 
-    # -- Cost gate: only call Claude Vision when a setup is strong --
+    # -- Cost gate: only call AI when a setup is strong --
     best_score = max((c["bullish_score"] for c in candidates), default=0.0)
     _mins = live_min_score()
     if best_score < _mins:
         print(f"  Best score {best_score:.1f} < {_mins:.1f}  -  "
-              f"skipping Claude Vision (saved API cost)")
+              f"skipping AI call (saved API cost)")
         signal = validate_signal({"decision": "HOLD", "confidence": 0.0},
                                   candidates, regime)
+    elif _AI_MODE == "text":
+        # Text-only mode: no charts — works with Groq and all other providers
+        print(f"  Calling {_AI_PROVIDER} (text mode — no charts)...")
+        raw_signal = ask_ai_text(candidates, before, regime)
+        signal     = validate_signal(raw_signal, candidates, regime)
     else:
+        # Vision mode: generate charts and send images to AI
         print(f"  Generating {len(candidates)} charts...")
         charts = {}
         saved  = []
@@ -1485,7 +1538,7 @@ def run_once():
             except Exception as e:
                 print(f"  [chart] {c['ticker']}: {e}")
         print(f"  Charts ready: {saved}")
-        print("  Calling Claude Vision...")
+        print(f"  Calling {_AI_PROVIDER} Vision...")
         raw_signal = ask_claude_vision(candidates, before, regime, charts)
         signal     = validate_signal(raw_signal, candidates, regime)
 

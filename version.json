@@ -1,4 +1,4 @@
 {
-  "version": "4.4.0",
-  "notes": "v4.4.0 — Multi-AI provider support\n\n✨ NEW\n• Choose your AI in Tools tab: Anthropic (Claude), Google Gemini (FREE — 1 500 req/day, no card), or xAI Grok\n• All 3 bots now route through unified ai_client — switching provider takes effect on next bot start\n• Per-provider model selector (Gemini 2.0 Flash, Grok-2-Vision, etc.)\n• Get a free Google AI key at aistudio.google.com"
+  "version": "4.5.0",
+  "notes": "v4.5.0 — Groq (free text AI) + text-only mode\n\n✨ NEW\n• Groq (Llama 3.3 70B) added as AI provider — completely FREE, 14 400 req/day, resets daily. Get key at console.groq.com\n• Text-only mode: bots skip chart generation and send numeric data directly to AI — faster, cheaper, works with Groq\n• AI Mode toggle in Tools: Vision (charts → AI) or Text-only (no charts)\n• Groq automatically forces text mode (no image support)\n• All 4 providers: Anthropic, Google Gemini (FREE), xAI Grok, Groq (FREE)"
 }

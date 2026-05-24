@@ -66,7 +66,7 @@ import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 
 from dotenv import load_dotenv
-from core.ai_client import call_ai_vision, load_ai_config
+from core.ai_client import call_ai_vision, call_ai_text, load_ai_config
 
 from alpaca.trading.client import TradingClient
 from alpaca.trading.requests import (
@@ -250,8 +250,8 @@ CHART_DIR     = "daybot_charts"
 
 os.makedirs(CHART_DIR, exist_ok=True)
 
-_AI_PROVIDER, _AI_MODEL, _AI_KEY = load_ai_config()
-print(f"[ai] provider={_AI_PROVIDER}  model={_AI_MODEL}")
+_AI_PROVIDER, _AI_MODEL, _AI_KEY, _AI_MODE = load_ai_config()
+print(f"[ai] provider={_AI_PROVIDER}  model={_AI_MODEL}  mode={_AI_MODE}")
 
 trading_client   = TradingClient(
     os.getenv("ALPACA_API_KEY_DAY",   os.getenv("ALPACA_API_KEY")),
@@ -1042,6 +1042,43 @@ def ask_claude(candidates: list, charts: dict) -> dict:
         return {"ticker": None, "confidence": 0.0, "reason": "JSON parse error"}
 
 
+def ask_ai_text(candidates: list) -> dict:
+    """Text-only AI path for daybot — returns ONE ticker to trade today.
+    Works with Groq and all providers (no charts needed)."""
+    lines = []
+    for c in candidates[:TOP_N_CLAUDE]:
+        t = c["ticker"]
+        ind = c.get("indicators", {})
+        pats = [k for k, v in c.get("patterns", {}).items() if v]
+        lines.append(
+            f"  {t}: RSI={ind.get('rsi', 0):.0f} "
+            f"ATR={c.get('atr_pct', 0):.1f}% "
+            f"SL=${c.get('stop_loss', 0)} TP=${c.get('take_profit', 0)} "
+            f"patterns={pats or 'none'}"
+        )
+
+    prompt = (
+        f"You are a day-trading assistant. Pick ONE stock from the list below "
+        f"for a bracket order trade today (one entry, one stop-loss, one take-profit).\n\n"
+        f"CANDIDATES:\n" + "\n".join(lines) + "\n\n"
+        f"Return ONLY valid JSON. No markdown.\n"
+        f'{{"ticker":"AAPL","confidence":0.85,"reason":"one sentence"}}\n\n'
+        f"Rules:\n"
+        f"- Pick exactly ONE ticker, or null if nothing is attractive\n"
+        f"- confidence between 0 and 1 (only pick if > 0.6)\n"
+        f"- Prefer: clear pattern + ATR stop not too wide + good R:R\n"
+        f"- If unsure: return {{\"ticker\": null, \"confidence\": 0, \"reason\": \"no clear setup\"}}"
+    )
+
+    raw = call_ai_text(prompt, _AI_PROVIDER, _AI_MODEL, _AI_KEY, MAX_TOKENS)
+    raw = raw.replace("```json", "").replace("```", "").strip()
+    print(f"  {_AI_PROVIDER.capitalize()} (text): {raw}")
+    try:
+        return json.loads(raw)
+    except Exception:
+        return {"ticker": None, "confidence": 0.0, "reason": "JSON parse error"}
+
+
 # =========================================================
 # LAYER 3  -  BRACKET EXECUTION
 # =========================================================
@@ -1234,22 +1271,26 @@ def run_once():
         save_state(state)
         return
 
-    # -- Generate charts for top candidates ----------------
-    print(f"  Generating charts for top {min(TOP_N_CLAUDE, len(candidates))}...")
-    charts = {}
-    for c in candidates[:TOP_N_CLAUDE]:
-        try:
-            png = generate_chart(c)
-            charts[c["ticker"]] = base64.standard_b64encode(png).decode()
-            path = os.path.join(CHART_DIR, f"{c['ticker']}.png")
-            with open(path, "wb") as f:
-                f.write(png)
-        except Exception as e:
-            print(f"  [chart] {c['ticker']}: {e}")
+    # -- Ask AI (vision or text mode) ----------------------
+    if _AI_MODE == "text":
+        print(f"  Asking {_AI_PROVIDER} (text mode — no charts)...")
+        signal = ask_ai_text(candidates)
+    else:
+        # Vision mode: generate charts then ask AI
+        print(f"  Generating charts for top {min(TOP_N_CLAUDE, len(candidates))}...")
+        charts = {}
+        for c in candidates[:TOP_N_CLAUDE]:
+            try:
+                png = generate_chart(c)
+                charts[c["ticker"]] = base64.standard_b64encode(png).decode()
+                path = os.path.join(CHART_DIR, f"{c['ticker']}.png")
+                with open(path, "wb") as f:
+                    f.write(png)
+            except Exception as e:
+                print(f"  [chart] {c['ticker']}: {e}")
 
-    # -- Ask Claude ----------------------------------------
-    print("  Asking Claude...")
-    signal = ask_claude(candidates, charts)
+        print(f"  Asking {_AI_PROVIDER} (vision)...")
+        signal = ask_claude(candidates, charts)
 
     chosen_ticker = signal.get("ticker")
     confidence    = float(signal.get("confidence", 0))

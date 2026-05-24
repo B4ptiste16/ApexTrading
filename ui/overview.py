@@ -968,18 +968,20 @@ class ToolsTab(QWidget):
         s.add(manual_frame)
 
     def _build_ai_key_section(self, s):
-        """AI provider selector — pick Anthropic, Google Gemini (free), or xAI Grok.
-        The chosen provider + model + key are stored in .env as AI_PROVIDER,
-        AI_MODEL, and the per-provider key var (ANTHROPIC_API_KEY /
-        GOOGLE_AI_API_KEY / XAI_API_KEY). All three bots read these at startup."""
-        from core.ai_client import PROVIDER_LABELS, PROVIDER_MODELS, PROVIDER_ENV_KEY
+        """AI provider + mode selector.
+        Provider/model/key stored in .env as AI_PROVIDER, AI_MODEL, and the
+        per-provider key var. AI_MODE = vision | text controls whether bots
+        generate charts before calling AI."""
+        from core.ai_client import (PROVIDER_LABELS, PROVIDER_MODELS,
+                                    PROVIDER_ENV_KEY, provider_supports_vision)
 
         s.add(SectionHeader("AI PROVIDER", C["yellow"]))
 
         # Hint text
         hint = QLabel(
-            "Choose which AI analyses your bot charts. Google Gemini is FREE "
-            "(get key at aistudio.google.com — no credit card).")
+            "Pick which AI powers your bots. "
+            "Groq (Llama) and Google Gemini are completely FREE. "
+            "Text mode skips chart generation — faster and works with Groq.")
         hint.setStyleSheet(f"color:{C['muted']};font-size:11px;")
         hint.setWordWrap(True)
         s.add(hint)
@@ -1035,7 +1037,23 @@ class ToolsTab(QWidget):
         afl.addWidget(key_lbl, 2, 0)
         afl.addWidget(self._ai_key_edit, 2, 1)
 
-        # Row 3: show key checkbox + save button
+        # Row 3: AI Mode toggle (Vision vs Text)
+        mode_lbl = QLabel("Mode")
+        mode_lbl.setStyleSheet(f"color:{C['text']};font-size:12px;")
+        self._ai_mode_combo = QComboBox()
+        self._ai_mode_combo.setStyleSheet(
+            f"background:{C['panel2']};color:{C['text']};"
+            f"border:1px solid {C['border']};border-radius:4px;padding:4px;")
+        self._ai_mode_combo.addItem("Vision  (charts → AI)", "vision")
+        self._ai_mode_combo.addItem("Text-only  (no charts — works with Groq)", "text")
+        saved_mode = cur.get("AI_MODE", "vision")
+        mode_idx = self._ai_mode_combo.findData(saved_mode)
+        if mode_idx >= 0:
+            self._ai_mode_combo.setCurrentIndex(mode_idx)
+        afl.addWidget(mode_lbl, 3, 0)
+        afl.addWidget(self._ai_mode_combo, 3, 1)
+
+        # Row 4: show key checkbox + save button
         ai_show = QCheckBox("Show key")
         ai_show.setStyleSheet(f"color:{C['muted']};font-size:10px;")
         ai_show.toggled.connect(lambda on:
@@ -1044,24 +1062,24 @@ class ToolsTab(QWidget):
         ai_save = QPushButton("Save")
         ai_save.setObjectName("toolBtn")
         ai_save.clicked.connect(self._save_ai_key)
-        afl.addWidget(ai_show, 3, 0)
-        afl.addWidget(ai_save, 3, 1)
+        afl.addWidget(ai_show, 4, 0)
+        afl.addWidget(ai_save, 4, 1)
 
-        # Row 4: status message
+        # Row 5: status message
         self._ai_save_msg = QLabel("")
         self._ai_save_msg.setStyleSheet(f"color:{C['green']};font-size:11px;")
-        afl.addWidget(self._ai_save_msg, 4, 0, 1, 2)
+        afl.addWidget(self._ai_save_msg, 5, 0, 1, 2)
 
-        # Row 5: where-to-get-key link per provider
+        # Row 6: where-to-get-key link per provider
         self._ai_key_hint = QLabel("")
         self._ai_key_hint.setStyleSheet(
             f"color:{C['muted']};font-size:10px;")
         self._ai_key_hint.setOpenExternalLinks(True)
-        afl.addWidget(self._ai_key_hint, 5, 0, 1, 2)
+        afl.addWidget(self._ai_key_hint, 6, 0, 1, 2)
 
         s.add(ai_frame)
 
-        # Wire up provider change → update model list + key field + hint
+        # Wire up provider change → update model list + key field + hint + mode
         def _on_provider_changed(_idx):
             prov = self._ai_provider_combo.currentData()
             models = PROVIDER_MODELS.get(prov, [])
@@ -1069,18 +1087,25 @@ class ToolsTab(QWidget):
             self._ai_model_combo.clear()
             for m in models:
                 self._ai_model_combo.addItem(m)
-            # Try to restore saved model
             idx = self._ai_model_combo.findText(saved_model)
             if idx >= 0:
                 self._ai_model_combo.setCurrentIndex(idx)
             # Fill key field
             env_var = PROVIDER_ENV_KEY.get(prov, "ANTHROPIC_API_KEY")
             self._ai_key_edit.setText(cur.get(env_var, ""))
+            # Force text mode if provider doesn't support vision
+            if not provider_supports_vision(prov):
+                self._ai_mode_combo.setCurrentIndex(
+                    self._ai_mode_combo.findData("text"))
+                self._ai_mode_combo.setEnabled(False)
+            else:
+                self._ai_mode_combo.setEnabled(True)
             # Update hint
             _HINTS = {
                 "anthropic": "Get key: <a href='https://console.anthropic.com'>console.anthropic.com</a> (paid)",
                 "google":    "Get FREE key: <a href='https://aistudio.google.com'>aistudio.google.com</a> — 1 500 req/day, resets daily",
                 "xai":       "Get key: <a href='https://console.x.ai'>console.x.ai</a> ($25 free credits/mo for new accounts)",
+                "groq":      "Get FREE key: <a href='https://console.groq.com'>console.groq.com</a> — 14 400 req/day, resets daily",
             }
             self._ai_key_hint.setText(_HINTS.get(prov, ""))
 
@@ -1161,13 +1186,16 @@ class ToolsTab(QWidget):
         prov      = self._ai_provider_combo.currentData() or "anthropic"
         model     = self._ai_model_combo.currentText().strip()
         key_value = self._ai_key_edit.text().strip()
+        mode      = self._ai_mode_combo.currentData() or "vision"
         env_var   = PROVIDER_ENV_KEY.get(prov, "ANTHROPIC_API_KEY")
-        to_write  = {"AI_PROVIDER": prov, "AI_MODEL": model}
+        to_write  = {"AI_PROVIDER": prov, "AI_MODEL": model, "AI_MODE": mode}
         if key_value:
             to_write[env_var] = key_value
         D.write_env_keys(to_write)
         prov_label = self._ai_provider_combo.currentText()
-        self._ai_save_msg.setText(f"✓ {prov_label} saved — bots use it on next start")
+        mode_label = "text" if mode == "text" else "vision"
+        self._ai_save_msg.setText(
+            f"✓ {prov_label} ({mode_label}) saved — bots use it on next start")
         self._ai_save_msg.setStyleSheet(f"color:{C['green']};font-size:11px;")
         _QT.singleShot(5000, lambda: self._ai_save_msg.setText(""))
 
