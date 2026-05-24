@@ -94,8 +94,38 @@ class FriendsTab(QWidget):
 
     # ── Layout ──────────────────────────────────────────────────────
 
+    def set_manual_mode(self, on: bool):
+        """Called by main window when the user switches manual/auto mode.
+        Shows a banner and refreshes the list so friend cards display the
+        correct account context."""
+        if hasattr(self, "_manual_banner"):
+            self._manual_banner.setVisible(on)
+        self._refresh_friends()
+
     def _build(self):
         s = self.scroll
+
+        # ─── MANUAL MODE BANNER (hidden in auto mode) ─────────────
+        self._manual_banner = QFrame()
+        self._manual_banner.setStyleSheet(
+            f"background:{C['panel']};border:none;border-radius:10px;"
+            f"border-left:4px solid {C['orange']};")
+        _bv = QVBoxLayout(self._manual_banner)
+        _bv.setContentsMargins(20, 14, 20, 14)
+        _bv.setSpacing(4)
+        _btitle = QLabel("✋  MANUAL MODE — Friends' manual accounts")
+        _btitle.setStyleSheet(
+            f"font-family:'Syne',sans-serif;font-size:13px;font-weight:800;"
+            f"color:{C['orange']};letter-spacing:1px;")
+        _bsub = QLabel(
+            "You're seeing your friends' dedicated manual trading accounts — "
+            "performance here is purely from manual orders, no bots.")
+        _bsub.setStyleSheet(f"color:{C['muted']};font-size:11px;")
+        _bsub.setWordWrap(True)
+        _bv.addWidget(_btitle)
+        _bv.addWidget(_bsub)
+        self._manual_banner.setVisible(False)
+        s.add(self._manual_banner)
 
         # ─── SEARCH / ADD ────────────────────────────────────────
         s.add(SectionHeader("ADD A FRIEND", C["purple"]))

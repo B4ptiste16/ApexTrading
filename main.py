@@ -1155,9 +1155,8 @@ class ApexWindow(QMainWindow):
                     self._friends_idx, self._account_idx,
                     self._admin_idx, self._tools_idx):
             self.tabs.tabBar().setTabVisible(idx, False)
-        # Restore manual tab visibility if it was on last session
-        if self._is_manual_mode():
-            self.tabs.tabBar().setTabVisible(self._manual_idx, True)
+        # Startup state applied after corner is built (corner buttons need to exist)
+        # — deferred to _apply_manual_mode_ui() called at end of _setup_ui
 
         # ── CORNER WIDGET (Universe / Tools) ────────────────
         self.tabs.setCornerWidget(self._build_corner(), Qt.Corner.TopRightCorner)
@@ -1224,6 +1223,9 @@ class ApexWindow(QMainWindow):
         # so the stack is fully populated before we switch pages.
         QTimer.singleShot(0, lambda: self._apply_broker_mode(
             self._current_broker_mode()))
+        # V4.3.0 — restore manual mode UI state after all tabs exist
+        QTimer.singleShot(0, lambda: self._apply_manual_mode_ui(
+            self._is_manual_mode()))
 
         # V7.1.1: accept .py drops anywhere in the window so a user can
         # drag a bot script in and we'll offer to install it locally or
@@ -1445,6 +1447,40 @@ class ApexWindow(QMainWindow):
     def _manual_mode_label(self) -> str:
         return "✋  MANUAL" if self._is_manual_mode() else "⚡  AUTO"
 
+    def _apply_manual_mode_ui(self, on: bool):
+        """Show/hide tabs and corner buttons to reflect manual-vs-auto mode.
+        Safe to call at any time after _setup_tabs + _insert_bot_tabs."""
+        tb = self.tabs.tabBar()
+
+        # ── Bot tabs (OVERVIEW, dynamic bots, MORE BOTS, BOT MARKET) ──
+        tb.setTabVisible(self._overview_idx,  not on)
+        tb.setTabVisible(self._morebots_idx,  not on)
+        tb.setTabVisible(self._botmarket_idx, False)   # always hidden from bar
+        for idx in self._tab_indices.values():
+            tb.setTabVisible(idx, not on)
+
+        # ── MANUAL tab ─────────────────────────────────────────────────
+        tb.setTabVisible(self._manual_idx, on)
+
+        # ── Corner buttons ─────────────────────────────────────────────
+        if hasattr(self, "_corner_universe"):
+            self._corner_universe.setVisible(not on)
+        if hasattr(self, "_corner_makebot"):
+            self._corner_makebot.setVisible(not on)
+
+        # ── Navigate to the right tab ──────────────────────────────────
+        if on:
+            self.tabs.setCurrentIndex(self._manual_idx)
+            if hasattr(self, "manual_tab"):
+                self.manual_tab._refresh_key_state()
+        else:
+            self.tabs.setCurrentIndex(self._overview_idx)
+
+        # ── Friends tab: switch display mode ───────────────────────────
+        if hasattr(self, "friends_tab") and hasattr(self.friends_tab,
+                                                    "set_manual_mode"):
+            self.friends_tab.set_manual_mode(on)
+
     def _toggle_manual_mode(self, *, force_off: bool = False):
         new_state = False if force_off else not self._is_manual_mode()
         try:
@@ -1462,11 +1498,7 @@ class ApexWindow(QMainWindow):
             self._manual_mode_btn.setStyleSheet(
                 self._manual_mode_btn.styleSheet())  # force repaint
         if hasattr(self, "tabs") and hasattr(self, "_manual_idx"):
-            self.tabs.tabBar().setTabVisible(self._manual_idx, new_state)
-            if new_state:
-                self.tabs.setCurrentIndex(self._manual_idx)
-                if hasattr(self, "manual_tab"):
-                    self.manual_tab._refresh_positions()
+            self._apply_manual_mode_ui(new_state)
 
     # ── V3.2.0 — broker-mode selector ───────────────────────
 
@@ -1780,9 +1812,10 @@ class ApexWindow(QMainWindow):
         insert_at = self._morebots_idx
         self.tabs.insertTab(insert_at, tab, label)
 
-        # Shift static indices  (V3.1.3 added _botmarket_idx)
+        # Shift static indices  (V3.1.3 added _botmarket_idx, V4.3.0 added _manual_idx)
         self._morebots_idx  += 1
         self._botmarket_idx += 1
+        self._manual_idx    += 1
         self._universe_idx  += 1
         self._makebot_idx   += 1
         self._friends_idx   += 1
@@ -1838,9 +1871,10 @@ class ApexWindow(QMainWindow):
         idx = self.tabs.indexOf(tab)
         if idx >= 0:
             self.tabs.removeTab(idx)
-            # Shift static indices back  (V3.1.3 added _botmarket_idx)
+            # Shift static indices back  (V3.1.3 added _botmarket_idx, V4.3.0 _manual_idx)
             if idx < self._morebots_idx:  self._morebots_idx  -= 1
             if idx < self._botmarket_idx: self._botmarket_idx -= 1
+            if idx < self._manual_idx:    self._manual_idx    -= 1
             if idx < self._universe_idx:  self._universe_idx  -= 1
             if idx < self._makebot_idx:   self._makebot_idx   -= 1
             if idx < self._friends_idx:   self._friends_idx   -= 1
