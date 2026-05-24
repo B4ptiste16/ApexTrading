@@ -114,7 +114,7 @@ class GradientBackground(QWidget):
 # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 class StatusDot(QLabel):
-    """Coloured blinking â— for bot status."""
+    """Coloured blinking ● for bot status."""
 
     _DOT_COLORS = {
         "running":   C["green"],
@@ -125,7 +125,7 @@ class StatusDot(QLabel):
     }
 
     def __init__(self, parent=None):
-        super().__init__("â—", parent)
+        super().__init__("●", parent)
         self.setFixedSize(20, 20)
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
@@ -165,7 +165,7 @@ class StatusDot(QLabel):
 
 
 # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-# TAB QUICK CONTROLS  (â–¶ â–  âœ•)
+# TAB QUICK CONTROLS  (> [ ] X)
 # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 class TabQuickControls(QWidget):
@@ -181,9 +181,9 @@ class TabQuickControls(QWidget):
         row.setContentsMargins(0, 0, 4, 0)
         row.setSpacing(2)
 
-        self._play = QPushButton("â–¶")
-        self._stop = QPushButton("â– ")
-        self._remove = QPushButton("âœ•")
+        self._play = QPushButton(">")
+        self._stop = QPushButton("[ ]")
+        self._remove = QPushButton("X")
 
         self._play.setObjectName("tabPlayBtn")
         self._stop.setObjectName("tabStopBtn")
@@ -193,7 +193,7 @@ class TabQuickControls(QWidget):
             btn.setFixedSize(16, 16)
 
         # Pack: play / stop (mutually exclusive), then breathing room,
-        # then the remove âœ•. V7.1.1 â€” the âœ• used to sit flush against
+        # then the remove X. V7.1.1 â€” the X used to sit flush against
         # the play button which made mis-clicks easy.
         row.addWidget(self._play)
         row.addWidget(self._stop)
@@ -216,8 +216,8 @@ class TabQuickControls(QWidget):
 
 BUILTIN_BOTS = {
     "LONG": {
-        "label":       "â–² LONG",
-        "icon":        "â–²",
+        "label":       "LONG",
+        "icon":        "^",
         "color":       C["green"],
         "description": "Momentum + mean-reversion portfolio. "
                        "Uses Claude Vision on charts to rank candidates.",
@@ -225,8 +225,8 @@ BUILTIN_BOTS = {
         "account":     "Alpaca â€” 1 dedicated API key pair",
     },
     "SHORT": {
-        "label":       "â–¼ SHORT",
-        "icon":        "â–¼",
+        "label":       "SHORT",
+        "icon":        "v",
         "color":       C["red"],
         "description": "Bear momentum, defensive in BULL regime. "
                        "Sells short on weakness, covers on strength.",
@@ -234,8 +234,8 @@ BUILTIN_BOTS = {
         "account":     "Alpaca â€” 1 dedicated API key pair",
     },
     "DAY": {
-        "label":       "â—† DAY",
-        "icon":        "â—†",
+        "label":       "DAY",
+        "icon":        "*",
         "color":       C["orange"],
         "description": "Single high-conviction intraday bracket orders. "
                        "ATR-based stop-loss and take-profit.",
@@ -346,15 +346,15 @@ class MoreBotsTab(QWidget):
         s.add(custom_info)
 
         upload_row = QHBoxLayout()
-        upload_btn = QPushButton("ðŸ“‚  Browse .py file...")
+        upload_btn = QPushButton("Browse .py file...")
         upload_btn.setObjectName("toolBtn")
         upload_btn.clicked.connect(self._upload_bot)
-        skel_btn = QPushButton("ðŸ“–  Open skeleton guide")
+        skel_btn = QPushButton("Open skeleton guide")
         skel_btn.setObjectName("toolBtn")
         skel_btn.clicked.connect(self._open_skeleton_guide)
         # V4.0.0 â€” explicit Publish button so the user can test a bot
         # locally first, then publish without going through BOT MARKET.
-        publish_btn = QPushButton("â¬†  Publish to marketplace")
+        publish_btn = QPushButton("Publish to marketplace")
         publish_btn.setObjectName("addBotBtn")
         publish_btn.clicked.connect(self._publish_bot)
         self._upload_msg = QLabel("")
@@ -380,7 +380,7 @@ class MoreBotsTab(QWidget):
         lv.setSpacing(6)
 
         lock_head = QHBoxLayout()
-        lock_title = QLabel("ðŸ”’  LIBRARY LOCK")
+        lock_title = QLabel("LIBRARY LOCK")
         lock_title.setStyleSheet(
             f"color:{C['muted']};font-size:9px;letter-spacing:3px;"
             f"font-weight:700;")
@@ -403,7 +403,7 @@ class MoreBotsTab(QWidget):
         lv.addWidget(lock_desc)
 
         lock_row = QHBoxLayout()
-        self._lock_btn = QPushButton("ðŸ”’  Lock library")
+        self._lock_btn = QPushButton("Lock library")
         self._lock_btn.setObjectName("toolBtn")
         self._lock_btn.clicked.connect(self._toggle_lock)
         lock_row.addWidget(self._lock_btn)
@@ -426,7 +426,7 @@ class MoreBotsTab(QWidget):
         mv = QVBoxLayout(market_wrap)
         mv.setContentsMargins(24, 20, 24, 20)
         mv.setSpacing(8)
-        title = QLabel("ðŸ›’  BOT MARKET")
+        title = QLabel("BOT MARKET")
         title.setStyleSheet(
             f"font-family:'Syne',sans-serif;font-size:18px;font-weight:800;"
             f"color:{C['text']};letter-spacing:3px;")
@@ -440,7 +440,7 @@ class MoreBotsTab(QWidget):
 
         open_row = QHBoxLayout()
         open_row.setContentsMargins(0, 6, 0, 0)
-        open_btn = QPushButton("ðŸ›’  Open Bot Market")
+        open_btn = QPushButton("Open Bot Market")
         open_btn.setObjectName("addBotBtn")
         open_btn.setMinimumHeight(40)
         open_btn.setStyleSheet(
@@ -529,13 +529,13 @@ class MoreBotsTab(QWidget):
         bots_dir = DATA_DIR / "bots"
         locked   = secure.is_locked(bots_dir)
         if locked:
-            self._lock_btn.setText("ðŸ”“  Unlock library")
+            self._lock_btn.setText("Unlock library")
             self._lock_status.setText("LOCKED")
             self._lock_status.setStyleSheet(
                 f"color:{C['orange']};font-size:10px;font-weight:700;"
                 f"letter-spacing:2px;")
         else:
-            self._lock_btn.setText("ðŸ”’  Lock library")
+            self._lock_btn.setText("Lock library")
             self._lock_status.setText("UNLOCKED")
             self._lock_status.setStyleSheet(
                 f"color:{C['muted']};font-size:10px;letter-spacing:2px;")
@@ -605,7 +605,7 @@ class MoreBotsTab(QWidget):
 
     def _make_bot_card(self, side: str, mode: str) -> QFrame:
         info = BUILTIN_BOTS.get(side, {
-            "label": side, "icon": "â—‰", "color": C["purple"],
+            "label": side, "icon": "o", "color": C["purple"],
             "description": "Custom bot", "cost": "â€”", "account": "â€”",
         })
         color   = info["color"]
@@ -1131,15 +1131,15 @@ class ApexWindow(QMainWindow):
         self.manual_tab.switch_off_requested.connect(
             lambda: self._toggle_manual_mode(force_off=True))
 
-        self._overview_idx  = self.tabs.addTab(self.overview_tab,  "â—ˆ  OVERVIEW")
-        self._morebots_idx  = self.tabs.addTab(self.more_bots_tab, "âŠ•  MORE BOTS")
+        self._overview_idx  = self.tabs.addTab(self.overview_tab,  "OVERVIEW")
+        self._morebots_idx  = self.tabs.addTab(self.more_bots_tab, "MORE BOTS")
 
         # V3.1.3 â€” BOT MARKET is a "summon-able" tab.
         self._botmarket_idx = self.tabs.addTab(self.bot_market_tab,
-                                                "ðŸ›’  BOT MARKET")
+                                                "BOT MARKET")
 
         # V4.1.0 â€” MANUAL TRADING is a "summon-able" tab (shown when toggle is ON)
-        self._manual_idx = self.tabs.addTab(self.manual_tab, "âœ‹  MANUAL")
+        self._manual_idx = self.tabs.addTab(self.manual_tab, "MANUAL")
 
         # Corner row reads:
         #   UNIVERSE Â· MAKE BOT Â· FRIENDS Â· ACCOUNT Â· ADMIN Â· TOOLS
@@ -1205,7 +1205,7 @@ class ApexWindow(QMainWindow):
         # v1.2.0 â€” restore cloud-bot UI state on startup. If any cloud
         # bots are still running on Oracle (the server keeps them alive
         # across desktop restarts), light up their tabs without making
-        # the user click â–¶ again.
+        # the user click > again.
         QTimer.singleShot(3000, self._resume_cloud_bots)
         # V3 wave 5 â€” credits + admin visibility refresh, fires shortly
         # after launch and then every 60 s.
@@ -1347,7 +1347,7 @@ class ApexWindow(QMainWindow):
         layout.addLayout(brand_v)
         layout.addStretch()
 
-        self.mkt_label = SweepLabel("â— CHECKING...")
+        self.mkt_label = SweepLabel("● CHECKING...")
         self.mkt_label.setStyleSheet(
             f"font-size:10px;font-weight:600;letter-spacing:2px;"
             f"color:{C['muted']};padding:3px 12px;"
@@ -1361,7 +1361,7 @@ class ApexWindow(QMainWindow):
         )
         layout.addWidget(self.clock_label)
 
-        self.update_btn = QPushButton("â¬† UPDATE AVAILABLE")
+        self.update_btn = QPushButton("UPDATE AVAILABLE")
         self.update_btn.setVisible(False)
         self.update_btn.setObjectName("updateBtn")
         self.update_btn.clicked.connect(self._show_update_dialog)
@@ -1371,7 +1371,7 @@ class ApexWindow(QMainWindow):
         # dig into the system-tray menu to actually exit. The window
         # X button still hides-to-tray (bots keep running) â€” this
         # button does a real cleanup + QApplication.quit().
-        self.quit_btn = QPushButton("â»  QUIT")
+        self.quit_btn = QPushButton("QUIT")
         self.quit_btn.setObjectName("quitBtn")
         self.quit_btn.setToolTip(
             "Fully quit BAPTOU (stops all running bots).\n"
@@ -1445,7 +1445,7 @@ class ApexWindow(QMainWindow):
             return False
 
     def _manual_mode_label(self) -> str:
-        return "âœ‹  MANUAL" if self._is_manual_mode() else "âš¡  AUTO"
+        return "MANUAL" if self._is_manual_mode() else "AUTO"
 
     def _apply_manual_mode_ui(self, on: bool):
         """Show/hide tabs and corner buttons to reflect manual-vs-auto mode.
@@ -1518,7 +1518,7 @@ class ApexWindow(QMainWindow):
     def _current_broker_label(self) -> str:
         mode = self._current_broker_mode()
         label, _status = self.BROKER_MODES.get(mode, ("Alpaca", "active"))
-        return f"â›  {label}  â–¾"
+        return f"{label}  v"
 
     def _set_broker_mode(self, mode: str):
         try:
@@ -1590,7 +1590,7 @@ class ApexWindow(QMainWindow):
         v.addWidget(desc, alignment=Qt.AlignmentFlag.AlignCenter)
 
         # "Switch back" button â€” one click to return to Alpaca
-        back = QPushButton("â›  Switch back to Alpaca")
+        back = QPushButton("Switch back to Alpaca")
         back.setObjectName("addBotBtn")
         back.setFixedHeight(44)
         back.setMinimumWidth(260)
@@ -1661,7 +1661,7 @@ class ApexWindow(QMainWindow):
         add_act.triggered.connect(self._sign_out)
         menu.addAction(add_act)
 
-        signout_act = QAction("â»  Sign out", self)
+        signout_act = QAction("Sign out", self)
         signout_act.triggered.connect(self._sign_out)
         menu.addAction(signout_act)
 
@@ -2052,7 +2052,7 @@ class ApexWindow(QMainWindow):
                 print(f"[market] refresh on open: {e}")
 
     def _close_bot_market(self):
-        """Called when the market tab's âœ• button is clicked."""
+        """Called when the market tab's X button is clicked."""
         if hasattr(self, "_botmarket_idx"):
             self.tabs.tabBar().setTabVisible(self._botmarket_idx, False)
             # Send the user back to MORE BOTS, since that's where they
@@ -2553,7 +2553,7 @@ class ApexWindow(QMainWindow):
             if ck.is_open:
                 self._mkt_open_prev = True
                 self.mkt_label.stop_sweep()
-                self.mkt_label.setText("â— MARKET OPEN")
+                self.mkt_label.setText("● MARKET OPEN")
                 self.mkt_label.setStyleSheet(
                     f"font-size:10px;font-weight:600;letter-spacing:2px;"
                     f"color:{C['green']};padding:3px 12px;"
@@ -2563,7 +2563,7 @@ class ApexWindow(QMainWindow):
             else:
                 self._mkt_open_prev = False
                 nxt = ck.next_open.astimezone().strftime("%b %d %H:%M")
-                self.mkt_label.setText(f"â— CLOSED  {nxt}")
+                self.mkt_label.setText(f"● CLOSED  {nxt}")
                 self.mkt_label.setStyleSheet(
                     f"font-size:10px;font-weight:600;letter-spacing:2px;"
                     f"color:{C['red']};padding:3px 12px;"

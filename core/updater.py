@@ -156,32 +156,49 @@ def get_current_version() -> str:
 
 
 def check_for_update() -> Optional[dict]:
-    """
-    Check GitHub for a newer version.
-    Returns update info dict if update available, None if up to date or error.
+    """Check GitHub RELEASES for a newer version.
+
+    Uses the /releases/latest API so the version number and the installer
+    URL always come from the same published release.  This prevents the
+    update loop that occurred when version.json on main was bumped ahead
+    of a matching release: the old version would be seen as 'update
+    available', downloaded, installed — and still look outdated because
+    no newer installer actually existed yet.
     """
     if not HAS_REQUESTS:
         return None
 
     try:
-        url  = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/version.json"
-        resp = requests.get(url, timeout=5)
+        api = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
+        resp = requests.get(api, timeout=8)
         if resp.status_code != 200:
             return None
 
-        remote = resp.json()
-        remote_ver  = remote.get("version", "0.0.0")
-        current_ver = get_current_version()
+        release = resp.json()
+        # tag_name is "v4.5.1" → strip the leading "v"
+        remote_ver = release.get("tag_name", "").lstrip("v")
+        if not remote_ver:
+            return None
 
-        if _version_gt(remote_ver, current_ver):
-            return {
-                "current":  current_ver,
-                "latest":   remote_ver,
-                "notes":    remote.get("notes", ""),
-                "download": f"https://github.com/{GITHUB_REPO}/archive/refs/heads/main.zip",
-                "installer": _latest_release_installer(),
-            }
-        return None
+        current_ver = get_current_version()
+        if not _version_gt(remote_ver, current_ver):
+            return None
+
+        # Find the .exe installer asset on this release
+        installer_url = None
+        for asset in release.get("assets", []):
+            name = (asset.get("name") or "").lower()
+            if name.endswith(".exe"):
+                installer_url = asset.get("browser_download_url")
+                break
+
+        return {
+            "current":   current_ver,
+            "latest":    remote_ver,
+            "notes":     release.get("body", ""),
+            "download":  f"https://github.com/{GITHUB_REPO}/archive/refs/heads/main.zip",
+            "installer": installer_url,
+        }
 
     except Exception as e:
         print(f"[updater] Check failed: {e}")

@@ -1,4 +1,4 @@
 {
-  "version": "4.5.1",
-  "notes": "v4.5.1 — hotfix: cloud bot key sync now includes all slots\n\n🐛 FIXED\n• Sync keys to APEX server now correctly uploads ALL Alpaca slots (including CRYPTO, custom bots) — previously only IBKR keys were synced, causing \"No Alpaca keys synced\" error when starting cloud crypto bot\n• Build: google.generativeai bundled more efficiently (smaller installer)"
+  "version": "4.5.2",
+  "notes": "v4.5.2 — fix update loop + garbled characters\n\n🐛 FIXED\n• Update check now uses GitHub Releases API — the update banner only appears when a real installer is actually published. Eliminates the loop where the app kept suggesting the same update after installing it.\n• Removed garbled 2-3 character sequences (corrupted Unicode) that appeared before tab names, button labels, and other UI text throughout the app."
 }

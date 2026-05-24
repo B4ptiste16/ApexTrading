@@ -214,7 +214,7 @@ class _GoogleOAuthWorker(QThread):
                     "<html><body style='font-family:sans-serif;"
                     "padding:40px;text-align:center;background:#0c0f16;"
                     "color:#d8dde8;'><h2 style='color:#3fb89a;letter-spacing:4px;'>"
-                    "â—ˆ APEX</h2><p>Sign-in received. You can close this tab "
+                    "o APEX</h2><p>Sign-in received. You can close this tab "
                     "and return to BAPTOU.</p></body></html>"
                 ).encode("utf-8")
                 self_inner.send_response(200)
@@ -727,7 +727,7 @@ class LoginWindow(_GradWidget):
         hl = QHBoxLayout(w)
         hl.setContentsMargins(0, 10, 14, 0)
         hl.addStretch()
-        btn = QPushButton("âœ•")
+        btn = QPushButton("X")
         btn.setFixedSize(28, 28)
         btn.setStyleSheet(f"""
             QPushButton {{
@@ -1074,7 +1074,7 @@ class LoginWindow(_GradWidget):
         hl.setContentsMargins(30, 6, 30, 16)
         hl.setSpacing(6)
 
-        self._srv_dot = QLabel("â—")
+        self._srv_dot = QLabel("●")
         self._srv_dot.setStyleSheet(
             f"color:{C['muted']};font-size:8px;background:transparent;")
         hl.addWidget(self._srv_dot)
