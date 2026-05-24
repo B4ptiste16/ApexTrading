@@ -1,14 +1,17 @@
-# APEX Trading Platform — Project Context
+# BAPTOU Trading Platform — Project Context
 
 > One-stop briefing for any agent picking up this codebase. Skim this top-to-bottom and you'll have everything an established session has, except for the back-and-forth.
+
+**Last refreshed:** after v4.1.0 (BAPTOU rebrand + revenue split + custom-bot cloud-run + logo).
+**Naming note:** Branded as **BAPTOU Trading Platform** end-user-facing, but the internal data dir, env-var prefixes, installer filename, and a lot of code symbols are still `APEX` / `APEX_*`. **Do not rename them** — it would orphan every existing install's settings + keys.
 
 ---
 
 ## 1. What this is
 
-APEX is a **Windows desktop trading app** (PyQt6, packaged with PyInstaller) that runs **AI-driven trading bots** against the **Alpaca paper-trading API**. Three built-in bots — `LONG`, `SHORT`, `DAY` — use **Anthropic Claude (Sonnet / Haiku / Opus)** with Vision to score and rank candidates. A **FastAPI server** running on **Oracle Cloud** provides auth, encrypted broker-credential storage, a public bot marketplace, a phone-accessible web dashboard, and remote bot execution (bots can run on the cloud 24/7 instead of the user's laptop).
+A **Windows desktop trading app** (PyQt6, packaged with PyInstaller) that runs **AI-driven trading bots** against the **Alpaca paper-trading API**. Three built-in bots — `LONG`, `SHORT`, `DAY` — use **Anthropic Claude / Google Gemini / Groq Llama** with Vision to score and rank candidates. A **FastAPI server** running on **Oracle Cloud** provides auth, encrypted broker-credential storage, a public bot marketplace, a phone-accessible web dashboard, remote bot execution (bots can run on the cloud 24/7), a credits + revenue-split economy, friend sharing, T&C acceptance, moderation, and similarity-based copy detection.
 
-The user (Baptiste, GitHub `B4ptiste16`) is the sole developer and primary user. Single-account, personal project for now, but architecturally multi-tenant.
+The user (Baptiste, GitHub `B4ptiste16`) is the sole developer and primary user. Single-account in practice, but multi-tenant by architecture — everything below scales horizontally per user.
 
 ---
 
@@ -16,26 +19,27 @@ The user (Baptiste, GitHub `B4ptiste16`) is the sole developer and primary user.
 
 | | |
 |---|---|
-| GitHub | https://github.com/B4ptiste16/ApexTrading |
+| GitHub | https://github.com/B4ptiste16/ApexTrading  (repo name kept as `ApexTrading` for URL stability) |
 | Default branch | `main` |
 | Local clone | `C:\Users\bapti\Documents\Trade app` (Windows) |
-| `git config user.email` | `B4ptiste16@users.noreply.github.com` |
-| `git config user.name` | `B4ptiste16` |
-| Auth | GitHub CLI (`gh`) is signed in as `B4ptiste16` |
-| `gh.exe` | `C:\Program Files\GitHub CLI\gh.exe` (sometimes not on `PATH` in fresh terminals — call by absolute path) |
+| Git identity | `B4ptiste16@users.noreply.github.com` / `B4ptiste16` |
+| Auth | GitHub CLI (`gh`) signed in as `B4ptiste16` |
+| `gh.exe` | `C:\Program Files\GitHub CLI\gh.exe` (call by absolute path — sometimes not on `PATH`) |
 
 ### Pushing & releasing
 
 ```powershell
 cd "C:\Users\bapti\Documents\Trade app"
-git add <files>
+git add -A
 git commit -m "..."
 git push origin main
 
 # Release with installer attached
 $gh = "C:\Program Files\GitHub CLI\gh.exe"
-& $gh release create "v1.1.X" "installer\APEX_Setup.exe" --title "..." --notes "..."
+& $gh release create "v4.X.Y" "installer\APEX_Setup.exe" --title "..." --notes "..."
 ```
+
+**ALWAYS run `gh release create` — committing alone doesn't publish a build.** I forgot this once and the user spent 4 release cycles re-installing the same stale v3.1.5 thinking each was a new version. (Lesson baked into the build.bat now — always smoke-launch the dist .exe + always `gh release create` after a successful build.)
 
 ---
 
@@ -44,13 +48,15 @@ $gh = "C:\Program Files\GitHub CLI\gh.exe"
 | | |
 |---|---|
 | Project root | `C:\Users\bapti\Documents\Trade app` |
-| User's APEX data dir (frozen) | `%LocalAppData%\APEX Trading Platform` |
-| Sub-files there | `.env`, `apex_auth.json`, `apex_server.json`, `apex_settings.json`, `daybot_state.json`, `longv2_state.json`, `shortv2_state.json`, `*_trade_log.jsonl`, `longv2_charts/`, etc. |
-| Build artifacts | `dist/APEX/` (PyInstaller output), `installer/APEX_Setup.exe` (Inno) |
+| User data dir (frozen) | `%LocalAppData%\APEX Trading Platform` — **kept as APEX for back-compat across the rebrand** |
+| Files there | `.env`, `apex_auth.json`, `apex_accounts.json` (multi-account), `apex_server.json`, `apex_settings.json`, `apex_version_diag.log`, `apex_crash.log`, `daybot_state.json`, `longv2_state.json`, `shortv2_state.json`, `*_trade_log.jsonl`, `bots/*.py(.apex)`, `longv2_charts/`, etc. |
+| Build artifacts | `dist/APEX/` (PyInstaller), `installer/APEX_Setup.exe` (Inno) |
 | Oracle SSH key | `C:\Users\bapti\Documents\oracle server\ssh-key-2026-05-20.key` |
+| Assets / branding | `assets/baptou_logo.png` (login window image), `assets/icon.png` (B-graphic for window-icon, auto-cropped square), `assets/icon.ico` (multi-size, auto-generated by `tools/make_icon.py`) |
 
-`.env` keys (the user manages these via Tools → API Keys in the app):
-`ANTHROPIC_API_KEY`, `ALPACA_API_KEY_LONG`, `ALPACA_SECRET_KEY_LONG`, `ALPACA_API_KEY_SHORT`, `ALPACA_SECRET_KEY_SHORT`, `ALPACA_API_KEY_DAY`, `ALPACA_SECRET_KEY_DAY`.
+### `.env` keys the user manages via Tools → ALPACA · API KEYS
+
+`ANTHROPIC_API_KEY` plus per-bot Alpaca slot keys: `ALPACA_API_KEY_<SIDE>` / `ALPACA_SECRET_KEY_<SIDE>` where `<SIDE>` is `LONG` / `SHORT` / `DAY` **or** any custom bot's slug (e.g. `CRYPTO`). Slot assignment is done via dropdown in Tools; `ENV_KEYS` allowlist in `core/data.py` accepts the `ALPACA_*_KEY_*` glob pattern so custom bots work end-to-end.
 
 ---
 
@@ -62,40 +68,54 @@ $gh = "C:\Program Files\GitHub CLI\gh.exe"
 | Public IP | `145.241.170.165` (static) |
 | SSH user | `opc` |
 | SSH | `ssh -i "C:\Users\bapti\Documents\oracle server\ssh-key-2026-05-20.key" -o StrictHostKeyChecking=no opc@145.241.170.165` |
-| OS | Oracle Linux 9, SELinux **enforcing** (important — every new binary in `/usr/local/bin` or files in `/opt/server` need `sudo chcon -t bin_t` or `sudo restorecon -Rv`) |
-| Firewall | `firewalld` — already open: 22 (SSH), 80, 443, 8000 |
-| Oracle Cloud Security List | Same ports open in the VCN's Default Security List (manual step in the web console) |
+| OS | Oracle Linux 9, SELinux **enforcing** (every new binary in `/usr/local/bin` or file in `/opt/server` needs `sudo chcon -t bin_t` or `sudo restorecon -Rv`) |
+| Server Python | **3.11** (more restrictive than dev's 3.14 — see gotchas) |
+| Firewall | `firewalld` — open: 22 / 80 / 443 / 8000 |
+| Oracle VCN Security List | Same ports open (manual step in OCI web console) |
 
 ### What runs there
 
 | Service | Path | Port | systemd unit |
 |---|---|---|---|
-| APEX auth + bot-runner API | `/opt/server/` (Python, FastAPI) | `127.0.0.1:8000` | `apex_server.service` |
-| Caddy reverse proxy | `/usr/local/bin/caddy` (custom build with `caddy-dns/duckdns` plugin) | `80`, `443` | `caddy.service` |
-| Bot subprocesses (per user, per bot) | `/opt/apex_bots/` ← bot `.py` files; spawned as `python -u -c "import M; M.main()"` | none | none (managed by `bot_runner.py` via `subprocess.Popen` + `start_new_session=True`) |
-| Per-user state dirs | `/opt/apex_users/user_<id>/` | — | — |
-| Encrypted creds + bot library + scheduled-bot list | `~/apex_data/apex_server.db` (SQLite, owned by `apex`) | — | — |
+| BAPTOU auth + bot-runner API | `/opt/server/` (FastAPI, **--workers 2** uvicorn) | `127.0.0.1:8000` | `apex_server.service` |
+| Caddy reverse proxy | `/usr/local/bin/caddy` | `80`, `443` | `caddy.service` |
+| Bot subprocesses | `/opt/apex_bots/<module>.py` (built-ins) OR `/opt/apex_users/user_<id>/private_bots/<slug>.py` (custom) | none | none (managed by `bot_runner.py`, `subprocess.Popen(start_new_session=True)`) |
+| Per-user state dirs | `/opt/apex_users/user_<id>/` containing `logs/`, `pids/`, `private_bots/`, `*_state.json` | — | — |
+| SQLite DB | `/opt/apex_data/apex_server.db` (owned by `apex`) | — | — |
+| Public marketplace files | `/opt/apex_data/marketplace/<slug>.py` | — | — |
 
 ### Service users
 
 | | |
 |---|---|
-| `opc` | Login/SSH user, has `sudo` without password |
-| `apex` | System user that runs the auth server + spawns bots. Home dir `/home/apex`; data in `/home/apex/apex_data` (owned by `apex:apex`). |
+| `opc` | Login/SSH user, passwordless `sudo`. |
+| `apex` | System user that runs the auth server + spawns bots. Home `/home/apex`. Data lives at `/opt/apex_data/` (owned by `apex:apex`). |
 
-### Critical install gotchas (already resolved, kept for reference)
+### Server env vars (set in `/opt/apex_data/.env`, loaded by systemd via `EnvironmentFile=-`)
 
-* SELinux refuses to let systemd execute files from `/home/<user>/`. **All bot/server binaries live in `/opt/`**.
-* When moving files from `/home/...` to `/opt/...`, they keep the `user_home_t` label; always run `sudo restorecon -Rv <path>` afterwards.
-* The package layout expects `/opt/server/` to be importable as `server.<module>` — `WorkingDirectory=/opt` + `PYTHONPATH=/opt` in the systemd unit.
-* `taskkill /F /IM APEX.exe /T` from the Windows updater would target its own grandparent process tree → "cannot terminate itself". Use `/F /IM APEX.exe` WITHOUT `/T`.
-* On Python 3.11 (server's venv): **no backslash escapes inside f-string expressions**. Build complex HTML strings outside the f-string and interpolate.
+| Var | Purpose | Required? |
+|---|---|---|
+| `APEX_JWT_SECRET` | JWT signing + Fernet-key derivation for encrypted broker creds | ✅ (auto-persisted to `/opt/apex_data/.jwt_secret` if absent) |
+| `APEX_DB_PATH` | SQLite path override | optional |
+| `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` | Sign-in-with-Google flow (created at console.cloud.google.com → OAuth client of type "Desktop app") | optional — desktop button surfaces "not configured" if missing |
+| `APEX_ANTHROPIC_KEY` (or `ANTHROPIC_API_KEY`) | Pooled key for "Via APEX" credit-charging MAKE BOT generations. Falls back to caller's own synced key when not set. | optional |
+| `GEMINI_API_KEY`, `GROQ_API_KEY` | Reserved for future server-side Gemini/Groq routing (v3.2.0 plan). Not consumed yet. | optional |
+| `RESEND_API_KEY`, `RESEND_FROM`, `APEX_PUBLIC_URL` | Email verification on signup. Without these, signups auto-verify so nobody gets stuck. | optional |
 
-### Server deploy command (run from Windows PowerShell)
+### Critical install gotchas (kept for reference)
+
+* **SELinux** refuses to let systemd execute files from `/home/<user>/`. All bot/server binaries live in `/opt/`.
+* When moving files from `/home/...` to `/opt/...`, they keep `user_home_t` label — always `sudo restorecon -Rv <path>`.
+* `/opt/server/` must be importable as `server.<module>` — systemd unit has `WorkingDirectory=/opt` + `PYTHONPATH=/opt`.
+* `taskkill /F /IM APEX.exe /T` from the Windows updater targets its own grandparent → "cannot terminate itself". Use `/F /IM APEX.exe` WITHOUT `/T`.
+* **Python 3.11 forbids backslashes in f-string expressions.** Don't put `\` inside `{}`. Use `str.format` or pre-build the string outside the f-string. (Cost us one failed v4.0.1 deploy.)
+* **uvicorn `--workers 2` means each worker has its own in-memory state**. The bot-runner uses on-disk PID files (`/opt/apex_users/user_<id>/pids/<side>.pid`) to coordinate so consecutive `/bots/X/start` calls can't spawn duplicates from different workers. **Don't reintroduce a memory-only registry.**
+
+### Server deploy command (PowerShell from local)
 
 ```powershell
 ssh -i "C:\Users\bapti\Documents\oracle server\ssh-key-2026-05-20.key" -o StrictHostKeyChecking=no opc@145.241.170.165 `
-  "cd ~/apex_repo && git pull && sudo cp ~/apex_repo/server/*.py /opt/server/ && sudo chown apex:apex /opt/server/*.py && sudo restorecon -Rv /opt/server >/dev/null && sudo systemctl restart apex_server && sleep 2 && sudo systemctl is-active apex_server && curl -s http://localhost:8000/health"
+  "cd ~/apex_repo && git pull && sudo cp ~/apex_repo/server/*.py /opt/server/ && sudo chown apex:apex /opt/server/*.py && sudo restorecon -Rv /opt/server >/dev/null && sudo systemctl restart apex_server && sleep 5 && sudo systemctl is-active apex_server && curl -s http://localhost:8000/health"
 ```
 
 ---
@@ -104,38 +124,58 @@ ssh -i "C:\Users\bapti\Documents\oracle server\ssh-key-2026-05-20.key" -o Strict
 
 | URL | Notes |
 |---|---|
-| `http://145.241.170.165:8000/` | Direct IP, raw port — works |
+| `http://145.241.170.165:8000/` | Direct IP — always works |
 | `http://apexbaptou.duckdns.org/` | DuckDNS → reverse-proxied by Caddy to `:8000` |
-| `https://apexbaptou.duckdns.org/` | **Currently broken** — Let's Encrypt validators get SERVFAIL on DuckDNS nameservers. Caddy is rebuilt with `caddy-dns/duckdns` plugin for DNS-01 challenge; still hits DuckDNS SERVFAIL. Caddyfile is currently set to HTTP-only as a workaround. Fix path: buy a real domain at Cloudflare (~$10/yr), point its A record at `145.241.170.165`, update Caddyfile. |
-| Landing page | `/` |
+| `https://apexbaptou.duckdns.org/` | **Currently broken** (Let's Encrypt SERVFAIL on DuckDNS NS). Workaround: HTTP-only. **Real fix**: register `baptou.app` etc. at Cloudflare → A-record to `145.241.170.165` → update `/etc/caddy/Caddyfile`. |
+| Landing | `/` |
 | Phone dashboard | `/web/dashboard?tab=overview\|bots\|universe\|tools` |
-| Login | `/web/login` |
-| Signup | `/web/signup` |
-| API: signup / login / me | `POST /auth/signup`, `POST /auth/login`, `GET /auth/me` |
-| API: credentials | `PUT/GET/DELETE /credentials` (bearer auth) |
-| API: schedule | `GET/PUT /schedule` (bearer auth) |
-| API: bot lifecycle | `POST /bots/{side}/start`, `POST /bots/{side}/stop`, `GET /bots/{side}/status`, `GET /bots/{side}/logs`, `GET /bots/running` |
-| API: marketplace | `GET /bots`, `GET /bots/{slug}`, `GET /bots/{slug}/download`, `POST /bots`, `DELETE /bots/{slug}` |
-| Web JSON endpoints (cookie-auth) | `GET /web/api/status`, `POST /web/api/bots/{side}/start|stop|liquidate` |
+| Login / Signup | `/web/login`, `/web/signup` |
+| T&C page | `/web/tos` |
 
-DuckDNS:
+### REST endpoint groups (all bearer-authed unless noted)
+
+| Group | Endpoints |
+|---|---|
+| **Auth** | `POST /auth/signup`, `POST /auth/login`, `GET /auth/me`, `GET /auth/google/config`, `POST /auth/google/exchange`, `GET /auth/verify?token=`, `POST /auth/resend-verification`, `PUT /auth/profile`, `PUT /auth/password`, `PUT /auth/email`, `GET /auth/tos`, `POST /auth/tos/accept` |
+| **Credentials** | `PUT/GET/DELETE /credentials` |
+| **Schedule** | `GET/PUT /schedule` |
+| **Bot lifecycle** | `POST /bots/{side}/start`, `POST /bots/{side}/stop`, `GET /bots/{side}/status`, `GET /bots/{side}/logs`, `GET /bots/running` |
+| **Marketplace** | `GET /bots`, `GET /bots/v2` (filtered), `GET /bots/{slug}`, `GET /bots/{slug}/download`, `POST /bots` (with similarity gate), `PUT /bots/{slug}`, `DELETE /bots/{slug}`, `GET /bots/mine`, `GET /bots/philosophies`, `POST /bots/check-similarity`, `GET /bots/mine/revocations` |
+| **Private bots** (V4.0.2) | `POST /bots/private/upload`, `GET /bots/private`, `DELETE /bots/private/{slug}` — user's own custom bots uploaded for cloud-run without publishing |
+| **Make-bot (Via APEX)** | `POST /api/makebot/generate` (10 credit cost), `GET /api/makebot/price` |
+| **Friends** (V3.0.0) | `GET /friends`, `POST /friends/request`, `POST /friends/{id}/respond`, `DELETE /friends/{id}`, `GET /friends/search`, `GET/PUT /share-settings`, `GET /users/{username}/profile`, `GET /users/{username}/bots` |
+| **Credits + Admin** (V3.1.0+) | `GET /credits/me`, `GET /admin/users`, `POST /admin/credits/grant`, `PUT /admin/users/{id}/role`, `PUT /admin/bots/{slug}/classify`, `POST /admin/bots/{slug}/flag`, `POST /admin/bots/{slug}/unflag`, `POST /admin/bots/{slug}/remove` |
+| **Revenue split** (V4.0.0) | `GET /admin/revenue-split`, `PUT /admin/revenue-split` (BOSS_ADMIN only) |
+| **Web JSON** (cookie-auth) | `GET /web/api/status`, `POST /web/api/bots/{side}/start\|stop\|liquidate`, `GET /web/api/portfolio/history`, `GET /web/api/bots/{side}/positions` |
+
+### DuckDNS
+
 * Subdomain: `apexbaptou`
-* Token: `9e2b505a-79ca-494a-a473-8443bebb6280` (also embedded in `/etc/caddy/Caddyfile` for DNS-01 plugin)
-* Manual DNS update: `https://www.duckdns.org/update?domains=apexbaptou&token=<TOKEN>&ip=145.241.170.165`
+* Token: `9e2b505a-79ca-494a-a473-8443bebb6280` (also in `/etc/caddy/Caddyfile`)
+* Manual update: `https://www.duckdns.org/update?domains=apexbaptou&token=<TOKEN>&ip=145.241.170.165`
 
 ---
 
 ## 6. Versions
 
-Tag history on GitHub: `v1.0.x` (V7 origin), then steady minor bumps. Auto-update logic compares local `version.json` to `https://raw.githubusercontent.com/B4ptiste16/ApexTrading/main/version.json`.
+Tag history: `v1.0.x` (V7 origin) → steady minor bumps through `v1.2.3` (bracket bug saga) → `v3.0.0` (friends) → `v3.0.2` (Google + Account) → `v3.1.0–v3.1.9` (credits + admin + multi-account + bot market + version-fix saga) → `v3.2.0` (broker mode) → `v3.3.0` (patent + moderator) → `v4.0.0` (BAPTOU rebrand + revenue split) → `v4.0.3` (Tools slot crash) → `v4.1.0` (logo). **34 published releases in one 13-hour session.**
 
-The current latest published is `v1.1.13` (Phase D — cloud-run toggle + chart fix). After that, this `Vnext.txt` is the next batch.
+### Version detection — the long story
 
-If the user is reporting weird auto-update behavior, **the most likely cause is they're on a version EARLIER than v1.1.5 where the relauncher batch was broken**. They need to manually install at least v1.1.5 from a GitHub Release once; from v1.1.5 onward in-app updates work via a visible Inno wizard (no `/SILENT`, no `taskkill /T`).
+This caused recurring "v1.0.0 in header even though app has v3.x features" reports through v3.1.2, v3.1.5, v3.1.6. **Final fix (v3.1.7+)**:
+
+1. `tools/embed_version.py` runs as build.bat step **1c** BEFORE PyInstaller. It reads `version.json` and writes THREE files:
+   - `apex_version.py` (top-level absolute import — no package context needed)
+   - `core/_version.py` (relative import — fallback)
+   - `installer.iss` (Inno's `MyAppVersion` constant)
+2. `core/updater.py` tries `import apex_version` first, then `from ._version import VERSION`, then file lookup. The top-level absolute import works around a PyInstaller relative-import edge case that silently broke v3.1.2 → v3.1.6.
+3. `get_current_version()` writes a one-line diagnostic to `%LocalAppData%\APEX Trading Platform\apex_version_diag.log` on first call so any future regression is visible from the log.
+
+Auto-update logic compares local version to `https://raw.githubusercontent.com/B4ptiste16/ApexTrading/main/version.json` and offers the latest GitHub Release asset (`APEX_Setup.exe` filename — UNCHANGED by the rebrand for URL stability).
 
 ---
 
-## 7. File map — what each file does
+## 7. File map
 
 ### Bots (Python, runnable both inside the frozen exe and on Oracle)
 
@@ -143,66 +183,83 @@ If the user is reporting weird auto-update behavior, **the most likely cause is 
 |---|---|
 | `longbot_v2.py` | LONG (momentum + mean-reversion portfolio, Claude Vision on charts) |
 | `shortbot_v2.py` | SHORT (bear momentum) |
-| `daybot.py` | DAY (single high-conviction intraday bracket order — entry + GTC TP + GTC SL) |
-| `universe_manager.py` | Refreshes the candidate ticker lists |
+| `daybot.py` | DAY (single high-conviction intraday bracket order — entry + GTC TP + GTC SL + `force_close_stale_brackets` safety net + `rearm_orphaned_positions`) |
+| `universe_manager.py` | Refreshes candidate ticker lists |
 
 ### Core (shared by desktop GUI + bots)
 
 | File | Role |
 |---|---|
-| `core/data.py` | Single source of truth for: Alpaca client construction, account/positions/orders/history fetchers, JSON-Lines log reading, snapshot derivation, settings load/save, cost estimation, bot-metrics aggregation. **`load_snapshots()` derives from the trade log because no bot writes a separate snapshots file.** |
-| `core/paths.py` | `DATA_DIR` resolution. `APEX_DATA_DIR` env var wins, then `LOCALAPPDATA\APEX Trading Platform` (frozen), else source root (dev). |
-| `core/charts.py` | Plotly chart factories (equity curves, combined history, P/L bars, allocation pie) |
-| `core/schedule.py` | US-market clock + auto-update window helpers (overnight gating) |
-| `core/updater.py` | In-app self-update: notify-only banner; visible Inno installer; relauncher batch via `taskkill /F /IM APEX.exe` (no `/T`) + `CREATE_NO_WINDOW` `cmd /c`. Writes step-by-step log to `%TEMP%\apex_update.log`. |
-| `core/worker.py` | Generic `QThread` wrappers (`DataWorker`, `RefreshWorker`, `OverviewWorker`) |
+| `core/data.py` | Alpaca client construction, account/positions/orders/history fetchers, JSON-Lines log reading, snapshot derivation, settings load/save, cost estimation, bot-metrics aggregation. **`get_history` returns `profit_loss` column from Alpaca** for Trade-Republic-style deposit-adjusted equity charts. `compute_trade_events()` builds per-order buy/sell event lists for the chart's vertical markers. `position_meta()` does yfinance ATR fetches with 1h cache for per-stock LONG/SHORT/DAY targets on the gauge chart. `write_env_keys()` + `delete_env_keys()` for the Tools slot UI. `ENV_KEYS` allowlist accepts the `ALPACA_*_KEY_*` pattern (custom bots supported). |
+| `core/paths.py` | `DATA_DIR` resolution — `APEX_DATA_DIR` env var wins, then `%LocalAppData%\APEX Trading Platform` (frozen), else source root (dev). |
+| `core/charts.py` | Plotly chart factories. `equity_curve` + `combined_history_chart` plot `profit_loss` not `equity` (so deposits don't fake jumps). `_local_market_hours()` translates US session into the user's tz for `rangebreaks`. `bracket_gauge` iterates LIVE positions (not state's open_brackets) so liquidated entries don't render as ghosts. `position_gauge` accepts a per-ticker `meta` dict for real-ATR targets. |
+| `core/schedule.py` | US-market clock + auto-update window helpers. |
+| `core/secure.py` | Fernet wrapping for the bot-library lock (`.py` ↔ `.apex` toggle). Honest disclaimer baked in: this is OBFUSCATION not vault-grade — the key is in the exe. Real protection = cloud-only execution. |
+| `core/updater.py` | In-app self-update: notify-only banner, visible Inno wizard, relauncher batch via `taskkill /F /IM APEX.exe` (no `/T`) + `CREATE_NO_WINDOW` `cmd /c`. `get_current_version` uses embedded VERSION constant + diagnostic log. |
+| `core/worker.py` | `QThread` wrappers (`DataWorker`, `RefreshWorker`, `OverviewWorker`). `RefreshWorker` now also computes `position_meta` (per-stock ATR for all sides including DAY) + `trade_events` (buy/sell markers). |
+| `core/_version.py` | **Generated** by `tools/embed_version.py`. Do not edit. |
 
 ### Desktop UI (PyQt6)
 
 | File | Role |
 |---|---|
-| `main.py` | `ApexWindow` (the main window), tab management, drag-reorderable bot tabs, drag-and-drop bot import, tray, header (clock + market badge + UPDATE banner + QUIT), auto-update wiring, `MoreBotsTab` (manage / browse marketplace / publish) |
-| `ui/overview.py` | `OverviewTab` (sortable per-bot blocks, Period combo, AI cost cards) **and** `ToolsTab` (API keys, AUTOMATION row of per-bot auto-schedule checks + Run-on-Oracle checks, ACCOUNT LINKING with Sync-to-server, broker conversion exports, UPDATES section with Check-Now) |
-| `ui/bot_tab.py` | `BotTab` per built-in bot, with all the sections: account cards, closed-trades feed, signal panel, gauge, equity chart, trades table, P/L bars, RISK METRICS, API COST, POSITION MANAGEMENT |
-| `ui/make_bot_tab.py` | `MakeBotTab` — pick Anthropic/OpenAI/OpenRouter, paste API key, write English description, generate `.py`, save locally or publish to marketplace |
-| `ui/login.py` | `LoginWindow` (gradient background, login/signup card, Continue-as-Guest, Continue-with-Google stub, server-status dot, configurable server URL) |
-| `ui/universe.py` | Universe tab (editable ticker lists) |
-| `ui/widgets.py` | Shared widgets: `BotProcessWidget` (▶/■/↺ + log textarea, with cloud-execution path that calls `/bots/{side}/start` etc.), `ChartView`, `MetricCard`, `SectionHeader`, `ScrollContent`, `DataTable`, `ClosedTradesFeed`, `WheelGuard` |
-| `ui/styles.py` | `COLORS` dict + `DARK_STYLESHEET` |
+| `main.py` | `ApexWindow` — main window, tab management, drag-reorderable bot tabs, drag-and-drop bot import, tray, header (broker-mode chip, credits chip, clickable user chip with account menu, market badge, UPDATE banner, QUIT), auto-update wiring, `_install_exception_handler` (friendly QMessageBox + `apex_crash.log` on any unhandled exception), `MoreBotsTab` (local bot manager + 🛒 Open Bot Market launcher + 🔒 Library Lock + ⬆ Publish), `_apply_broker_mode` (QStackedWidget swap — Alpaca page vs COMING-VERY-SOON placeholder for IBKR/TradingView), `_sync_revocations` (moderation cleanup on launch), `_check_tos_acceptance` (T&C modal), `_resume_cloud_bots` (restore UI state for bots still running on Oracle). |
+| `ui/overview.py` | `OverviewTab` — wrapping `QGridLayout` (rows of 3) of per-bot blocks, Period combo, AI cost cards. `ToolsTab` — broker-mode-aware (Alpaca shows numbered slots with assignment dropdowns; IBKR/TradingView show COMING-SOON). Slot dropdowns include custom bots from `bot_registry.custom`. AUTOMATION + Run-on-Oracle checks + ACCOUNT LINKING + STAY UPDATED card at the bottom + UPDATES section. |
+| `ui/bot_tab.py` | `BotTab` per bot (built-in OR custom). `BOT_COLOR.get(side)` with custom-color fallback via `_resolve_custom_color`. ⓘ hover tooltips on every metric card explaining formula + time-frame. |
+| `ui/widgets.py` | `BotProcessWidget` (▶/■/↺ now 54px tall, always visible) — handles local QProcess + cloud `/bots/{side}/start` flow. `_has_alpaca_key_for_side` pre-flight → "MUST ASSIGN API KEY IN TOOLS" dialog. `_cloud_upload_then_start` for custom bots: uploads local `.py` (decrypting from `.apex` if needed) to `/bots/private/upload`, then triggers cloud start. `decrypted_temp_file()` cleanup on bot finish. Plus `ChartView`, `MetricCard` (with `tooltip=` kwarg + ⓘ marker), `SectionHeader`, `ScrollContent`, `DataTable`, `ClosedTradesFeed`, `WheelGuard`, `SweepLabel` (the MARKET CLOSED shimmer). |
+| `ui/login.py` | `LoginWindow` — gradient background, login/signup card, Continue-as-Guest, **Continue-with-Google** (real loopback OAuth2 flow via `_GoogleOAuthWorker`), server-status dot, configurable server URL, saved-account picker ("CONTINUE AS" section), `_branding()` displays `assets/baptou_logo.png` if present, else typographic fallback. Multi-account storage helpers: `list_saved_accounts`, `activate_saved_account`, `forget_saved_account` (backed by `apex_accounts.json` — top 20 most-recent). |
+| `ui/make_bot_tab.py` | `MakeBotTab` — provider dropdown (Via APEX / Anthropic / OpenAI / OpenRouter / 🎁 Gemini / 🎁 Groq), per-provider key memory in `apex_settings.json['makebot_keys']`, model selector with `{model}` URL templating (Gemini), credit-cost badge for Via APEX (live balance refresh after each gen), "Improve existing bot" mode (prepends existing source to the prompt), FREE-TIER badge for free providers. |
+| `ui/friends_tab.py` | `FriendsTab` — search by username, add/accept/decline, list view, **in-place profile view** (QStackedWidget swap) with header card + 4 MetricCards (broker / daily / monthly / yearly P&L) + bot list with ⬇ Install. Friend rows in the list view show a one-line shared-stats summary fetched lazily per friend. |
+| `ui/account_tab.py` | `AccountTab` — display name + phone editor, password change, email change + re-verification, resend verification, APPEARANCE section with 5 themes + colour-swatch preview. |
+| `ui/admin_tab.py` | `AdminTab` — gated by `/auth/me` role. Users table (id / email / role / credit balance), grant-credits form, BOSS-ADMIN-only role-assignment + REVENUE SPLIT card (3 % spin-boxes summing to 100, running-balance readout), FEATURE/RECOMMEND classifier, MODERATION card (Flag / Unflag / Remove + refund). |
+| `ui/bot_market_tab.py` | `BotMarketTab` (V3.1.3) — standalone "summon-able" tab opened only via MORE BOTS → 🛒 Open Bot Market button. Hero header + ✕ Close, search + filter row (philosophy / sort / max ◊ / min win %), sub-nav pills (✨ Featured / 🎯 For You / 🔍 Browse / 📊 My published), 2-column card grid with rich per-bot cards. |
+| `ui/universe.py` | Editable universe ticker lists. |
+| `ui/styles.py` | `COLORS` dict + `THEMES` dict (5 palettes — Default BAPTOU teal / Midnight Blue / Forest / Cyberpunk / Solarized Dark) + `apply_theme()` + `DARK_STYLESHEET`. Theme is read from `apex_settings.json` at import time so the bake-once stylesheet picks up the user's choice. |
 
 ### Server (FastAPI, runs on Oracle)
 
 | File | Role |
 |---|---|
-| `server/app.py` | FastAPI app, routes, lifespan, CORS |
-| `server/auth.py` | bcrypt + JWT (HS256, 30-day expiry). Secret from `APEX_JWT_SECRET` env var or auto-generated and persisted in `~/apex_data/.jwt_secret` |
-| `server/schemas.py` | Pydantic request/response models |
-| `server/database.py` | SQLite users + helpers (stdlib `sqlite3`, no ORM) |
-| `server/credentials.py` | Fernet-encrypted broker creds per user (key derived from `APEX_JWT_SECRET` via SHA-256). Also stores the per-user `_schedule` list |
-| `server/bots.py` | Public bot marketplace SQLite table + filesystem store at `~/apex_data/marketplace/<slug>.py` |
-| `server/web.py` | HTML pages: `landing_page`, `login_page`, `signup_page`, `dashboard_page(tab=...)`; user session via `apex_token` cookie |
-| `server/bot_runner.py` | Spawns/tracks per-user bot processes. Uses `/opt/apex_venv/bin/python -u -c "import M; M.main()"`; per-user `APEX_DATA_DIR=/opt/apex_users/user_<id>/` |
-| `server/scheduler.py` | Once-a-minute async loop in the FastAPI event loop. Polls US market clock (Alpaca's `get_clock()` via any user with linked keys; falls back to ET wall-clock). For every user, reconciles scheduled-bot list against running bots |
-| `server/run.py` | Dev runner: `python server/run.py` |
-| `server/requirements.txt` | fastapi, uvicorn[standard], bcrypt, PyJWT, pydantic, python-multipart, cryptography |
+| `server/app.py` | FastAPI app, all routes, lifespan (DB init + scheduler), CORS. Imports every other server module. |
+| `server/auth.py` | bcrypt + JWT (HS256, 30-day expiry). Secret from `APEX_JWT_SECRET` env var or auto-persisted to `/opt/apex_data/.jwt_secret`. |
+| `server/schemas.py` | Pydantic request/response models. |
+| `server/database.py` | SQLite + helpers. Schema migrations via idempotent `ALTER TABLE ADD COLUMN`. Adds `google_sub`, `is_verified`, `verification_token`, `verification_sent_at`, `avatar_url`, `phone`, `role`, `publish_ban_until`, `accepted_tos_at` to the users table. `bootstrap_boss_admin()` runs at startup — first active user is auto-promoted to BOSS_ADMIN. |
+| `server/credentials.py` | Fernet-encrypted broker creds per user (key = `base64.urlsafe_b64encode(sha256(APEX_JWT_SECRET))`). Also stores per-user `_schedule` list. |
+| `server/bots.py` | Public marketplace SQLite table + filesystem store at `/opt/apex_data/marketplace/<slug>.py`. Schema additions: `price_credits`, `philosophy`, `win_rate_pct`, `rating`, `featured`, `recommended`, `active_users`, `runtime_hours`, `visibility`, `status` (active/flagged/removed), `flagged_reason`, `flagged_by`, `flagged_at`. `list_bots` filters by `status='active'`. |
+| `server/web.py` | HTML pages — `landing_page`, `login_page`, `signup_page`, `dashboard_page`, `tos_page`. Cookie-banner `_FOOTER` injected into every page. Clickable `<a href="/">` logo. |
+| `server/bot_runner.py` | Spawns per-user bot processes. Cross-worker PID-file dedup at `/opt/apex_users/user_<id>/pids/<side>.pid`. Custom bots resolved via `_custom_bot_path(user_id, side)` → `/opt/apex_users/user_<id>/private_bots/<slug>.py` (run as `python -u <path>` not `python -c "import"`). |
+| `server/scheduler.py` | Once-a-minute async loop. Polls US market clock via Alpaca's `get_clock()` (any user with linked keys; falls back to ET wall-clock). Reconciles scheduled-bot lists. |
+| `server/friends.py` | `friendships` + `share_settings` tables. Canonical-pair ordering eliminates duplicate-friendship bugs. Search by username/display_name (only `discoverable=1` users return). |
+| `server/credits.py` | `user_credits` (cached balance) + `credit_transactions` (audit log). `grant(user_id, delta, reason, granted_by)` is the only mutation path. |
+| `server/revenue.py` | Revenue-split logic — `system_config` row storing the seller/admin/running % split + running-account balance. `distribute_purchase()` fans purchase credits across the buckets. |
+| `server/moderation.py` | `bot_purchases` table (tracks who downloaded what for refund/revocation), `flag_bot` / `unflag_bot` / `remove_bot` (with 500-credit fine + 7-day publish ban + buyer refunds). `list_revocations_for_user(user_id)` returns slugs that should be deleted locally and marks them as `revoked` so each is returned only once. |
+| `server/similarity.py` | Python tokenizer → identifier/string/number normalisation → 5-gram set → Jaccard distance vs marketplace. Used by `POST /bots/check-similarity` + `POST /bots` (block ≥0.85, warn ≥0.60). |
+| `server/oauth.py` | Google OAuth2 — `exchange_code(code, redirect_uri)` swaps an authorization code for the user's email/sub/name via Google's token endpoint. Confidential client; secret stays on the server. |
+| `server/email_send.py` | Resend HTTPS wrapper (no SDK). `send_verification(to, name, token)` builds the HTML email. Soft-fails gracefully if `RESEND_API_KEY` missing — caller auto-verifies the user. |
+| `server/run.py` | Dev runner: `python server/run.py`. |
+| `server/requirements.txt` | `fastapi, uvicorn[standard], bcrypt, PyJWT, pydantic, python-multipart, cryptography, requests, anthropic` |
 
-### Build / release
+### Build / release / tools
 
 | File | Role |
 |---|---|
-| `build.bat` | One-shot PyInstaller `--onedir` build + Inno Setup compile → `installer\APEX_Setup.exe`. Bundles `version.json`, `BOT_SKELETON.md`, `assets/` |
-| `release.bat` | Bump patch version → call `build.bat` → git push → `gh release create`. **Not safe for minor/major bumps** — when bumping minor, edit `version.json` manually and run `build.bat` + `gh release create` yourself |
-| `installer.iss` | Inno Setup script. Per-user install to `%LocalAppData%\APEX Trading Platform\`, `PrivilegesRequired=lowest`, `[Run]` launches `APEX.exe` post-install with `Flags: nowait postinstall skipifsilent` |
-| `requirements.txt` | App dependencies (PyQt6, pandas, numpy, alpaca-py, anthropic, yfinance, matplotlib, plotly, python-dotenv, requests) |
-| `BOT_SKELETON.md` | Bundled at install time — appears in `_MEIPASS/BOT_SKELETON.md`; surfaced by Tools → "Open skeleton guide" and used as the system prompt by `ui/make_bot_tab.py` so AI-generated bots follow the APEX contract |
+| `build.bat` | PyInstaller `--onedir` + Inno Setup compile → `installer\APEX_Setup.exe`. Steps: 1) install deps, 1b) purge caches, **1c) embed version**, **1d) regenerate icon.ico from PNG**, 2) PyInstaller, 3) Inno. Bundles `version.json`, `BOT_SKELETON.md`, `assets/`. Hidden imports: `apex_version`, the 3 built-in bot modules, `dotenv`, `PyQt6.QtWebEngine*`. |
+| `installer.iss` | Inno Setup script. Per-user install to `%LocalAppData%\APEX Trading Platform\`. `PrivilegesRequired=lowest`. `MyAppVersion` auto-patched by `tools/embed_version.py`. |
+| `requirements.txt` | Desktop deps — PyQt6, pandas, numpy, alpaca-py, anthropic, yfinance, matplotlib, plotly, python-dotenv, requests, cryptography, Pillow. |
+| `BOT_SKELETON.md` | Bundled at install time (`_MEIPASS/BOT_SKELETON.md`). Used as the system prompt by `ui/make_bot_tab.py`. |
+| `tools/embed_version.py` | Reads `version.json` → writes `apex_version.py`, `core/_version.py`, and patches `installer.iss MyAppVersion`. Run by `build.bat` step 1c. |
+| `tools/make_icon.py` | PNG → multi-size .ico (16/32/48/64/128/256). Prefers `assets/icon.png`, falls back to `assets/baptou_logo.png`. Auto-square-crops. Requires Pillow. Soft-fails if Pillow missing OR no source PNG. Run by `build.bat` step 1d. |
+| `apex_version.py` | **Generated** by `tools/embed_version.py`. Top-level module so updater can do absolute import. |
 
 ### Docs / planning
 
 | File | Role |
 |---|---|
-| `V7.1+.txt` | User's V7.1+ wishlist (mostly shipped) |
-| `Vnext.txt` | Current pending wishlist (this batch) |
-| `PROJECT_CONTEXT.md` | **This file** |
+| `V7.1+.txt` | Old wishlist (shipped). |
+| `Vnext.txt` | V1.2.x wishlist (shipped). |
+| `V3.0.0.txt` | V3.0.0 wishlist (fully shipped). |
+| `V4.0.0.txt` | Current wishlist. Some items shipped (revenue split, BAPTOU rebrand, whole-window broker mode, friends summary, overview wrapping, bigger play buttons, publish button in MORE BOTS, no traditional green, new logo). Items still pending — see **Section 9** below. |
+| `PROJECT_CONTEXT.md` | **This file.** |
 
 ---
 
@@ -211,72 +268,121 @@ If the user is reporting weird auto-update behavior, **the most likely cause is 
 ```powershell
 cd "C:\Users\bapti\Documents\Trade app"
 
-# Update version manually
-notepad version.json     # set "version": "1.1.X" and notes
+# Edit version manually
+notepad version.json     # set "version": "4.X.Y" and notes
 
 # Syntax-check changed files
-python -m py_compile core/data.py ui/overview.py ui/widgets.py main.py    # add others as needed
+python -m py_compile core/data.py ui/overview.py main.py    # add others as needed
 
-# Full build (~5 min) — PyInstaller + Inno Setup
+# Full build (~5-8 min) — runs embed_version + make_icon + PyInstaller + Inno
 $env:APEX_NOPAUSE = "1"
 .\build.bat 2>&1 | Tee-Object -FilePath build_log.txt
-# OR run in background:
-.\build.bat 2>&1 | Tee-Object -FilePath build_log.txt   # via Bash tool with run_in_background:true
 
 # Verify
 Get-Item installer\APEX_Setup.exe | Select-Object Length, LastWriteTime
 
-# Publish
+# SMOKE LAUNCH before publishing — the new rule baked in after a NameError shipped
+$p = Start-Process "dist\APEX\APEX.exe" -PassThru -WindowStyle Hidden
+Start-Sleep 12
+if ($p.HasExited) { Write-Output "CRASH"; Get-Content "$env:LocalAppData\APEX Trading Platform\apex_crash.log" -Tail 30 } else { Stop-Process $p.Id -Force; "OK" }
+
+# Publish — DO NOT FORGET THIS STEP
 git add -A; git commit -m "..."; git push origin main
 $gh = "C:\Program Files\GitHub CLI\gh.exe"
-& $gh release create "v1.1.X" "installer\APEX_Setup.exe" --title "..." --notes "..."
+& $gh release create "v4.X.Y" "installer\APEX_Setup.exe" --title "..." --notes "..."
 ```
 
 Toolchain on the Windows laptop:
-* Python 3.14.5 (note: bleeding-edge — most things work; if something doesn't, Python 3.12 LTS is the safe fallback)
+
+* Python 3.14.5 (bleeding-edge; Python 3.11 LTS is the safe fallback if anything breaks)
 * `python -m pip` works; standalone `pip` not on PATH
 * Inno Setup 6 at `C:\Program Files (x86)\Inno Setup 6\ISCC.exe`
 * gh CLI at `C:\Program Files\GitHub CLI\gh.exe`
 
 ---
 
-## 9. Where things stand (Vnext.txt items)
+## 9. What's planned next
 
-| # | Item | Status |
-|---|---|---|
-| 1 | Tooltip "?" icons next to metrics | not started |
-| 2 | Chart spans close-to-close | not started (chart currently forward-fills NaN gaps which gives a flat overnight line — works for visualization but doesn't skip non-update hours yet) |
-| 3 | Level right corner tabs with left tabs | not started |
-| 4 | Per-stock target prices on long-bot chart | not started |
-| 5 | "Update existing bot" in MAKE BOT | not started |
-| 6 | Free AI option in MAKE BOT | not started |
-| 7 | Phone bot detail page + liquidate confirmation | not started |
-| 8 | Phone overview: period + portfolio % | not started |
-| 9 | Phone status-bar color fix | not started |
+### V4.0.0.txt — still open
+
+| Item | Status / notes |
+|---|---|
+| **Manual web + app mode** — toggle that deactivates a bot's auto-trading so its broker account can be used for manual trading (e.g. trading vs. friends) | **Not started.** Significant feature — needs UI for the toggle + bot-pause semantics that don't trip the existing auto-schedule logic + dashboard widgets for manual trading. |
+| **Tab alignment** — right corner tabs slightly lower than left tab row | **Worked on 3×, still imperfect.** Needs a designer pass with side-by-side pixel screenshots; padding/margin tweaks alone aren't getting there. |
+| **B-shaped logo** | ✅ Shipped v4.1.0. User saved a 728×728 PNG with B + chart + STOP-LOSS bar + BAPTOU TRADING text → drove the login window image + window icon. Small-size icon at 16 px is text-blurred — sharper version possible if user supplies a B-graphic-only square crop at `assets/icon.png`. |
+| **Profile pictures** | **Not started.** Schema already has `avatar_url` column. Needs an upload endpoint + storage + UI. |
+| **Draggable panel layout** ("hold the top part of a graph or table and drag like the tabs") | **Not started.** Qt has the primitives (`QDockWidget` / custom drag-handles) but it's a substantial UI restructure. |
+| **Phone confirmations** | **Not started.** Needs a Twilio account ($$$). The `phone` column on users already exists. |
+| **Oracle instance rename → "baptou"** | **User action.** OCI Console → Compute → VM → Rename. Cosmetic only, no code impact. |
+| **Domain rename → baptou.app etc.** | **User action.** Cloudflare Registrar ~$10/yr → A-record to `145.241.170.165` → I update `/etc/caddy/Caddyfile`. Also unblocks HTTPS (DuckDNS Let's Encrypt is permanently broken). |
+
+### V4.0.0.txt items shipped already
+
+- BOSS_ADMIN revenue-split UI (v4.0.0)
+- Credits as virtual money with 1 ◊ = $0.01 convention (v3.1.0)
+- 5% to admin / running on bot sale — defaults match user spec (v4.0.0)
+- Friends list shows shared info under name with "not sharing" placeholders (v4.0.0)
+- Overview cards wrap at 4+ bots (v4.0.0)
+- Publish button in MORE BOTS (v4.0.0)
+- Bigger always-visible play/stop/restart buttons (v4.0.0)
+- Replaced traditional green with teal-cyan #3eb8a4 (v4.0.0)
+- BAPTOU rename across user-facing strings (v4.0.0)
+- Whole-window swap on broker mode change (v4.0.0)
+- Tools API-slot dropdowns include custom bots (v4.0.2)
+- MUST ASSIGN API KEY IN TOOLS pre-flight dialog (v4.0.2)
+- Custom bots can run on Oracle (v4.0.2)
+- Check-for-updates card at bottom of Tools (v4.0.1)
+- T&C acceptance modal (v4.0.1)
+- Cookie banner + clickable logo on website (v4.0.1)
+- Liability clauses (no liability for losses except refund-of-sale on moderated bots) baked into the T&C text (v4.0.1)
+
+### V5 / "future" wishlist (post-V4)
+
+| | |
+|---|---|
+| **Stripe Connect Express** | Real-money cashout. Defer until ~50 active users. Needs an LLC/SAS + KYC. |
+| **Custodial credits → fiat conversion** | Tied to Stripe. Currently credits are a virtual sub-currency. The "real money is in the app's bank account, credits track ownership" model from V4.0.0.txt needs a banking layer to actually work. |
+| **Revolut Business API** | Alternative to Stripe Connect. Requires Revolut Business account (€25/mo). Limited to Revolut-account holders. |
+| **Centralised AI proxying** | Extend `/api/makebot/generate` so the same Via-APEX flow routes to Gemini + Groq from server-side pooled keys (currently only Anthropic). Adds `APEX_GEMINI_KEY` + `APEX_GROQ_KEY` server env vars. |
+| **Behavioral bot judge** | LLM-based "does this bot actually do what its description claims" auto-check for the moderation queue. Novel research territory — defer indefinitely. |
+| **Real graphical assets in the dashboard** | Use the BAPTOU logo on the landing page (currently only the desktop login uses it; the web pages still show the ◈ BAPTOU text mark). |
+
+### Open issues / known biters
+
+* **HTTPS on `apexbaptou.duckdns.org`** still down. Workaround: HTTP-only. Real fix: buy a domain.
+* **`pandas_market_calendars`** not yet a dep — needed if we want to skip non-market hours by holiday calendar (currently the `rangebreaks` use simple weekend + hour cut-offs).
+* **DAY bot's `rearm_orphaned_positions`** only runs on bot startup. Mid-session orphans wait for the next bot run.
+* **Bot library lock is "casual protection"** — the Fernet key is in `APEX.exe`. A determined attacker can decrypt. Real protection = cloud-only execution.
 
 ---
 
 ## 10. Architectural decisions worth knowing
 
-* **No ORM on server** — uses stdlib `sqlite3` because the schema is tiny and dependency-free is a feature on a small VM.
+* **No ORM on server** — stdlib `sqlite3` because the schema is tiny.
 * **Bot subprocesses run as `apex` user** under the FastAPI server's process. They survive uvicorn restarts because `start_new_session=True` is set.
-* **Encryption key derivation**: Fernet key = `base64.urlsafe_b64encode(sha256(APEX_JWT_SECRET))`. Same secret for JWT signing AND credential encryption. **If `APEX_JWT_SECRET` ever rotates, all stored credentials become unreadable** (we treat that as expected; clients re-upload).
-* **One snapshot source of truth**: `load_snapshots(side)` derives from the bot's `*_trade_log.jsonl` file because no bot writes a dedicated snapshots file. Supports both schemas: LONG/SHORT have `portfolio_before/after.portfolio_value`; DAY has `portfolio.value`.
-* **Updates are notify-only** — never auto-apply. The user sees a banner in the header. Click → release notes → click Install → visible Inno wizard. No SmartScreen surprises.
-* **Auto-schedule** stays on the desktop's `_tick_schedule` for local bots; **cloud bots** are managed by `server/scheduler.py`'s once-a-minute reconciliation loop. The intersection of `cloud_bots ∩ auto_schedule_bots` is what gets pushed to the server's `_schedule` field.
-* **Single-instance lock** on the desktop: `ctypes.windll.kernel32.CreateMutexW(None, False, "APEX_Trading_Platform_SingleInstance_v7")` at startup. Double-click on the exe → second instance exits silently.
+* **Encryption key derivation**: Fernet key = `base64.urlsafe_b64encode(sha256(APEX_JWT_SECRET))`. Same secret for JWT signing AND credential encryption. **If `APEX_JWT_SECRET` ever rotates, all stored credentials become unreadable.**
+* **One snapshot source of truth**: `load_snapshots(side)` derives from the bot's `*_trade_log.jsonl` file. Supports both schemas: LONG/SHORT have `portfolio_before/after.portfolio_value`; DAY has `portfolio.value`.
+* **Updates are notify-only** — never auto-apply. Visible Inno wizard. No SmartScreen surprises.
+* **Auto-schedule**: desktop's `_tick_schedule` for local bots; cloud bots managed by `server/scheduler.py`. The intersection of `cloud_bots ∩ auto_schedule_bots` is pushed to the server's `_schedule` field.
+* **Single-instance lock** on the desktop: `ctypes.windll.kernel32.CreateMutexW(None, False, "APEX_Trading_Platform_SingleInstance_v7")`. Mutex name **kept** despite the rebrand for back-compat (changing it would let two copies of v4.x run simultaneously alongside an older v3.x install).
+* **Quit-button hygiene**: cloud bots are NEVER stopped on app quit — that's the whole point of cloud mode. Only local subprocess bots get terminated. (Bug fixed in v1.2.3 — `_teardown_for_quit` skips `_cloud_running` bots.)
+* **Cross-worker PID files**: `/opt/apex_users/user_<id>/pids/<side>.pid` is the source of truth for "is this bot running" because uvicorn `--workers 2` means each worker has a separate in-memory registry. Fixed in v1.2.1 after duplicate spawns were observed.
+* **Cloud-resume on launch**: 3 s after app start, ApexWindow queries `/bots/{side}/status` for every bot regardless of the local "cloud mode" toggle (the toggle was sometimes lost between sessions while the cloud bot kept running). Bot tabs show running state without user intervention.
+* **Revocation sync on launch**: 4.5 s after app start, ApexWindow polls `/bots/mine/revocations` and deletes any locally-installed bot that has been removed by moderation (with a one-shot dialog telling the user what was removed).
 
 ---
 
 ## 11. Working with the user
 
-Conversational style preferences observed across the build:
-* Concise, table-based answers for plans.
-* The user appreciates **before/after** explanations of bug fixes (what was broken / why / fix).
-* The user types fast — small typos are common (e.g. "thq", "wqs"); treat them as the intended English word.
-* Bilingual French/English context; comments and code should stay in English.
-* The user has a Claude credit budget — **don't redo work or re-derive context that's in this file**.
-* The user can SSH into Oracle themselves, but you can also SSH from your own PowerShell tool using the SSH key path above. Do it yourself when a server change is needed — saves a round-trip.
+* **Concise, table-based answers** for plans.
+* **Before/after explanations** of bug fixes (what broke / why / fix).
+* **Fast typist** — small typos like "thq", "wqs", "thats" are common. Treat them as the intended word, don't ask.
+* **Bilingual French/English**. Comments and code stay English.
+* **Claude credit budget is finite** — don't redo work or re-derive context that's in this file. Don't quote large code blocks back unnecessarily.
+* User can SSH into Oracle themselves but agent should **do SSH from PowerShell directly** when a server change is needed — saves a round-trip.
+* **Always smoke-launch** the built `dist\APEX\APEX.exe` before `gh release create`. One NameError shipped → 3-release detour.
+* **Always run `gh release create`** after a successful build. Committing alone doesn't publish a release. (Lost 4 release cycles to this.)
+* **Soft-fail every optional integration**: Resend, Google OAuth, APEX-pooled Anthropic — they should never crash the app if env vars are missing.
 
 ---
 
@@ -290,23 +396,37 @@ ssh -i "C:\Users\bapti\Documents\oracle server\ssh-key-2026-05-20.key" opc@145.2
 # Tail server log
 ssh ... "sudo journalctl -u apex_server -n 50 --no-pager"
 
-# Cert / Caddy status
-ssh ... "sudo journalctl -u caddy -n 30 --no-pager"
-
 # What's running on the user's account
 $token = (Get-Content "$env:LocalAppData\APEX Trading Platform\apex_auth.json" | ConvertFrom-Json).token
 curl.exe -H "Authorization: Bearer $token" http://145.241.170.165:8000/bots/running
+
+# Check the version-diagnostic log if the header ever shows a wrong version
+Get-Content "$env:LocalAppData\APEX Trading Platform\apex_version_diag.log" -Tail 10
+
+# Check the crash log if the global exception handler caught something
+Get-Content "$env:LocalAppData\APEX Trading Platform\apex_crash.log" -Tail 80
+
+# Server-side: list all SQLite tables (sanity check after a schema migration)
+ssh ... 'sudo /opt/apex_venv/bin/python -c "
+import sqlite3
+c=sqlite3.connect(\"/opt/apex_data/apex_server.db\")
+print([r[0] for r in c.execute(\"SELECT name FROM sqlite_master WHERE type='\''table'\''\").fetchall()])
+"'
+
+# Test the privately-uploaded custom bots dir for a user
+ssh ... "sudo ls -la /opt/apex_users/user_1/private_bots/"
 ```
 
 ---
 
-## 13. Open issues / things that still bite occasionally
+## 13. Things that recently bit and are worth remembering
 
-* **HTTPS on `apexbaptou.duckdns.org`** is currently disabled. DuckDNS's nameservers intermittently SERVFAIL Let's Encrypt's validators (both HTTP-01 and DNS-01 paths). Workaround: HTTP only. Real fix: buy a domain ($10/yr at Cloudflare Registrar), point A-record at `145.241.170.165`, update `/etc/caddy/Caddyfile`.
-* The desktop **app freezes briefly** on bot-tab drag if you held a cloud-poll cycle. v1.1.13 mitigated it. If reports come back, the next defense is to push the cloud-status poll into a background thread instead of a `QTimer` on the main thread.
-* `pandas_market_calendars` is **not yet a dependency** — needed if we want to implement Vnext item 2 (skip non-market hours by holiday calendar). Add to `requirements.txt` and bundle it via PyInstaller (`--collect-all pandas_market_calendars` in `build.bat`).
-* DAY bot's `rearm_orphaned_positions` (v1.1.10) only runs on bot startup. If a position becomes orphaned mid-session, it'll wait for the next bot run. Acceptable for now.
+* **`update_env_keys` doesn't exist** — the function is `write_env_keys`. (v4.0.3 hotfix.)
+* **`write_env_keys` ignores empty values by design** — so "clear all then refill" pattern silently no-ops. Use `delete_env_keys(list)` to actually remove a key. (v4.0.3 hotfix.)
+* **`ENV_KEYS` allowlist hardcodes LONG/SHORT/DAY** — but `write_env_keys` was loosened to also accept `ALPACA_API_KEY_*` / `ALPACA_SECRET_KEY_*` globs so custom-bot slots work. (v4.0.3 hotfix.)
+* **Missing import surfaces at app launch** — every `ui/*.py` change should be syntax-checked AND ideally the desktop should be smoke-launched (the global exception handler turns crashes into dialogs but doesn't help if it's an import-time crash before the handler is installed).
+* **Logo PNG file naming matters** — code looks for `assets/baptou_logo.png` and `assets/icon.png` specifically. ChatGPT exports save with auto-generated filenames like "ChatGPT Image May 24, 2026, 02_33_19 AM.png" — must be renamed.
 
 ---
 
-That's everything. A fresh agent reading this should be productive in the codebase within minutes — paths, IPs, conventions, gotchas, and the current to-do list are all here.
+That's everything. A fresh agent reading this should be productive in the codebase within minutes — paths, IPs, server endpoints, conventions, gotchas, and the open V4 + V5 backlog are all here.
