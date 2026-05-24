@@ -20,7 +20,7 @@ from . import (auth, database, credentials as creds,
                friends, oauth as google_oauth, email_send,
                credits as credits_mod,
                similarity, moderation,
-               revenue)
+               revenue, payments)
 from .schemas import SignupRequest, LoginRequest
 
 
@@ -35,6 +35,7 @@ async def _lifespan(app: FastAPI):
     credits_mod.init_credits_tables()
     moderation.init_purchases_table()
     revenue.init_revenue_table()
+    payments.init_payments_table()
     promoted = database.bootstrap_boss_admin()
     if promoted:
         print(f"[bootstrap] promoted user_id={promoted} to BOSS_ADMIN",
@@ -487,6 +488,9 @@ async def upload_public_bot(
     philosophy:  str = Form(""),     # V3.1.1
     price_credits: int = Form(0),    # V3.1.1
     visibility:  str = Form("public"),
+    creator_ai:  str = Form(""),     # V4.1.0 — AI used to generate the bot
+    runner_ai:   str = Form(""),     # V4.1.0 — AI used to run/score candidates
+    broker:      str = Form(""),     # V4.1.0 — compatible broker (alpaca/ibkr/both)
     file:        UploadFile = File(...),
     authorization: str | None = Header(default=None),
 ):
@@ -522,6 +526,9 @@ async def upload_public_bot(
             philosophy=philosophy,
             price_credits=price_credits,
             visibility=visibility,
+            creator_ai=creator_ai,
+            runner_ai=runner_ai,
+            broker=broker,
         )
     except ValueError as e:
         raise HTTPException(400, str(e))
@@ -1499,6 +1506,142 @@ def api_user_profile(username: str,
     if out["shows"]["daily"] or out["shows"]["monthly"] or out["shows"]["yearly"]:
         out["pl"] = _pl_for_user(target["id"], out["shows"])
     return out
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# V4.2.0 — Stripe credit top-ups
+# ──────────────────────────────────────────────────────────────────────────────
+
+@app.get("/payments/packages")
+def api_payments_packages():
+    """Public — returns available credit packages + whether Stripe is live."""
+    return {
+        "configured": payments.is_configured(),
+        "packages": [
+            {
+                "key":          k,
+                "label":        v["label"],
+                "credits":      v["credits"],
+                "amount_cents": v["amount_cents"],
+                "popular":      v.get("popular", False),
+            }
+            for k, v in payments.CREDIT_PACKAGES.items()
+        ],
+    }
+
+
+@app.post("/payments/create-checkout")
+def api_create_checkout(payload: dict,
+                         authorization: str | None = Header(default=None)):
+    """Create a Stripe Checkout Session and return the redirect URL.
+    Body: {package_key: str, server_url: str (optional)}"""
+    user = _current_user(authorization)
+    package_key = (payload or {}).get("package_key", "").strip()
+    # server_url lets the desktop tell us its own public address so the
+    # success/cancel pages point back to this server instance.
+    server_url = (payload or {}).get("server_url", "").strip()
+    if not server_url:
+        server_url = _os.environ.get("APEX_PUBLIC_URL", "http://145.241.170.165:8000")
+    if not package_key:
+        raise HTTPException(400, "Missing package_key.")
+    if not payments.is_configured():
+        raise HTTPException(
+            503,
+            "Payment gateway not configured on this server. "
+            "Ask the server admin to set STRIPE_SECRET_KEY.")
+    # success_url uses the literal Stripe placeholder {CHECKOUT_SESSION_ID}
+    # — it must NOT be inside an f-string or it would raise NameError.
+    success_url = server_url + "/payments/success?session_id={CHECKOUT_SESSION_ID}"
+    cancel_url  = server_url + "/payments/cancel"
+    try:
+        result = payments.create_checkout_session(
+            user_id     = user["id"],
+            package_key = package_key,
+            success_url = success_url,
+            cancel_url  = cancel_url,
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except RuntimeError as e:
+        raise HTTPException(503, str(e))
+    return result
+
+
+@app.post("/payments/webhook", include_in_schema=False)
+async def api_stripe_webhook(request: Request):
+    """Stripe sends POST here on checkout.session.completed.
+    No bearer auth — Stripe signs the raw body with STRIPE_WEBHOOK_SECRET."""
+    payload_bytes = await request.body()
+    sig_header    = request.headers.get("stripe-signature", "")
+    if not sig_header:
+        raise HTTPException(400, "Missing Stripe-Signature header.")
+    try:
+        payments.handle_webhook(payload_bytes, sig_header)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except RuntimeError as e:
+        raise HTTPException(503, str(e))
+    except Exception as e:
+        print("[stripe webhook] unhandled: " + str(e), flush=True)
+        raise HTTPException(500, "Webhook processing failed.")
+    return {"ok": True}
+
+
+@app.get("/payments/success", include_in_schema=False)
+def api_payments_success(session_id: str = ""):
+    return HTMLResponse("""<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Payment successful — BAPTOU</title>
+  <style>
+    body{background:#0c0f16;color:#d8dde8;font-family:sans-serif;
+         display:flex;align-items:center;justify-content:center;
+         min-height:100vh;margin:0;}
+    .card{text-align:center;padding:48px 40px;max-width:420px;}
+    h2{color:#3eb8a4;font-size:26px;letter-spacing:3px;margin-bottom:12px;}
+    p{color:#8899aa;line-height:1.7;}
+    .icon{font-size:60px;margin-bottom:20px;}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon">&#10003;</div>
+    <h2>PAYMENT SUCCESSFUL</h2>
+    <p>Your credits have been added to your BAPTOU account.<br>
+       Close this tab, return to the desktop app, and click&nbsp;<b>&#8635;</b>
+       to see your new balance.</p>
+  </div>
+</body>
+</html>""")
+
+
+@app.get("/payments/cancel", include_in_schema=False)
+def api_payments_cancel():
+    return HTMLResponse("""<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Payment cancelled — BAPTOU</title>
+  <style>
+    body{background:#0c0f16;color:#d8dde8;font-family:sans-serif;
+         display:flex;align-items:center;justify-content:center;
+         min-height:100vh;margin:0;}
+    .card{text-align:center;padding:48px 40px;max-width:420px;}
+    h2{color:#e07b54;font-size:24px;letter-spacing:3px;margin-bottom:12px;}
+    p{color:#8899aa;line-height:1.7;}
+    .icon{font-size:60px;margin-bottom:20px;}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon">&#10005;</div>
+    <h2>PAYMENT CANCELLED</h2>
+    <p>No charge was made. Close this tab and return to the app
+       whenever you&rsquo;re ready.</p>
+  </div>
+</body>
+</html>""")
 
 
 def _pl_for_user(user_id: int, shows: dict) -> dict:

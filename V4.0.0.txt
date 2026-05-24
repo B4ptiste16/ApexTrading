@@ -56,3 +56,9 @@ TO IMPROVE
 
 - Can unlimited people use a sigle same claude api key or not. Will I have to generate many keys. Same questions for other ai's.
 
+- Superpose these graphs onto the overview graph which would be the return of all different ai models on this account. Only show the ones being used
+
+- On the website home page have one graph grouping the return of each ai with ajustable time frame and have a ranking (not in table but in an animated line moving from right to left and have a pie chart with adjustable time frame show the most used ai models accros the entire platform. Note, the website shows general app data grouping all accounts whereas the apps overview section is the personal data. 
+
+- Have the opportunity to create many friend groups and have a ranking board ranking as a function of return over adjustable period and have a winner weekly, monthly and yearly. Have the friend list be ordered in a ranking with the same 1D,1W,1M... to adjust ranking and details under their names.
+

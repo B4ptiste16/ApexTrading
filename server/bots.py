@@ -76,6 +76,10 @@ def init_marketplace_table() -> None:
             "ALTER TABLE public_bots ADD COLUMN flagged_by     INTEGER",
             "ALTER TABLE public_bots ADD COLUMN flagged_at     TEXT",
             "CREATE INDEX IF NOT EXISTS idx_public_bots_status ON public_bots(status)",
+            # V4.1.0 — AI transparency + broker compatibility on marketplace cards
+            "ALTER TABLE public_bots ADD COLUMN creator_ai TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE public_bots ADD COLUMN runner_ai  TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE public_bots ADD COLUMN broker     TEXT NOT NULL DEFAULT ''",
         ):
             try:
                 c.execute(ddl)
@@ -93,7 +97,9 @@ def _slug(name: str) -> str:
 def upload_bot(*, owner_id: int, name: str, description: str,
                tags: list[str], file_bytes: bytes,
                philosophy: str = "", price_credits: int = 0,
-               visibility: str = "public") -> dict:
+               visibility: str = "public",
+               creator_ai: str = "", runner_ai: str = "",
+               broker: str = "") -> dict:
     """Persist a new bot in the marketplace. Returns the row dict."""
     if len(file_bytes) > 1_000_000:           # 1 MB cap
         raise ValueError("Bot script too large (max 1 MB).")
@@ -120,12 +126,14 @@ def upload_bot(*, owner_id: int, name: str, description: str,
         cur = c.execute(
             """INSERT INTO public_bots
                (owner_id, name, slug, description, tags, size_bytes,
-                sha256, created_at, philosophy, price_credits, visibility)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                sha256, created_at, philosophy, price_credits, visibility,
+                creator_ai, runner_ai, broker)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (owner_id, name, slug, description,
              ",".join(t.strip() for t in tags if t.strip()),
              len(file_bytes), sha, now,
-             philosophy.strip(), max(0, int(price_credits)), visibility),
+             philosophy.strip(), max(0, int(price_credits)), visibility,
+             creator_ai.strip(), runner_ai.strip(), broker.strip()),
         )
         c.commit()
         return _row(c.execute(

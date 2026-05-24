@@ -335,6 +335,12 @@ Toolchain on the Windows laptop:
 - T&C acceptance modal (v4.0.1)
 - Cookie banner + clickable logo on website (v4.0.1)
 - Liability clauses (no liability for losses except refund-of-sale on moderated bots) baked into the T&C text (v4.0.1)
+- **Live themes** — `apply_theme()` now returns the new stylesheet; account tab calls `QApplication.setStyleSheet()` so themes apply instantly without restart (v4.1.x)
+- **Sober style** — removed borders from card frames + text inputs; buttons now border-free by default; visual noise reduced across the app (v4.1.x)
+- **Manual trading mode toggle** — ⚡ AUTO / ✋ MANUAL toggle in the header; activates a ManualTradingTab with order entry, positions table, account selector, and friend-challenge stub (v4.1.x)
+- **Market cards: AI + broker** — bot cards in the marketplace now show "🤖 Created by / ⚡ Runs with / 🏦 Works on" fields; publish dialog asks for these; server schema updated (v4.1.x)
+- **IBKR page** — IBKR broker mode now shows the full app (not a coming-soon page); Tools tab has a real IBKR connection setup section: Gateway host/port, per-bot clientId mapping, fund allocation, connection test button (v4.1.x)
+- **Tab alignment fix** — `_sync_corner_height()` defers-pins corner widget height to actual tab bar height after first paint; `AlignVCenter` on corner row layout (v4.1.x)
 
 ### V5 / "future" wishlist (post-V4)
 

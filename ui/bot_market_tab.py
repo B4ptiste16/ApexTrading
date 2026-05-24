@@ -418,6 +418,24 @@ class BotMarketTab(QWidget):
         desc.setMinimumHeight(40)
         v.addWidget(desc)
 
+        # AI + broker info row (V4.1.0)
+        ai_row = QHBoxLayout()
+        ai_row.setSpacing(16)
+        for prefix, ai_field, icon in (
+            ("Created by", "creator_ai", "🤖"),
+            ("Runs with",  "runner_ai",  "⚡"),
+            ("Works on",   "broker",     "🏦"),
+        ):
+            ai_val = b.get(ai_field, "").strip()
+            if ai_val:
+                ai_chip = QLabel(f"{icon} {prefix}: {ai_val}")
+                ai_chip.setStyleSheet(
+                    f"color:{C['muted']};font-size:9px;letter-spacing:1px;")
+                ai_row.addWidget(ai_chip)
+        ai_row.addStretch()
+        arw = QWidget(); arw.setLayout(ai_row)
+        v.addWidget(arw)
+
         # Stat strip — 4 columns
         stat_row = QHBoxLayout()
         stat_row.setSpacing(10)

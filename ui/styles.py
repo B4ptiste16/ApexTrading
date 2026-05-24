@@ -2,9 +2,9 @@
 APEX UI Styles — V7
 """
 
-# V3.1.6 — theme presets. apply_theme() at startup mutates the COLORS
-# dict in-place so widgets that reference C[...] at module-load time
-# pick up the chosen scheme.
+# V3.1.6 — theme presets. apply_theme() mutates COLORS + BOT_COLOR in-place
+# and returns the new stylesheet string — pass it to QApplication.setStyleSheet()
+# for a fully live theme change without restarting the app.
 THEMES: dict = {
     # V4.0.0 — BAPTOU brand palette. The traditional green-as-outline
     # is gone; the "green" slot is now a clear teal-cyan that still
@@ -52,9 +52,8 @@ THEMES: dict = {
 COLORS = dict(THEMES["Default (BAPTOU teal)"])
 
 # v3.1.6 — Read the user's saved theme BEFORE DARK_STYLESHEET is built
-# below. The stylesheet is a baked f-string, so once it's constructed
-# it can't pick up a theme change without an app restart. By doing the
-# read up here we make the active theme take effect on every launch.
+# below. The stylesheet is now a function (build_stylesheet) so it re-reads
+# COLORS every time it's called, making live theme switching possible.
 try:
     import json as _json, os as _os
     from pathlib import Path as _Path
@@ -70,36 +69,21 @@ except Exception:
     pass
 
 
-def apply_theme(name: str) -> bool:
-    """Mutate COLORS in-place so already-imported `C = COLORS` refs see
-    the new palette. Returns True if the theme was applied. NB: the
-    DARK_STYLESHEET f-string is already baked — applying a theme at
-    runtime only updates inline-styled widgets, not the global stylesheet.
-    The user needs to restart APEX to fully see a theme change."""
-    if name not in THEMES:
-        return False
-    COLORS.update(THEMES[name])
-    return True
-
-C = COLORS
-
-BOT_COLOR = {
-    "LONG":  C["green"],
-    "SHORT": C["red"],
-    "DAY":   C["orange"],
-}
-
-DARK_STYLESHEET = f"""
+def build_stylesheet(colors=None) -> str:
+    """Build the complete QSS stylesheet from the given (or current) COLORS palette.
+    Called once at import and again by apply_theme() for live updates."""
+    c = colors if colors is not None else COLORS
+    return f"""
 /* ── GLOBAL ── */
 QWidget {{
     background-color: transparent;
-    color: {C['text']};
+    color: {c['text']};
     font-family: 'JetBrains Mono', monospace;
     font-size: 12px;
 }}
 
 QMainWindow {{
-    background-color: {C['bg']};
+    background-color: {c['bg']};
 }}
 
 /* ── TABS ── */
@@ -114,7 +98,7 @@ QTabWidget#mainTabs > QWidget {{
 
 QTabBar::tab {{
     background: transparent;
-    color: {C['muted']};
+    color: {c['muted']};
     font-family: 'JetBrains Mono';
     font-size: 10px;
     font-weight: 500;
@@ -126,19 +110,19 @@ QTabBar::tab {{
 }}
 
 QTabBar::tab:selected {{
-    color: {C['text']};
-    border-bottom: 2px solid {C['green']};
+    color: {c['text']};
+    border-bottom: 2px solid {c['green']};
 }}
 
 QTabBar::tab:hover:!selected {{
-    color: {C['text']};
+    color: {c['text']};
     background: rgba(255,255,255,0.025);
 }}
 
 /* ── CORNER BUTTONS (Universe / Tools) ── */
 QPushButton#cornerBtn {{
     background: transparent;
-    color: {C['muted']};
+    color: {c['muted']};
     border: none;
     border-bottom: 2px solid transparent;
     font-family: 'JetBrains Mono';
@@ -152,18 +136,18 @@ QPushButton#cornerBtn {{
 }}
 
 QPushButton#cornerBtn:hover {{
-    color: {C['text']};
+    color: {c['text']};
 }}
 
 QPushButton#cornerBtn[active="true"] {{
-    color: {C['text']};
-    border-bottom: 2px solid {C['purple']};
+    color: {c['text']};
+    border-bottom: 2px solid {c['purple']};
 }}
 
 /* ── TAB QUICK CONTROLS ── */
 QPushButton#tabPlayBtn {{
     background: transparent;
-    color: {C['muted']};
+    color: {c['muted']};
     border: none;
     padding: 0;
     font-size: 8px;
@@ -174,13 +158,13 @@ QPushButton#tabPlayBtn {{
 }}
 
 QPushButton#tabPlayBtn:hover {{
-    color: {C['green']};
+    color: {c['green']};
     background: rgba(122,181,162,0.15);
 }}
 
 QPushButton#tabStopBtn {{
     background: transparent;
-    color: {C['muted']};
+    color: {c['muted']};
     border: none;
     padding: 0;
     font-size: 8px;
@@ -191,7 +175,7 @@ QPushButton#tabStopBtn {{
 }}
 
 QPushButton#tabStopBtn:hover {{
-    color: {C['red']};
+    color: {c['red']};
     background: rgba(194,142,151,0.15);
 }}
 
@@ -208,7 +192,7 @@ QPushButton#tabRemoveBtn {{
 }}
 
 QPushButton#tabRemoveBtn:hover {{
-    color: {C['muted']};
+    color: {c['muted']};
     background: rgba(255,255,255,0.08);
 }}
 
@@ -226,7 +210,7 @@ QScrollBar:vertical {{
 }}
 
 QScrollBar::handle:vertical {{
-    background: {C['border']};
+    background: {c['border']};
     border-radius: 2px;
     min-height: 30px;
 }}
@@ -241,7 +225,7 @@ QScrollBar:horizontal {{
 }}
 
 QScrollBar::handle:horizontal {{
-    background: {C['border']};
+    background: {c['border']};
     border-radius: 2px;
     min-width: 30px;
 }}
@@ -251,8 +235,8 @@ QScrollBar::sub-line:horizontal {{ width: 0; }}
 
 /* ── FRAMES / PANELS ── */
 QFrame#card {{
-    background: {C['panel']};
-    border: 1px solid {C['border']};
+    background: {c['panel']};
+    border: none;
     border-radius: 8px;
 }}
 
@@ -267,13 +251,13 @@ QLabel#sectionTitle {{
     font-size: 10px;
     font-weight: 600;
     letter-spacing: 2px;
-    color: {C['muted']};
+    color: {c['muted']};
     padding: 0;
 }}
 
 QLabel#cardLabel {{
     font-size: 8px;
-    color: {C['muted']};
+    color: {c['muted']};
     letter-spacing: 3px;
 }}
 
@@ -281,19 +265,19 @@ QLabel#cardValue {{
     font-family: 'Syne', sans-serif;
     font-size: 18px;
     font-weight: 700;
-    color: {C['text']};
+    color: {c['text']};
 }}
 
 QLabel#cardSub {{
     font-size: 9px;
-    color: {C['muted']};
+    color: {c['muted']};
 }}
 
 /* ── BUTTONS ── */
 QPushButton {{
-    background: {C['panel2']};
-    color: {C['text']};
-    border: 1px solid {C['border']};
+    background: {c['panel2']};
+    color: {c['text']};
+    border: none;
     border-radius: 5px;
     font-family: 'JetBrains Mono';
     font-size: 10px;
@@ -303,58 +287,57 @@ QPushButton {{
 }}
 
 QPushButton:hover {{
-    color: {C['text']};
-    border-color: {C['muted']};
-    background: {C['panel']};
+    color: {c['text']};
+    background: {c['panel']};
 }}
 
 QPushButton#runBtn {{
     background: rgba(122,181,162,0.10);
-    color: {C['green']};
-    border: 1px solid rgba(122,181,162,0.55);
+    color: {c['green']};
+    border: 1px solid rgba(122,181,162,0.45);
 }}
 
 QPushButton#runBtn:hover {{
     background: rgba(122,181,162,0.18);
-    border-color: {C['green']};
+    border-color: {c['green']};
 }}
 
 QPushButton#stopBtn {{
     background: rgba(194,142,151,0.10);
-    color: {C['red']};
-    border: 1px solid rgba(194,142,151,0.55);
+    color: {c['red']};
+    border: 1px solid rgba(194,142,151,0.45);
 }}
 
 QPushButton#stopBtn:hover {{
     background: rgba(194,142,151,0.18);
-    border-color: {C['red']};
+    border-color: {c['red']};
 }}
 
 QPushButton#dangerBtn {{
     background: rgba(194,142,151,0.08);
-    color: {C['red']};
-    border: 1px solid rgba(194,142,151,0.45);
+    color: {c['red']};
+    border: 1px solid rgba(194,142,151,0.35);
 }}
 
 QPushButton#dangerBtn:hover {{
     background: rgba(194,142,151,0.16);
-    border-color: {C['red']};
+    border-color: {c['red']};
 }}
 
 QPushButton#toolBtn {{
     background: rgba(138,147,201,0.08);
-    color: {C['purple']};
-    border: 1px solid rgba(138,147,201,0.45);
+    color: {c['purple']};
+    border: 1px solid rgba(138,147,201,0.35);
 }}
 
 QPushButton#toolBtn:hover {{
     background: rgba(138,147,201,0.16);
-    border-color: {C['purple']};
+    border-color: {c['purple']};
 }}
 
 QPushButton#updateBtn {{
     background: rgba(138,147,201,0.10);
-    color: {C['purple']};
+    color: {c['purple']};
     border: 1px solid rgba(138,147,201,0.45);
     font-size: 10px;
     padding: 6px 16px;
@@ -363,8 +346,8 @@ QPushButton#updateBtn {{
 /* V3.2.0 — broker-mode selector chip in the header */
 QPushButton#brokerModeBtn {{
     background: rgba(138,147,201,0.08);
-    color: {C['purple']};
-    border: 1px solid {C['border']};
+    color: {c['purple']};
+    border: 1px solid {c['border']};
     border-radius: 5px;
     font-family: 'JetBrains Mono';
     font-size: 10px;
@@ -375,13 +358,37 @@ QPushButton#brokerModeBtn {{
 }}
 QPushButton#brokerModeBtn:hover {{
     background: rgba(138,147,201,0.18);
-    border-color: {C['purple']};
+    border-color: {c['purple']};
+}}
+
+/* Manual trading mode toggle */
+QPushButton#manualModeBtn {{
+    background: transparent;
+    color: {c['muted']};
+    border: 1px solid {c['border']};
+    border-radius: 5px;
+    font-family: 'JetBrains Mono';
+    font-size: 10px;
+    letter-spacing: 1px;
+    font-weight: 600;
+    padding: 6px 12px;
+    margin-left: 6px;
+}}
+QPushButton#manualModeBtn:hover {{
+    background: rgba(200,160,112,0.12);
+    border-color: {c['orange']};
+    color: {c['orange']};
+}}
+QPushButton#manualModeBtn[active="true"] {{
+    background: rgba(200,160,112,0.14);
+    color: {c['orange']};
+    border-color: {c['orange']};
 }}
 
 /* V3.0.1 — clickable user chip in the header (opens Account menu) */
 QPushButton#userChipBtn {{
     background: transparent;
-    color: {C['muted']};
+    color: {c['muted']};
     border: 1px solid transparent;
     border-radius: 5px;
     font-family: 'JetBrains Mono';
@@ -393,8 +400,8 @@ QPushButton#userChipBtn {{
 }}
 
 QPushButton#userChipBtn:hover {{
-    color: {C['text']};
-    border-color: {C['border']};
+    color: {c['text']};
+    border-color: {c['border']};
     background: rgba(255,255,255,0.04);
 }}
 
@@ -404,9 +411,9 @@ QPushButton#userChipBtn:pressed {{
 
 /* Drop-down menu used by the user chip (Switch / Sign-out) */
 QMenu {{
-    background: {C['panel']};
-    color: {C['text']};
-    border: 1px solid {C['border']};
+    background: {c['panel']};
+    color: {c['text']};
+    border: 1px solid {c['border']};
     border-radius: 8px;
     padding: 6px;
     font-family: 'JetBrains Mono';
@@ -420,21 +427,21 @@ QMenu::item {{
 }}
 
 QMenu::item:selected {{
-    background: {C['panel2']};
-    color: {C['text']};
+    background: {c['panel2']};
+    color: {c['text']};
 }}
 
 QMenu::separator {{
     height: 1px;
-    background: {C['border']};
+    background: {c['border']};
     margin: 4px 6px;
 }}
 
 /* V7.1.7: explicit Quit button in the header */
 QPushButton#quitBtn {{
     background: transparent;
-    color: {C['muted']};
-    border: 1px solid {C['border']};
+    color: {c['muted']};
+    border: 1px solid {c['border']};
     border-radius: 5px;
     font-family: 'JetBrains Mono';
     font-size: 10px;
@@ -444,28 +451,28 @@ QPushButton#quitBtn {{
 }}
 
 QPushButton#quitBtn:hover {{
-    color: {C['red']};
+    color: {c['red']};
     border-color: rgba(194,142,151,0.55);
     background: rgba(194,142,151,0.08);
 }}
 
 QPushButton#addBotBtn {{
     background: rgba(122,181,162,0.08);
-    color: {C['green']};
-    border: 1px solid rgba(122,181,162,0.40);
+    color: {c['green']};
+    border: 1px solid rgba(122,181,162,0.35);
     font-size: 10px;
     padding: 6px 14px;
 }}
 
 QPushButton#addBotBtn:hover {{
     background: rgba(122,181,162,0.16);
-    border-color: {C['green']};
+    border-color: {c['green']};
 }}
 
 QPushButton#silenceBtn {{
     background: rgba(92,107,130,0.07);
-    color: {C['muted']};
-    border: 1px solid rgba(92,107,130,0.30);
+    color: {c['muted']};
+    border: none;
     font-size: 10px;
     padding: 5px 12px;
 }}
@@ -476,13 +483,13 @@ QPushButton#silenceBtn:hover {{
 
 /* ── TABLE ── */
 QTableWidget {{
-    background: {C['panel']};
-    color: {C['text']};
-    border: 1px solid {C['border']};
+    background: {c['panel']};
+    color: {c['text']};
+    border: none;
     border-radius: 6px;
-    gridline-color: {C['border']};
+    gridline-color: {c['border']};
     font-size: 11px;
-    selection-background-color: {C['panel2']};
+    selection-background-color: {c['panel2']};
 }}
 
 QTableWidget::item {{
@@ -491,26 +498,26 @@ QTableWidget::item {{
 }}
 
 QTableWidget::item:selected {{
-    background: {C['panel2']};
-    color: {C['text']};
+    background: {c['panel2']};
+    color: {c['text']};
 }}
 
 QHeaderView::section {{
-    background: {C['panel2']};
-    color: {C['muted']};
+    background: {c['panel2']};
+    color: {c['muted']};
     font-size: 9px;
     font-weight: 600;
     letter-spacing: 2px;
     padding: 9px 12px;
     border: none;
-    border-bottom: 1px solid {C['border']};
+    border-bottom: 1px solid {c['border']};
 }}
 
 /* ── COMBO BOX ── */
 QComboBox {{
-    background: {C['panel']};
-    color: {C['text']};
-    border: 1px solid {C['border']};
+    background: {c['panel']};
+    color: {c['text']};
+    border: 1px solid {c['border']};
     border-radius: 5px;
     padding: 5px 10px;
     font-size: 11px;
@@ -523,32 +530,32 @@ QComboBox::drop-down {{
 }}
 
 QComboBox QAbstractItemView {{
-    background: {C['panel']};
-    color: {C['text']};
-    border: 1px solid {C['border']};
-    selection-background-color: {C['panel2']};
+    background: {c['panel']};
+    color: {c['text']};
+    border: 1px solid {c['border']};
+    selection-background-color: {c['panel2']};
 }}
 
 /* ── PROGRESS BAR ── */
 QProgressBar {{
-    background: {C['panel']};
-    border: 1px solid {C['border']};
+    background: {c['panel']};
+    border: none;
     border-radius: 4px;
     text-align: center;
-    color: {C['text']};
+    color: {c['text']};
     font-size: 10px;
 }}
 
 QProgressBar::chunk {{
-    background: {C['green']};
+    background: {c['green']};
     border-radius: 3px;
 }}
 
 /* ── TEXT EDIT ── */
 QTextEdit, QPlainTextEdit {{
-    background: {C['panel2']};
-    color: {C['text']};
-    border: 1px solid {C['border']};
+    background: {c['panel2']};
+    color: {c['text']};
+    border: none;
     border-radius: 5px;
     font-size: 11px;
     padding: 6px;
@@ -556,46 +563,46 @@ QTextEdit, QPlainTextEdit {{
 
 /* ── LINE EDIT ── */
 QLineEdit {{
-    background: {C['panel']};
-    color: {C['text']};
-    border: 1px solid {C['border']};
+    background: {c['panel']};
+    color: {c['text']};
+    border: none;
     border-radius: 5px;
     padding: 6px 12px;
     font-size: 11px;
 }}
 
 QLineEdit:focus {{
-    border-color: {C['muted']};
+    background: {c['panel2']};
 }}
 
 /* ── MESSAGE BOX ── */
 QMessageBox {{
-    background: {C['panel']};
-    color: {C['text']};
+    background: {c['panel']};
+    color: {c['text']};
 }}
 
 QMessageBox QLabel {{
-    color: {C['text']};
+    color: {c['text']};
 }}
 
 /* ── STATUS BAR ── */
 QStatusBar {{
-    background: {C['panel']};
-    color: {C['muted']};
+    background: {c['panel']};
+    color: {c['muted']};
     font-size: 10px;
-    border-top: 1px solid {C['border']};
+    border-top: 1px solid {c['border']};
 }}
 
 /* ── SPLITTER ── */
 QSplitter::handle {{
-    background: {C['border']};
+    background: {c['border']};
 }}
 
 /* ── TOOLTIP ── */
 QToolTip {{
-    background: {C['panel']};
-    color: {C['text']};
-    border: 1px solid {C['border']};
+    background: {c['panel']};
+    color: {c['text']};
+    border: 1px solid {c['border']};
     font-size: 11px;
     padding: 5px 10px;
     border-radius: 4px;
@@ -603,35 +610,35 @@ QToolTip {{
 
 /* ── CHECKBOX ── */
 QCheckBox {{
-    color: {C['text']};
+    color: {c['text']};
     spacing: 6px;
 }}
 
 QCheckBox::indicator {{
     width: 14px;
     height: 14px;
-    border: 1px solid {C['border']};
+    border: 1px solid {c['border']};
     border-radius: 3px;
-    background: {C['panel']};
+    background: {c['panel']};
 }}
 
 QCheckBox::indicator:checked {{
-    background: {C['green']};
-    border-color: {C['green']};
+    background: {c['green']};
+    border-color: {c['green']};
 }}
 
 /* ── SPIN BOX ── */
 QDoubleSpinBox, QSpinBox {{
-    background: {C['panel']};
-    color: {C['text']};
-    border: 1px solid {C['border']};
+    background: {c['panel']};
+    color: {c['text']};
+    border: 1px solid {c['border']};
     border-radius: 4px;
     padding: 4px 8px;
     font-size: 11px;
 }}
 
 QDoubleSpinBox:focus, QSpinBox:focus {{
-    border-color: {C['muted']};
+    border-color: {c['muted']};
 }}
 
 QDoubleSpinBox::up-button, QDoubleSpinBox::down-button,
@@ -641,3 +648,28 @@ QSpinBox::up-button, QSpinBox::down-button {{
     width: 14px;
 }}
 """
+
+
+def apply_theme(name: str) -> str:
+    """Mutate COLORS + BOT_COLOR in-place, rebuild and return the new stylesheet.
+    For a fully live update: QApplication.instance().setStyleSheet(apply_theme(name))"""
+    if name not in THEMES:
+        return build_stylesheet()
+    COLORS.update(THEMES[name])
+    BOT_COLOR.update({
+        "LONG":  COLORS["green"],
+        "SHORT": COLORS["red"],
+        "DAY":   COLORS["orange"],
+    })
+    return build_stylesheet()
+
+
+C = COLORS
+
+BOT_COLOR = {
+    "LONG":  C["green"],
+    "SHORT": C["red"],
+    "DAY":   C["orange"],
+}
+
+DARK_STYLESHEET = build_stylesheet()  # backward compat — evaluated once at import

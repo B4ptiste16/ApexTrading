@@ -550,33 +550,233 @@ class ToolsTab(QWidget):
         self._build_ai_key_section(s)
 
     def _build_coming_soon_section(self, s, mode: str):
-        """Placeholder shown for IBKR / TradingView / etc. while we wire
-        up the actual integration."""
-        label = mode.upper() if mode != "tradingview" else "TRADINGVIEW"
-        s.add(SectionHeader(f"{label}  —  COMING VERY SOON", C["orange"]))
-        wrap = QFrame()
-        wrap.setStyleSheet(
-            f"background:{C['panel']};border:1px solid {C['border']};"
-            f"border-radius:10px;border-left:3px solid {C['orange']};")
-        v = QVBoxLayout(wrap)
-        v.setContentsMargins(24, 22, 24, 22)
-        v.setSpacing(8)
-        title = QLabel(f"🚧  {label} integration is on the way")
-        title.setStyleSheet(
-            f"font-family:'Syne',sans-serif;font-size:16px;"
-            f"font-weight:800;color:{C['text']};letter-spacing:2px;")
-        v.addWidget(title)
-        desc = QLabel(
-            f"APEX bots currently route orders through Alpaca's paper "
-            f"trading API. {label} support — including connection setup, "
-            f"key management, and per-bot account assignment — will land "
-            f"in a future release.\n\n"
-            f"Switch back to Alpaca via the broker-mode chip in the "
-            f"header to manage your live keys.")
-        desc.setStyleSheet(f"color:{C['muted']};font-size:11px;line-height:1.6;")
-        desc.setWordWrap(True)
-        v.addWidget(desc)
-        s.add(wrap)
+        """IBKR shows a real connection-setup section. Other future brokers
+        (TradingView) keep the coming-soon placeholder."""
+        if mode == "ibkr":
+            self._build_ibkr_section(s)
+        else:
+            label = mode.upper() if mode != "tradingview" else "TRADINGVIEW"
+            s.add(SectionHeader(f"{label}  —  COMING VERY SOON", C["orange"]))
+            wrap = QFrame()
+            wrap.setStyleSheet(
+                f"background:{C['panel']};border:none;"
+                f"border-radius:10px;border-left:3px solid {C['orange']};")
+            v = QVBoxLayout(wrap)
+            v.setContentsMargins(24, 22, 24, 22)
+            v.setSpacing(8)
+            title = QLabel(f"🚧  {label} integration is on the way")
+            title.setStyleSheet(
+                f"font-family:'Syne',sans-serif;font-size:16px;"
+                f"font-weight:800;color:{C['text']};letter-spacing:2px;")
+            v.addWidget(title)
+            desc = QLabel(
+                f"APEX bots currently route orders through Alpaca's paper "
+                f"trading API. {label} support — including connection setup, "
+                f"key management, and per-bot account assignment — will land "
+                f"in a future release.\n\n"
+                f"Switch back to Alpaca via the broker-mode chip in the "
+                f"header to manage your live keys.")
+            desc.setStyleSheet(f"color:{C['muted']};font-size:11px;line-height:1.6;")
+            desc.setWordWrap(True)
+            v.addWidget(desc)
+            s.add(wrap)
+
+    def _build_ibkr_section(self, s):
+        """Full IBKR connection setup — same structure logic as Alpaca."""
+        s.add(SectionHeader("IBKR  ·  GATEWAY CONNECTION", C["green"]))
+
+        conn_info = QLabel(
+            "Interactive Brokers uses the IB Gateway or TWS desktop app as a local "
+            "API bridge. Enter your connection details below. All BAPTOU bots share "
+            "a single TWS/Gateway connection — each bot gets a unique Client ID so "
+            "orders don't collide.")
+        conn_info.setStyleSheet(f"color:{C['muted']};font-size:11px;")
+        conn_info.setWordWrap(True)
+        s.add(conn_info)
+
+        form = QFrame()
+        form.setStyleSheet(f"background:{C['panel']};border:none;border-radius:8px;")
+        fl = QGridLayout(form)
+        fl.setContentsMargins(16, 14, 16, 14)
+        fl.setHorizontalSpacing(12)
+        fl.setVerticalSpacing(10)
+
+        cur = D.load_settings().get("ibkr", {})
+
+        def lbl(text):
+            w = QLabel(text)
+            w.setStyleSheet(f"color:{C['text']};font-size:11px;")
+            return w
+
+        def inp(placeholder, key, default=""):
+            e = QLineEdit()
+            e.setPlaceholderText(placeholder)
+            e.setText(str(cur.get(key, default)))
+            return e
+
+        fl.addWidget(lbl("TWS / Gateway Host"), 0, 0)
+        self._ibkr_host = inp("127.0.0.1", "host", "127.0.0.1")
+        fl.addWidget(self._ibkr_host, 0, 1)
+
+        fl.addWidget(lbl("Port  (paper: 7497 · live: 7496)"), 1, 0)
+        self._ibkr_port = inp("7497", "port", "7497")
+        fl.addWidget(self._ibkr_port, 1, 1)
+
+        fl.addWidget(lbl("Master Account (optional)"), 2, 0)
+        self._ibkr_account = inp("e.g. DU123456", "account", "")
+        fl.addWidget(self._ibkr_account, 2, 1)
+
+        s.add(form)
+
+        # Per-bot client IDs
+        s.add(SectionHeader("BOT → CLIENT ID MAPPING", C["purple"]))
+        cid_info = QLabel(
+            "Each bot uses a unique clientId so their orders don't interfere. "
+            "IBKR requires clientId to be unique per connection. "
+            "Leave as defaults unless you run another IB application.")
+        cid_info.setStyleSheet(f"color:{C['muted']};font-size:11px;")
+        cid_info.setWordWrap(True)
+        s.add(cid_info)
+
+        cid_form = QFrame()
+        cid_form.setStyleSheet(
+            f"background:{C['panel']};border:none;border-radius:8px;")
+        cf = QGridLayout(cid_form)
+        cf.setContentsMargins(16, 14, 16, 14)
+        cf.setHorizontalSpacing(12)
+        cf.setVerticalSpacing(10)
+
+        self._ibkr_cid: dict[str, QLineEdit] = {}
+        cids = cur.get("client_ids", {})
+        for i, (side, color, default_id) in enumerate([
+            ("LONG",  C["green"],  "1"),
+            ("SHORT", C["red"],    "2"),
+            ("DAY",   C["orange"], "3"),
+        ]):
+            lab = QLabel(f"▸  {side} bot")
+            lab.setStyleSheet(f"color:{color};font-size:11px;font-weight:700;")
+            cf.addWidget(lab, i, 0)
+            e = QLineEdit(str(cids.get(side, default_id)))
+            e.setPlaceholderText(f"Client ID for {side}")
+            cf.addWidget(e, i, 1)
+            self._ibkr_cid[side] = e
+
+        s.add(cid_form)
+
+        # Money allocation
+        s.add(SectionHeader("FUND ALLOCATION", C["yellow"]))
+        alloc_info = QLabel(
+            "Allocate portions of your IB account to each bot. "
+            "Amounts are advisory — bots check buying power before placing orders. "
+            "Short bots may use margin (negative equity) — the real money check "
+            "flag will label the account as LIVE vs PAPER automatically.")
+        alloc_info.setStyleSheet(f"color:{C['muted']};font-size:11px;")
+        alloc_info.setWordWrap(True)
+        s.add(alloc_info)
+
+        alloc_form = QFrame()
+        alloc_form.setStyleSheet(
+            f"background:{C['panel']};border:none;border-radius:8px;")
+        af = QGridLayout(alloc_form)
+        af.setContentsMargins(16, 14, 16, 14)
+        af.setHorizontalSpacing(12)
+        af.setVerticalSpacing(10)
+
+        allocs = cur.get("allocations", {})
+        self._ibkr_alloc: dict[str, QLineEdit] = {}
+        for i, (side, color) in enumerate([
+            ("LONG", C["green"]), ("SHORT", C["red"]), ("DAY", C["orange"])
+        ]):
+            lab = QLabel(f"▸  {side} bot  ($)")
+            lab.setStyleSheet(f"color:{color};font-size:11px;font-weight:700;")
+            af.addWidget(lab, i, 0)
+            e = QLineEdit(str(allocs.get(side, "")))
+            e.setPlaceholderText("e.g. 10000")
+            af.addWidget(e, i, 1)
+            self._ibkr_alloc[side] = e
+
+        s.add(alloc_form)
+
+        # Save + test row
+        btn_row = QHBoxLayout()
+        save_btn = QPushButton("💾  Save IBKR settings")
+        save_btn.setObjectName("addBotBtn")
+        save_btn.clicked.connect(self._save_ibkr_settings)
+        test_btn = QPushButton("⚡  Test connection")
+        test_btn.setObjectName("toolBtn")
+        test_btn.clicked.connect(self._test_ibkr_connection)
+        self._ibkr_msg = QLabel("")
+        self._ibkr_msg.setStyleSheet(f"color:{C['green']};font-size:10px;")
+        btn_row.addWidget(save_btn)
+        btn_row.addWidget(test_btn)
+        btn_row.addWidget(self._ibkr_msg)
+        btn_row.addStretch()
+        bw = QWidget(); bw.setLayout(btn_row)
+        s.add(bw)
+
+        # Short bots + Alpaca→IBKR migration note
+        s.add(SectionHeader("NOTES", C["muted"]))
+        notes = QLabel(
+            "• Short bots hold negative positions (borrowed shares). "
+            "IBKR requires a margin account for shorting — paper trading accounts "
+            "support this.\n"
+            "• Use TOOLS → BROKER CONVERSION to export Alpaca positions as IBKR "
+            "order files when migrating real money.\n"
+            "• Money transfer between Alpaca and IBKR is done outside the app via "
+            "IBKR Fund Transfers or ACH from your bank.\n"
+            "• To detect live vs paper: a paper IBKR account has 'DU' prefix, "
+            "a live account has 'U' prefix (e.g. U1234567). BAPTOU labels it "
+            "automatically once connected."
+        )
+        notes.setStyleSheet(
+            f"font-family:'JetBrains Mono';font-size:11px;"
+            f"color:{C['text']};line-height:1.8;")
+        notes.setWordWrap(True)
+        s.add(notes)
+
+    def _save_ibkr_settings(self):
+        try:
+            import json
+            s = D.load_settings()
+            s["ibkr"] = {
+                "host":    self._ibkr_host.text().strip() or "127.0.0.1",
+                "port":    self._ibkr_port.text().strip() or "7497",
+                "account": self._ibkr_account.text().strip(),
+                "client_ids": {
+                    k: v.text().strip() or str(i + 1)
+                    for i, (k, v) in enumerate(self._ibkr_cid.items())
+                },
+                "allocations": {
+                    k: v.text().strip()
+                    for k, v in self._ibkr_alloc.items()
+                },
+            }
+            with open(D.SETTINGS_FILE, "w", encoding="utf-8") as f:
+                json.dump(s, f, indent=2)
+            self._ibkr_msg.setText("✓ Saved")
+            self._ibkr_msg.setStyleSheet(f"color:{C['green']};font-size:10px;")
+        except Exception as e:
+            self._ibkr_msg.setText(f"Save failed: {e}")
+            self._ibkr_msg.setStyleSheet(f"color:{C['red']};font-size:10px;")
+        QTimer.singleShot(3000, lambda: self._ibkr_msg.setText(""))
+
+    def _test_ibkr_connection(self):
+        self._ibkr_msg.setText("Testing…")
+        self._ibkr_msg.setStyleSheet(f"color:{C['muted']};font-size:10px;")
+        try:
+            host = self._ibkr_host.text().strip() or "127.0.0.1"
+            port = int(self._ibkr_port.text().strip() or "7497")
+            import socket
+            sock = socket.create_connection((host, port), timeout=3)
+            sock.close()
+            self._ibkr_msg.setText(f"✓ Port {port} reachable — IB Gateway appears to be running")
+            self._ibkr_msg.setStyleSheet(f"color:{C['green']};font-size:10px;")
+        except Exception as e:
+            self._ibkr_msg.setText(
+                f"✗ Could not reach {self._ibkr_host.text().strip()}:{self._ibkr_port.text().strip()} "
+                f"— make sure IB Gateway / TWS is open and API is enabled")
+            self._ibkr_msg.setStyleSheet(f"color:{C['red']};font-size:10px;")
+        QTimer.singleShot(8000, lambda: self._ibkr_msg.setText(""))
 
     def _build_alpaca_section(self, s):
         """V3.2.0 — slot-based key layout. The user enters up to 3 API
@@ -695,6 +895,72 @@ class ToolsTab(QWidget):
         fl.addWidget(bwrap, last_row + 1, 0, 1, 4)
         s.add(form)
 
+        # ── MANUAL TRADING ACCOUNT ───────────────────────────
+        s.add(SectionHeader("MANUAL TRADING ACCOUNT", C["orange"]))
+        manual_info = QLabel(
+            "A separate Alpaca paper account dedicated to manual trading. "
+            "This account is completely isolated from the LONG / SHORT / DAY "
+            "bot accounts — manual trades never interfere with bot positions.\n\n"
+            "Once saved, activate manual mode via the ✋  MANUAL button "
+            "in the app header.")
+        manual_info.setStyleSheet(f"color:{C['muted']};font-size:11px;")
+        manual_info.setWordWrap(True)
+        s.add(manual_info)
+
+        cur_m = D.read_env_keys()
+        manual_frame = QFrame()
+        manual_frame.setStyleSheet(
+            f"background:{C['panel']};border:1px solid {C['border']};"
+            f"border-radius:8px;border-left:3px solid {C['orange']};")
+        mfl = QGridLayout(manual_frame)
+        mfl.setContentsMargins(16, 14, 16, 14)
+        mfl.setHorizontalSpacing(10)
+        mfl.setVerticalSpacing(8)
+
+        _key_style = (
+            f"background:{C['panel2']};color:{C['text']};"
+            f"border:1px solid {C['border']};border-radius:4px;"
+            f"padding:5px;font-family:'JetBrains Mono';font-size:11px;")
+
+        self._manual_key_edit = QLineEdit(cur_m.get("ALPACA_API_KEY_MANUAL", ""))
+        self._manual_key_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        self._manual_key_edit.setPlaceholderText("Alpaca API key  (manual account)")
+        self._manual_key_edit.setStyleSheet(_key_style)
+
+        self._manual_secret_edit = QLineEdit(cur_m.get("ALPACA_SECRET_KEY_MANUAL", ""))
+        self._manual_secret_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        self._manual_secret_edit.setPlaceholderText("Alpaca secret  (manual account)")
+        self._manual_secret_edit.setStyleSheet(_key_style)
+
+        mfl.addWidget(QLabel("API key"), 0, 0)
+        mfl.addWidget(self._manual_key_edit, 0, 1)
+        mfl.addWidget(QLabel("Secret"), 1, 0)
+        mfl.addWidget(self._manual_secret_edit, 1, 1)
+
+        m_show = QCheckBox("Show")
+        m_show.setStyleSheet(f"color:{C['muted']};font-size:10px;")
+        def _toggle_manual_show(on):
+            _m = QLineEdit.EchoMode.Normal if on else QLineEdit.EchoMode.Password
+            self._manual_key_edit.setEchoMode(_m)
+            self._manual_secret_edit.setEchoMode(_m)
+        m_show.toggled.connect(_toggle_manual_show)
+
+        m_save = QPushButton("Save")
+        m_save.setObjectName("toolBtn")
+        m_save.clicked.connect(self._save_manual_keys)
+        self._manual_keys_msg = QLabel("")
+        self._manual_keys_msg.setStyleSheet(f"color:{C['green']};font-size:11px;")
+        m_brow = QHBoxLayout()
+        m_brow.addWidget(m_show)
+        m_brow.addSpacing(8)
+        m_brow.addWidget(m_save)
+        m_brow.addWidget(self._manual_keys_msg)
+        m_brow.addStretch()
+        m_bwrap = QWidget()
+        m_bwrap.setLayout(m_brow)
+        mfl.addWidget(m_bwrap, 2, 0, 1, 2)
+        s.add(manual_frame)
+
     def _build_ai_key_section(self, s):
         """Anthropic key stays available regardless of broker mode — it's
         used by every bot for the Claude Vision calls."""
@@ -777,6 +1043,16 @@ class ToolsTab(QWidget):
         self.keys_msg.setText("✓ Slots saved — bots use new keys on next start")
         self.keys_msg.setStyleSheet(f"color:{C['green']};font-size:11px;")
         _QT.singleShot(4000, lambda: self.keys_msg.setText(""))
+
+    def _save_manual_keys(self):
+        from PyQt6.QtCore import QTimer as _QT
+        D.write_env_keys({
+            "ALPACA_API_KEY_MANUAL":    self._manual_key_edit.text().strip(),
+            "ALPACA_SECRET_KEY_MANUAL": self._manual_secret_edit.text().strip(),
+        })
+        self._manual_keys_msg.setText("✓ Manual keys saved")
+        self._manual_keys_msg.setStyleSheet(f"color:{C['green']};font-size:11px;")
+        _QT.singleShot(4000, lambda: self._manual_keys_msg.setText(""))
 
     def _save_ai_key(self):
         from PyQt6.QtCore import QTimer as _QT

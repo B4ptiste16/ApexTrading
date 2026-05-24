@@ -41,6 +41,8 @@ from ui.friends_tab  import FriendsTab    # V3.0.0
 from ui.account_tab  import AccountTab    # V3 wave 4
 from ui.admin_tab    import AdminTab      # V3 wave 5
 from ui.bot_market_tab import BotMarketTab  # V3.1.3
+from ui.manual_tab     import ManualTradingTab  # V4.1.0
+from ui.credit_shop    import CreditShopDialog  # V4.2.0
 from ui.styles     import DARK_STYLESHEET, COLORS
 from core.updater  import (check_for_update, download_and_apply,
                             get_current_version, restart_app,
@@ -905,17 +907,34 @@ class MoreBotsTab(QWidget):
         price, _ = QInputDialog.getInt(
             self, "Price",
             "Price in APEX credits  (0 = free):", 0, 0, 1_000_000, 10)
+        # V4.1.0 — AI transparency fields
+        ai_choices = ["Claude (Anthropic)", "GPT-4 (OpenAI)", "Gemini (Google)",
+                      "Llama (Groq)", "Custom / Other"]
+        creator_ai, _ = QInputDialog.getItem(
+            self, "Creator AI",
+            "Which AI model was used to GENERATE this bot?",
+            ai_choices, 0, False)
+        runner_ai, _ = QInputDialog.getItem(
+            self, "Runner AI",
+            "Which AI model RUNS the bot (scores candidates at runtime)?",
+            ai_choices, 0, False)
+        broker_choices = ["Alpaca", "IBKR (Interactive Brokers)", "Alpaca + IBKR"]
+        broker, _ = QInputDialog.getItem(
+            self, "Compatible broker",
+            "Which broker does this bot work with?",
+            broker_choices, 0, False)
 
         from PyQt6.QtCore import QThread, pyqtSignal as _Sig
 
         class _UpWorker(QThread):
             done = _Sig(bool, str)
 
-            def __init__(self, base, tok, n, d, t, b, ph, pr):
+            def __init__(self, base, tok, n, d, t, b, ph, pr, cai, rai, brk):
                 super().__init__()
                 self.base, self.tok, self.n, self.d, self.t, self.b = \
                     base, tok, n, d, t, b
                 self.ph, self.pr = ph, pr
+                self.cai, self.rai, self.brk = cai, rai, brk
 
             def run(self):
                 import requests
@@ -926,7 +945,10 @@ class MoreBotsTab(QWidget):
                         data={"name": self.n, "description": self.d,
                               "tags": self.t,
                               "philosophy": self.ph,
-                              "price_credits": self.pr},
+                              "price_credits": self.pr,
+                              "creator_ai": self.cai,
+                              "runner_ai":  self.rai,
+                              "broker":     self.brk},
                         files={"file": ("bot.py", self.b, "text/x-python")},
                         timeout=20,
                     )
@@ -945,7 +967,8 @@ class MoreBotsTab(QWidget):
             load_server_url(), token, name.strip(), desc.strip(),
             tags.strip(), blob,
             philos if philos != "other" else "",
-            int(price))
+            int(price),
+            creator_ai, runner_ai, broker)
         def _on_pub(ok, msg):
             box = QMessageBox.information if ok else QMessageBox.warning
             box(self, "Publish bot", msg)
@@ -1103,16 +1126,20 @@ class ApexWindow(QMainWindow):
         self.bot_market_tab.closed.connect(self._close_bot_market)
         self.tools_tab     = ToolsTab()
 
+        # V4.1.0 — Manual trading tab (hidden until toggle is on)
+        self.manual_tab = ManualTradingTab()
+        self.manual_tab.switch_off_requested.connect(
+            lambda: self._toggle_manual_mode(force_off=True))
+
         self._overview_idx  = self.tabs.addTab(self.overview_tab,  "◈  OVERVIEW")
         self._morebots_idx  = self.tabs.addTab(self.more_bots_tab, "⊕  MORE BOTS")
 
-        # V3.1.3 — BOT MARKET is a "summon-able" tab. Hidden by default;
-        # MORE BOTS → 🛒 Open Bot Market makes it visible and switches to
-        # it. The market tab itself has a ✕ Close button that hides it
-        # again. Placed right after MORE BOTS so it appears in the
-        # natural reading order when revealed.
+        # V3.1.3 — BOT MARKET is a "summon-able" tab.
         self._botmarket_idx = self.tabs.addTab(self.bot_market_tab,
                                                 "🛒  BOT MARKET")
+
+        # V4.1.0 — MANUAL TRADING is a "summon-able" tab (shown when toggle is ON)
+        self._manual_idx = self.tabs.addTab(self.manual_tab, "✋  MANUAL")
 
         # Corner row reads:
         #   UNIVERSE · MAKE BOT · FRIENDS · ACCOUNT · ADMIN · TOOLS
@@ -1123,11 +1150,14 @@ class ApexWindow(QMainWindow):
         self._account_idx   = self.tabs.addTab(self.account_tab,  "")
         self._admin_idx     = self.tabs.addTab(self.admin_tab,    "")
         self._tools_idx     = self.tabs.addTab(self.tools_tab,    "")
-        for idx in (self._botmarket_idx,
+        for idx in (self._botmarket_idx, self._manual_idx,
                     self._universe_idx, self._makebot_idx,
                     self._friends_idx, self._account_idx,
                     self._admin_idx, self._tools_idx):
             self.tabs.tabBar().setTabVisible(idx, False)
+        # Restore manual tab visibility if it was on last session
+        if self._is_manual_mode():
+            self.tabs.tabBar().setTabVisible(self._manual_idx, True)
 
         # ── CORNER WIDGET (Universe / Tools) ────────────────
         self.tabs.setCornerWidget(self._build_corner(), Qt.Corner.TopRightCorner)
@@ -1199,6 +1229,8 @@ class ApexWindow(QMainWindow):
         # drag a bot script in and we'll offer to install it locally or
         # publish it to the public library.
         self.setAcceptDrops(True)
+        # Align corner widget height to the tab bar once the window has painted
+        QTimer.singleShot(200, self._sync_corner_height)
 
     # ── DRAG & DROP  (V7.1.1) ────────────────────────────────
 
@@ -1346,9 +1378,22 @@ class ApexWindow(QMainWindow):
         self.quit_btn.clicked.connect(self._quit_app)
         layout.addWidget(self.quit_btn)
 
-        # V3.2.0 — broker-mode selector. Currently only Alpaca is wired
-        # end-to-end; IBKR and TradingView show "COMING VERY SOON" in
-        # the Tools tab so users can see where it's heading.
+        # V4.1.0 — manual trading mode toggle (iPhone-style ON/OFF)
+        self._manual_mode_btn = QPushButton(self._manual_mode_label())
+        self._manual_mode_btn.setObjectName("manualModeBtn")
+        self._manual_mode_btn.setCheckable(True)
+        self._manual_mode_btn.setChecked(self._is_manual_mode())
+        self._manual_mode_btn.setProperty("active",
+            "true" if self._is_manual_mode() else "false")
+        self._manual_mode_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self._manual_mode_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._manual_mode_btn.setToolTip(
+            "Toggle between AI Auto-trading and Manual trading mode.\n"
+            "In Manual mode you place orders yourself — great for trading vs friends.")
+        self._manual_mode_btn.clicked.connect(self._toggle_manual_mode)
+        layout.addWidget(self._manual_mode_btn)
+
+        # V3.2.0 — broker-mode selector.
         self._broker_mode_btn = QPushButton(self._current_broker_label())
         self._broker_mode_btn.setObjectName("brokerModeBtn")
         self._broker_mode_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
@@ -1358,16 +1403,21 @@ class ApexWindow(QMainWindow):
         self._broker_mode_btn.clicked.connect(self._show_broker_menu)
         layout.addWidget(self._broker_mode_btn)
 
-        # V3 wave 5 — credit balance chip (visible to everyone)
-        self.credits_chip = QLabel("◊  — credits")
+        # V3 wave 5 — credit balance chip (clickable → Credit Shop)
+        self.credits_chip = QPushButton("◊  — credits")
         self.credits_chip.setObjectName("creditsChip")
         self.credits_chip.setStyleSheet(
+            f"QPushButton#creditsChip{{"
             f"color:{C['yellow']};font-size:10px;font-weight:600;"
             f"letter-spacing:1px;padding:6px 12px;margin-left:6px;"
             f"border:1px solid {C['border']};border-radius:5px;"
-            f"background:rgba(214,201,94,0.06);"
+            f"background:rgba(214,201,94,0.06);cursor:pointer;}}"
+            f"QPushButton#creditsChip:hover{{"
+            f"background:rgba(214,201,94,0.14);"
+            f"border:1px solid {C['yellow']};}}"
         )
-        self.credits_chip.setToolTip("Your APEX credit balance — refreshes every 60 s")
+        self.credits_chip.setToolTip("Click to buy more credits")
+        self.credits_chip.clicked.connect(self._open_credit_shop)
         layout.addWidget(self.credits_chip)
 
         # Logged-in user chip — V3.0.1: clickable, opens an account menu
@@ -1383,6 +1433,40 @@ class ApexWindow(QMainWindow):
             layout.addWidget(self.user_chip_btn)
 
         return header
+
+    # ── V4.1.0 — manual trading mode toggle ─────────────────
+
+    def _is_manual_mode(self) -> bool:
+        try:
+            return bool(D.load_settings().get("manual_mode", False))
+        except Exception:
+            return False
+
+    def _manual_mode_label(self) -> str:
+        return "✋  MANUAL" if self._is_manual_mode() else "⚡  AUTO"
+
+    def _toggle_manual_mode(self, *, force_off: bool = False):
+        new_state = False if force_off else not self._is_manual_mode()
+        try:
+            s = D.load_settings()
+            s["manual_mode"] = new_state
+            with open(D.SETTINGS_FILE, "w", encoding="utf-8") as f:
+                json.dump(s, f, indent=2)
+        except Exception as e:
+            print(f"[manual-mode] save failed: {e}")
+            return
+        if hasattr(self, "_manual_mode_btn"):
+            self._manual_mode_btn.setText(self._manual_mode_label())
+            self._manual_mode_btn.setChecked(new_state)
+            self._manual_mode_btn.setProperty("active", "true" if new_state else "false")
+            self._manual_mode_btn.setStyleSheet(
+                self._manual_mode_btn.styleSheet())  # force repaint
+        if hasattr(self, "tabs") and hasattr(self, "_manual_idx"):
+            self.tabs.tabBar().setTabVisible(self._manual_idx, new_state)
+            if new_state:
+                self.tabs.setCurrentIndex(self._manual_idx)
+                if hasattr(self, "manual_tab"):
+                    self.manual_tab._refresh_positions()
 
     # ── V3.2.0 — broker-mode selector ───────────────────────
 
@@ -1484,10 +1568,11 @@ class ApexWindow(QMainWindow):
 
     def _apply_broker_mode(self, mode: str):
         """Swap the central stack page based on broker mode. Page 0 is
-        the Alpaca tabbed UI; page 1 is the placeholder."""
+        the main tabbed UI (Alpaca and IBKR both use it); page 1 is the
+        placeholder for not-yet-wired brokers like TradingView."""
         if not hasattr(self, "_content_stack"):
             return
-        if mode == "alpaca":
+        if mode in ("alpaca", "ibkr"):
             self._content_stack.setCurrentIndex(0)
         else:
             label = self.BROKER_MODES.get(mode, (mode.title(), "coming"))[0]
@@ -1587,6 +1672,7 @@ class ApexWindow(QMainWindow):
         row = QHBoxLayout(w)
         row.setContentsMargins(0, 0, 8, 0)
         row.setSpacing(0)
+        row.setAlignment(Qt.AlignmentFlag.AlignVCenter)
 
         self._corner_universe = QPushButton("✦  UNIVERSE")
         self._corner_makebot  = QPushButton("⚒  MAKE BOT")
@@ -1621,6 +1707,18 @@ class ApexWindow(QMainWindow):
             lambda: self._switch_corner(self._tools_idx, self._corner_tools))
         self.tabs.currentChanged.connect(self._on_tab_changed)
         return w
+
+    def _sync_corner_height(self):
+        """Pin the corner widget height to the actual tab bar height so
+        the corner buttons sit perfectly flush with the left-side tabs."""
+        try:
+            from PyQt6.QtCore import Qt as _Qt
+            h = self.tabs.tabBar().height()
+            corner = self.tabs.cornerWidget(_Qt.Corner.TopRightCorner)
+            if corner and h > 0:
+                corner.setFixedHeight(h)
+        except Exception as e:
+            print(f"[corner-height] {e}")
 
     def _switch_corner(self, idx: int, btn: QPushButton):
         self.tabs.setCurrentIndex(idx)
@@ -2148,6 +2246,18 @@ class ApexWindow(QMainWindow):
             + "\n  · ".join(slugs) +
             "\n\nIf they were paid bots, the credits have been refunded "
             "to your APEX balance.")
+
+    def _open_credit_shop(self):
+        """Open the Credit Shop dialog. Balance passed in so we skip
+        an extra round-trip — it'll be refreshed inside the dialog."""
+        try:
+            bal = int(self.credits_chip.text().split()[1].replace(",", ""))
+        except Exception:
+            bal = 0
+        dlg = CreditShopDialog(parent=self, current_balance=bal)
+        dlg.balance_refreshed.connect(
+            lambda b: self.credits_chip.setText(f"◊  {b:,} credits"))
+        dlg.exec()
 
     def _on_user_meta_loaded(self, me: dict, balance: int):
         # Credits chip — always update

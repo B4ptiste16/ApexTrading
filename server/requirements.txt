@@ -8,3 +8,5 @@ pydantic>=2.6.0
 python-multipart>=0.0.9
 # V7.1+ — Fernet symmetric encryption for at-rest broker credentials
 cryptography>=42.0.0
+# V4.2.0 — Stripe payment gateway for credit top-ups
+stripe>=8.0.0

@@ -197,8 +197,8 @@ class AccountTab(QWidget):
         g.setVerticalSpacing(10)
 
         intro = QLabel(
-            "Pick a colour palette for the whole app. Changes apply "
-            "after restarting APEX (the stylesheet is baked at launch).")
+            "Pick a colour palette. Applies live to most UI elements. "
+            "A few card backgrounds refresh fully on next launch.")
         intro.setStyleSheet(f"color:{C['muted']};font-size:11px;")
         intro.setWordWrap(True)
         g.addWidget(intro, 0, 0, 1, 2)
@@ -231,7 +231,7 @@ class AccountTab(QWidget):
             lambda _t: self._refresh_theme_preview())
 
         row = QHBoxLayout()
-        btn = QPushButton("🎨  Apply theme  (restart required)")
+        btn = QPushButton("🎨  Apply theme")
         btn.setObjectName("toolBtn")
         btn.clicked.connect(self._apply_theme)
         self._theme_msg = QLabel("")
@@ -276,10 +276,19 @@ class AccountTab(QWidget):
             self._theme_msg.setText(f"Save failed: {e}")
             self._theme_msg.setStyleSheet(f"color:{C['red']};font-size:10px;")
             return
-        self._theme_msg.setText(
-            f"✓ {name} saved — restart APEX to see it.")
+        # Apply live: rebuild stylesheet from new palette and push to QApplication
+        try:
+            from ui.styles import apply_theme as _at
+            from PyQt6.QtWidgets import QApplication as _QApp
+            new_sheet = _at(name)
+            app = _QApp.instance()
+            if app:
+                app.setStyleSheet(new_sheet)
+        except Exception as e:
+            print(f"[theme] live apply failed: {e}")
+        self._theme_msg.setText(f"✓ {name} applied")
         self._theme_msg.setStyleSheet(f"color:{C['green']};font-size:10px;")
-        QTimer.singleShot(6000, lambda: self._theme_msg.setText(""))
+        QTimer.singleShot(4000, lambda: self._theme_msg.setText(""))
 
     def _build_password_form(self) -> QFrame:
         frame = QFrame()
