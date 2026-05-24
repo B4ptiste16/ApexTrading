@@ -423,6 +423,21 @@ def download_and_apply(update_info: dict,
 
         tmp_path.unlink(missing_ok=True)
 
+        # After a zip update the frozen bundle's apex_version.pyc still has
+        # the old version.  Write a fresh apex_version.py into app_root so
+        # that `import apex_version` on next launch picks up the new version
+        # (Python resolves a .py on sys.path before the frozen PYZ archive).
+        try:
+            new_ver = update_info.get("latest", "")
+            if new_ver:
+                (app_root / "apex_version.py").write_text(
+                    f'"""Auto-written by updater after zip update."""\n'
+                    f'VERSION = "{new_ver}"\n',
+                    encoding="utf-8",
+                )
+        except Exception:
+            pass
+
         if progress_callback:
             progress_callback(100, "Update complete!")
 
