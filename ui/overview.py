@@ -795,14 +795,20 @@ class ToolsTab(QWidget):
         s.add(keys_info)
 
         cur = D.read_env_keys()
-        # Reverse-look up which bot each existing pair belongs to. Bot
-        # name → (key, secret). Used to seed the slots.
         existing_pairs = []
-        for side in ("LONG", "SHORT", "DAY"):
-            k = cur.get(f"ALPACA_API_KEY_{side}", "")
-            sk = cur.get(f"ALPACA_SECRET_KEY_{side}", "")
-            if k or sk:
+        # Use saved slot order so custom-bot assignments survive restarts.
+        _saved_order = D.load_settings().get("alpaca_slot_order", [])
+        if _saved_order:
+            for side in _saved_order:
+                k  = cur.get(f"ALPACA_API_KEY_{side}", "")
+                sk = cur.get(f"ALPACA_SECRET_KEY_{side}", "")
                 existing_pairs.append((side, k, sk))
+        else:
+            for side in ("LONG", "SHORT", "DAY"):
+                k  = cur.get(f"ALPACA_API_KEY_{side}", "")
+                sk = cur.get(f"ALPACA_SECRET_KEY_{side}", "")
+                if k or sk:
+                    existing_pairs.append((side, k, sk))
         # Pad with empty slots so the user always sees 3
         while len(existing_pairs) < 3:
             existing_pairs.append(("__none__", "", ""))
@@ -1040,6 +1046,15 @@ class ToolsTab(QWidget):
 
         # 2. Write the new assignments
         D.write_env_keys(new_writes)
+
+        # 3. Persist slot order so custom-bot assignments survive restarts
+        import json as _json
+        _order = [slot["assign"].currentData() for slot in self._alpaca_slot_edits]
+        _s = D.load_settings()
+        _s["alpaca_slot_order"] = _order
+        with open(D.SETTINGS_FILE, "w", encoding="utf-8") as _f:
+            _json.dump(_s, _f, indent=2)
+
         self.keys_msg.setText("✓ Slots saved — bots use new keys on next start")
         self.keys_msg.setStyleSheet(f"color:{C['green']};font-size:11px;")
         _QT.singleShot(4000, lambda: self.keys_msg.setText(""))
