@@ -745,7 +745,13 @@ def set_day_atr_mults(stop_mult: float, tp_mult: float) -> None:
 ENV_FILE = ROOT / ".env"
 
 ENV_KEYS = [
+    # AI providers
     "ANTHROPIC_API_KEY",
+    "GOOGLE_AI_API_KEY",
+    "XAI_API_KEY",
+    "AI_PROVIDER",
+    "AI_MODEL",
+    # Alpaca (built-in bots)
     "ALPACA_API_KEY_LONG",  "ALPACA_SECRET_KEY_LONG",
     "ALPACA_API_KEY_SHORT", "ALPACA_SECRET_KEY_SHORT",
     "ALPACA_API_KEY_DAY",   "ALPACA_SECRET_KEY_DAY",

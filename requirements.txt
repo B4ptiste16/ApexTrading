@@ -9,6 +9,8 @@ numpy
 yfinance
 matplotlib
 anthropic
+google-generativeai
+openai
 alpaca-py
 python-dotenv
 requests

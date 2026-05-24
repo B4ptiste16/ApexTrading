@@ -66,7 +66,7 @@ import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 
 from dotenv import load_dotenv
-from anthropic import Anthropic
+from core.ai_client import call_ai_vision, load_ai_config
 
 from alpaca.trading.client import TradingClient
 from alpaca.trading.requests import (
@@ -231,10 +231,10 @@ CLOSING_SKIP_MINUTES   = 15     # skip last 15 min before close
 OPENING_BURST_SECONDS  = 300    # 5 min between runs during burst window
 OPENING_BURST_DURATION = 30 * 60
 
-# -- Claude -----------------------------------------------
+# -- AI --------------------------------------------------
 TOP_N_SCAN    = 5      # score all, send top 5 to scan filter
-TOP_N_CLAUDE  = 3      # send top 3 charts to Claude
-CLAUDE_MODEL  = "claude-haiku-4-5-20251001"
+TOP_N_CLAUDE  = 3      # send top 3 charts to AI
+# AI_PROVIDER / AI_MODEL loaded from .env via load_ai_config()
 MAX_TOKENS    = 500    # small  -  just needs one ticker + confidence
 
 # -- Files ------------------------------------------------
@@ -250,7 +250,9 @@ CHART_DIR     = "daybot_charts"
 
 os.makedirs(CHART_DIR, exist_ok=True)
 
-anthropic_client = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+_AI_PROVIDER, _AI_MODEL, _AI_KEY = load_ai_config()
+print(f"[ai] provider={_AI_PROVIDER}  model={_AI_MODEL}")
+
 trading_client   = TradingClient(
     os.getenv("ALPACA_API_KEY_DAY",   os.getenv("ALPACA_API_KEY")),
     os.getenv("ALPACA_SECRET_KEY_DAY", os.getenv("ALPACA_SECRET_KEY")),
@@ -1031,13 +1033,9 @@ def ask_claude(candidates: list, charts: dict) -> dict:
                 "source":{"type":"base64","media_type":"image/png","data":charts[t]}
             })
 
-    resp = anthropic_client.messages.create(
-        model=CLAUDE_MODEL,
-        max_tokens=MAX_TOKENS,
-        messages=[{"role":"user","content":content}]
-    )
-    raw = resp.content[0].text.strip().replace("```json","").replace("```","").strip()
-    print(f"  Claude: {raw}")
+    raw = call_ai_vision(content, _AI_PROVIDER, _AI_MODEL, _AI_KEY, MAX_TOKENS)
+    raw = raw.replace("```json","").replace("```","").strip()
+    print(f"  {_AI_PROVIDER.capitalize()}: {raw}")
     try:
         return json.loads(raw)
     except Exception:

@@ -101,6 +101,8 @@ python -m PyInstaller ^
     --collect-all PyQt6 ^
     --collect-all yfinance ^
     --collect-all anthropic ^
+    --collect-all google.generativeai ^
+    --collect-all openai ^
     --collect-all alpaca ^
     main.py
 

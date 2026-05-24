@@ -57,7 +57,7 @@ import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 
 from dotenv import load_dotenv
-from anthropic import Anthropic
+from core.ai_client import call_ai_vision, load_ai_config
 
 from alpaca.trading.client import TradingClient
 from alpaca.trading.requests import MarketOrderRequest, ClosePositionRequest
@@ -205,7 +205,8 @@ def live_min_score() -> float:
     except Exception:
         pass
     return MIN_SCORE_FOR_CLAUDE
-CLAUDE_MODEL           = "claude-haiku-4-5-20251001"
+# AI provider / model loaded from .env (AI_PROVIDER, AI_MODEL, GOOGLE_AI_API_KEY …)
+# Falls back to Anthropic / claude-haiku if not configured.
 MAX_TOKENS             = 800
 
 # -- Files ------------------------------------------------
@@ -223,7 +224,9 @@ UNIVERSE_FILE = "longbot_universe.txt"   # managed by universe_manager.py
 load_dotenv()
 os.makedirs(CHART_DIR, exist_ok=True)
 
-anthropic_client = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+_AI_PROVIDER, _AI_MODEL, _AI_KEY = load_ai_config()
+print(f"[ai] provider={_AI_PROVIDER}  model={_AI_MODEL}")
+
 trading_client   = TradingClient(
     os.getenv("ALPACA_API_KEY_LONG", os.getenv("ALPACA_API_KEY")),
     os.getenv("ALPACA_SECRET_KEY_LONG", os.getenv("ALPACA_SECRET_KEY")),
@@ -1076,15 +1079,9 @@ def ask_claude_vision(candidates: list, portfolio: dict,
         )
     })
 
-    response = anthropic_client.messages.create(
-        model=CLAUDE_MODEL,
-        max_tokens=MAX_TOKENS,
-        messages=[{"role": "user", "content": content}]
-    )
-
-    raw = response.content[0].text.strip()
+    raw = call_ai_vision(content, _AI_PROVIDER, _AI_MODEL, _AI_KEY, MAX_TOKENS)
     raw = raw.replace("```json", "").replace("```", "").strip()
-    print("RAW CLAUDE:", raw[:500])
+    print(f"RAW {_AI_PROVIDER.upper()}:", raw[:500])
 
     try:
         return json.loads(raw)

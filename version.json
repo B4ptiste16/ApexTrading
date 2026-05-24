@@ -1,4 +1,4 @@
 {
-  "version": "4.3.0",
-  "notes": "v4.3.0 — BAPTOU rebrand + custom bot key fix + manual mode\n\n🔧 FIXES\n• Custom bot API key now connects correctly — any bot slug (e.g. CRYPTO) resolves to its own ALPACA_API_KEY_<SLUG> entry\n• API key slot 2 no longer appears empty on restart — all custom slot keys are now read from .env on launch\n• Manual mode now fully swaps the UI — bot tabs, OVERVIEW, MORE BOTS, and corner buttons are hidden; only MANUAL tab is shown\n\n✨ NEW\n• Complete BAPTOU rebrand — all in-app text and dialogs updated\n• Friends tab shows manual mode banner when manual trading is active"
+  "version": "4.4.0",
+  "notes": "v4.4.0 — Multi-AI provider support\n\n✨ NEW\n• Choose your AI in Tools tab: Anthropic (Claude), Google Gemini (FREE — 1 500 req/day, no card), or xAI Grok\n• All 3 bots now route through unified ai_client — switching provider takes effect on next bot start\n• Per-provider model selector (Gemini 2.0 Flash, Grok-2-Vision, etc.)\n• Get a free Google AI key at aistudio.google.com"
 }
