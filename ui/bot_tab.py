@@ -6,7 +6,7 @@ from pathlib import Path
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QFrame, QGridLayout, QComboBox, QSizePolicy, QDoubleSpinBox, QSpinBox,
+    QFrame, QGridLayout, QSizePolicy, QDoubleSpinBox, QSpinBox,
 )
 from PyQt6.QtCore import Qt, QTimer
 
@@ -14,6 +14,7 @@ from ui.styles  import COLORS, BOT_COLOR
 from ui.widgets import (
     ChartView, MetricCard, SectionHeader,
     BotProcessWidget, ScrollContent, DataTable, ClosedTradesFeed,
+    NoScrollComboBox,
 )
 from core.worker import RefreshWorker
 import core.data   as D
@@ -81,7 +82,9 @@ class BotTab(QWidget):
         """Look up the colour the user picked when they imported a
         custom bot. Returns C['purple'] if the entry can't be found."""
         try:
-            reg = D.load_settings().get("bot_registry", {})
+            s   = D.load_settings()
+            key = D.bot_registry_key()
+            reg = s.get(key) or s.get("bot_registry", {})
             for c in reg.get("custom", []):
                 if str(c.get("id", "")).upper() == side.upper():
                     return c.get("color") or COLORS["purple"]
@@ -94,7 +97,9 @@ class BotTab(QWidget):
         """Where the bot's .py / .apex lives on disk."""
         from pathlib import Path as _P
         try:
-            reg = D.load_settings().get("bot_registry", {})
+            s   = D.load_settings()
+            key = D.bot_registry_key()
+            reg = s.get(key) or s.get("bot_registry", {})
             for c in reg.get("custom", []):
                 if str(c.get("id", "")).upper() == side.upper():
                     p = _P(c.get("script", ""))
@@ -156,6 +161,7 @@ class BotTab(QWidget):
         # 3. SIGNAL
         s.add(SectionHeader("LAST AI SIGNAL", self.color))
         s.add(self._build_signal_panel())
+        s.add(self._build_ai_config_panel())
 
         # 4. BOT CONTROLS
         s.add(SectionHeader("BOT CONTROLS", self.color))
@@ -377,7 +383,7 @@ class BotTab(QWidget):
         self.pos_table.setFixedHeight(180)
         s.add(self.pos_table)
         mr = QHBoxLayout()
-        self.pos_combo = QComboBox()
+        self.pos_combo = NoScrollComboBox()
         self.pos_combo.setPlaceholderText("Select ticker...")
         self.liq_btn   = QPushButton("⚠  LIQUIDATE")
         self.liq_btn.setObjectName("dangerBtn")
@@ -428,8 +434,113 @@ class BotTab(QWidget):
         layout.addWidget(self.sig_time_lbl, 1, 0, 1, 4)
         return frame
 
-    def _period_combo(self) -> QComboBox:
-        self.period_combo = QComboBox()
+    def _build_ai_config_panel(self) -> QFrame:
+        """Compact AI provider + model + mode selector shown beneath
+        LAST AI SIGNAL.  Settings are saved per-bot as AI_PROVIDER_<SIDE>
+        etc. in .env and synced to Oracle with the regular key sync."""
+        from core.ai_client import (PROVIDER_LABELS, PROVIDER_MODELS,
+                                    provider_supports_vision)
+
+        cfg = D.get_bot_ai_config(self.side)
+
+        frame = QFrame()
+        frame.setStyleSheet(
+            f"background:{C['panel']};border:1px solid {C['border']};"
+            f"border-radius:8px;")
+        fl = QGridLayout(frame)
+        fl.setContentsMargins(14, 10, 14, 10)
+        fl.setSpacing(8)
+        fl.setColumnStretch(1, 1)
+
+        title = QLabel("AI MODEL")
+        title.setStyleSheet(
+            f"font-size:8px;color:{C['muted']};letter-spacing:3px;"
+            f"font-weight:700;font-family:'JetBrains Mono';")
+        fl.addWidget(title, 0, 0, 1, 4)
+
+        # Provider
+        prov_lbl = QLabel("Provider")
+        prov_lbl.setStyleSheet(f"color:{C['muted']};font-size:11px;")
+        self._bot_prov_combo = NoScrollComboBox()
+        self._bot_prov_combo.setStyleSheet(
+            f"background:{C['panel2']};color:{C['text']};"
+            f"border:1px solid {C['border']};border-radius:4px;padding:4px;")
+        saved_prov = cfg.get("provider", "anthropic")
+        for key, label in PROVIDER_LABELS.items():
+            self._bot_prov_combo.addItem(label, key)
+            if key == saved_prov:
+                self._bot_prov_combo.setCurrentIndex(
+                    self._bot_prov_combo.count() - 1)
+        fl.addWidget(prov_lbl,             1, 0)
+        fl.addWidget(self._bot_prov_combo, 1, 1)
+
+        # Model
+        model_lbl = QLabel("Model")
+        model_lbl.setStyleSheet(f"color:{C['muted']};font-size:11px;")
+        self._bot_model_combo = NoScrollComboBox()
+        self._bot_model_combo.setStyleSheet(
+            f"background:{C['panel2']};color:{C['text']};"
+            f"border:1px solid {C['border']};border-radius:4px;padding:4px;")
+        fl.addWidget(model_lbl,              1, 2)
+        fl.addWidget(self._bot_model_combo,  1, 3)
+
+        # Mode
+        mode_lbl = QLabel("Mode")
+        mode_lbl.setStyleSheet(f"color:{C['muted']};font-size:11px;")
+        self._bot_mode_combo = NoScrollComboBox()
+        self._bot_mode_combo.setStyleSheet(
+            f"background:{C['panel2']};color:{C['text']};"
+            f"border:1px solid {C['border']};border-radius:4px;padding:4px;")
+        self._bot_mode_combo.addItem("Vision  (charts)", "vision")
+        self._bot_mode_combo.addItem("Text-only  (no charts — works with Groq)", "text")
+        saved_mode = cfg.get("mode", "vision")
+        mode_idx = self._bot_mode_combo.findData(saved_mode)
+        if mode_idx >= 0:
+            self._bot_mode_combo.setCurrentIndex(mode_idx)
+        fl.addWidget(mode_lbl,             2, 0)
+        fl.addWidget(self._bot_mode_combo, 2, 1, 1, 2)
+
+        # Save button + status
+        save_btn = QPushButton("Save")
+        save_btn.setObjectName("toolBtn")
+        save_btn.clicked.connect(self._save_ai_config)
+        self._ai_cfg_msg = QLabel("")
+        self._ai_cfg_msg.setStyleSheet(f"color:{C['green']};font-size:10px;")
+        fl.addWidget(save_btn,          2, 3)
+        fl.addWidget(self._ai_cfg_msg,  3, 0, 1, 4)
+
+        # Wire provider → update model list and enforce text mode for Groq
+        def _on_prov(_idx):
+            prov = self._bot_prov_combo.currentData()
+            models = PROVIDER_MODELS.get(prov, [])
+            saved_model = cfg.get("model", "")
+            self._bot_model_combo.clear()
+            for m in models:
+                self._bot_model_combo.addItem(m)
+            idx = self._bot_model_combo.findText(saved_model)
+            if idx >= 0:
+                self._bot_model_combo.setCurrentIndex(idx)
+            if not provider_supports_vision(prov):
+                self._bot_mode_combo.setCurrentIndex(
+                    self._bot_mode_combo.findData("text"))
+                self._bot_mode_combo.setEnabled(False)
+            else:
+                self._bot_mode_combo.setEnabled(True)
+
+        self._bot_prov_combo.currentIndexChanged.connect(_on_prov)
+        _on_prov(0)   # populate model list immediately
+        return frame
+
+    def _save_ai_config(self):
+        prov  = self._bot_prov_combo.currentData()  or "anthropic"
+        model = self._bot_model_combo.currentText().strip()
+        mode  = self._bot_mode_combo.currentData()  or "vision"
+        D.set_bot_ai_config(self.side, prov, model, mode)
+        self._ai_cfg_msg.setText("saved ✓  — sync to Oracle for cloud bots")
+        QTimer.singleShot(3000, lambda: self._ai_cfg_msg.setText(""))
+
+    def _period_combo(self) -> NoScrollComboBox:
+        self.period_combo = NoScrollComboBox()
         self.period_combo.addItems(["1D","1W","1M","3M","6M","1Y"])
         self.period_combo.setFixedWidth(80)
         self.period_combo.currentTextChanged.connect(

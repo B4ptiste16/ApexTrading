@@ -1,10 +1,10 @@
-﻿"""
-APEX Â· Friends tab  (V3.0.0)
-â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+"""
+APEX · Friends tab  (V3.0.0)
+─────────────────────────────────────────────────────────────────────
 Add friends by username, accept / decline pending requests, browse a
 friend's shared profile, and configure what to share with friends vs.
 publicly. All calls go to the APEX server's /friends/* and
-/share-settings endpoints â€” see server/friends.py.
+/share-settings endpoints — see server/friends.py.
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ from ui.widgets import ScrollContent, SectionHeader
 C = COLORS
 
 
-# â”€â”€ HTTP worker (thin wrapper so the UI never blocks) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── HTTP worker (thin wrapper so the UI never blocks) ───────────────
 
 class _HttpWorker(QThread):
     done = pyqtSignal(bool, dict)   # ok, parsed body
@@ -64,7 +64,7 @@ class _HttpWorker(QThread):
             self.done.emit(False, {"detail": str(e)})
 
 
-# â”€â”€ Tab widget â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── Tab widget ──────────────────────────────────────────────────────
 
 class FriendsTab(QWidget):
 
@@ -72,7 +72,7 @@ class FriendsTab(QWidget):
         super().__init__(parent)
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
-        # V3 wave 5 â€” two views in a stack so the friend profile can
+        # V3 wave 5 — two views in a stack so the friend profile can
         # replace the friends list IN PLACE instead of popping a dialog.
         self._stack = QStackedWidget()
         root.addWidget(self._stack)
@@ -92,7 +92,7 @@ class FriendsTab(QWidget):
         self._refresh_friends()
         self._refresh_settings()
 
-    # â”€â”€ Layout â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── Layout ──────────────────────────────────────────────────────
 
     def set_manual_mode(self, on: bool):
         """Called by main window when the user switches manual/auto mode.
@@ -105,7 +105,7 @@ class FriendsTab(QWidget):
     def _build(self):
         s = self.scroll
 
-        # â”€â”€â”€ MANUAL MODE BANNER (hidden in auto mode) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ─── MANUAL MODE BANNER (hidden in auto mode) ─────────────
         self._manual_banner = QFrame()
         self._manual_banner.setStyleSheet(
             f"background:{C['panel']};border:none;border-radius:10px;"
@@ -113,12 +113,12 @@ class FriendsTab(QWidget):
         _bv = QVBoxLayout(self._manual_banner)
         _bv.setContentsMargins(20, 14, 20, 14)
         _bv.setSpacing(4)
-        _btitle = QLabel("âœ‹  MANUAL MODE â€” Friends' manual accounts")
+        _btitle = QLabel("✋  MANUAL MODE — Friends' manual accounts")
         _btitle.setStyleSheet(
             f"font-family:'Syne',sans-serif;font-size:13px;font-weight:800;"
             f"color:{C['orange']};letter-spacing:1px;")
         _bsub = QLabel(
-            "You're seeing your friends' dedicated manual trading accounts â€” "
+            "You're seeing your friends' dedicated manual trading accounts — "
             "performance here is purely from manual orders, no bots.")
         _bsub.setStyleSheet(f"color:{C['muted']};font-size:11px;")
         _bsub.setWordWrap(True)
@@ -127,7 +127,7 @@ class FriendsTab(QWidget):
         self._manual_banner.setVisible(False)
         s.add(self._manual_banner)
 
-        # â”€â”€â”€ SEARCH / ADD â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ─── SEARCH / ADD ────────────────────────────────────────
         s.add(SectionHeader("ADD A FRIEND", C["purple"]))
         intro = QLabel(
             "Search for a BAPTOU user by username and send them a "
@@ -139,7 +139,7 @@ class FriendsTab(QWidget):
 
         search_row = QHBoxLayout()
         self._search_edit = QLineEdit()
-        self._search_edit.setPlaceholderText("Username or display nameâ€¦")
+        self._search_edit.setPlaceholderText("Username or display name…")
         self._search_edit.setStyleSheet(self._input_css())
         self._search_edit.returnPressed.connect(self._do_search)
         search_btn = QPushButton("Search")
@@ -160,7 +160,7 @@ class FriendsTab(QWidget):
         self._search_layout.addWidget(self._search_status)
         s.add(self._search_results)
 
-        # â”€â”€â”€ INCOMING REQUESTS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ─── INCOMING REQUESTS ───────────────────────────────────
         s.add(SectionHeader("INCOMING REQUESTS", C["yellow"]))
         self._incoming_box = QWidget()
         self._incoming_layout = QVBoxLayout(self._incoming_box)
@@ -172,7 +172,7 @@ class FriendsTab(QWidget):
         self._incoming_layout.addWidget(self._incoming_empty)
         s.add(self._incoming_box)
 
-        # â”€â”€â”€ FRIENDS LIST â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ─── FRIENDS LIST ────────────────────────────────────────
         s.add(SectionHeader("FRIENDS", C["green"]))
         self._accepted_box = QWidget()
         self._accepted_layout = QVBoxLayout(self._accepted_box)
@@ -184,7 +184,7 @@ class FriendsTab(QWidget):
         self._accepted_layout.addWidget(self._accepted_empty)
         s.add(self._accepted_box)
 
-        # â”€â”€â”€ OUTGOING (pending) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ─── OUTGOING (pending) ──────────────────────────────────
         s.add(SectionHeader("SENT REQUESTS  (pending)", C["muted"]))
         self._outgoing_box = QWidget()
         self._outgoing_layout = QVBoxLayout(self._outgoing_box)
@@ -196,11 +196,11 @@ class FriendsTab(QWidget):
         self._outgoing_layout.addWidget(self._outgoing_empty)
         s.add(self._outgoing_box)
 
-        # â”€â”€â”€ SHARE SETTINGS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ─── SHARE SETTINGS ──────────────────────────────────────
         s.add(SectionHeader("SHARING", C["orange"]))
         share_intro = QLabel(
             "Choose what's visible to friends and what's visible to "
-            "everyone. Everything is OFF by default â€” sharing is opt-in.")
+            "everyone. Everything is OFF by default — sharing is opt-in.")
         share_intro.setStyleSheet(f"color:{C['muted']};font-size:11px;")
         share_intro.setWordWrap(True)
         s.add(share_intro)
@@ -240,10 +240,10 @@ class FriendsTab(QWidget):
         self._chk_allow_dl.stateChanged.connect(self._on_share_changed)
         g.addWidget(self._chk_allow_dl, 2, 0, 1, 3)
 
-        # Per-stat toggles â€” friends and public columns
+        # Per-stat toggles — friends and public columns
         self._share_widgets: dict[str, dict[str, QCheckBox]] = {}
         rows = [
-            ("broker",  "Broker(s) used (Alpaca, IBKRâ€¦)"),
+            ("broker",  "Broker(s) used (Alpaca, IBKR…)"),
             ("daily",   "Daily P/L"),
             ("monthly", "Monthly P/L"),
             ("yearly",  "Yearly P/L"),
@@ -272,7 +272,7 @@ class FriendsTab(QWidget):
 
         return frame
 
-    # â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── Helpers ─────────────────────────────────────────────────────
 
     def _input_css(self) -> str:
         return (
@@ -295,7 +295,7 @@ class FriendsTab(QWidget):
             if w and w is not keep_first:
                 w.deleteLater()
 
-    # â”€â”€ Search â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── Search ──────────────────────────────────────────────────────
 
     def _do_search(self):
         q = self._search_edit.text().strip()
@@ -303,7 +303,7 @@ class FriendsTab(QWidget):
             self._search_status.setText("Type at least 2 characters.")
             return
         self._clear_layout(self._search_layout, keep_first=self._search_status)
-        self._search_status.setText("Searchingâ€¦")
+        self._search_status.setText("Searching…")
 
         worker = _HttpWorker("GET", "/friends/search", params={"q": q})
         self._spawn(worker, self._on_search_done)
@@ -321,7 +321,7 @@ class FriendsTab(QWidget):
         for u in users:
             self._search_layout.addWidget(self._make_user_row(u, action="add"))
 
-    # â”€â”€ Friends refresh â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── Friends refresh ─────────────────────────────────────────────
 
     def _refresh_friends(self):
         worker = _HttpWorker("GET", "/friends")
@@ -348,14 +348,14 @@ class FriendsTab(QWidget):
         for e in accepted:
             self._accepted_layout.addWidget(
                 self._make_friendship_row(e, action="view"))
-            # V4.0.0 â€” fetch each accepted friend's shared snapshot
+            # V4.0.0 — fetch each accepted friend's shared snapshot
             # asynchronously and inject under the row when it arrives
             self._fetch_friend_summary(e)
         for e in outgoing:
             self._outgoing_layout.addWidget(
                 self._make_friendship_row(e, action="cancel"))
 
-    # â”€â”€ Row factories â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── Row factories ───────────────────────────────────────────────
 
     def _make_user_row(self, u: dict, action: str) -> QWidget:
         row = QFrame()
@@ -377,7 +377,7 @@ class FriendsTab(QWidget):
         hl.addWidget(mw, 1)
 
         if action == "add":
-            btn = QPushButton("âž•  Send request")
+            btn = QPushButton("➕  Send request")
             btn.setObjectName("addBotBtn")
             btn.clicked.connect(lambda _, uname=u["username"]:
                                 self._send_request(uname))
@@ -385,7 +385,7 @@ class FriendsTab(QWidget):
         return row
 
     def _fetch_friend_summary(self, e: dict):
-        """V4.0.0 â€” pull the friend's profile in the background and
+        """V4.0.0 — pull the friend's profile in the background and
         attach a one-line summary under their row in the FRIENDS list."""
         peer = e.get("peer", {})
         uname = peer.get("username")
@@ -399,7 +399,7 @@ class FriendsTab(QWidget):
         if not ok:
             return
         shows = body.get("shows", {})
-        # Build a compact line: "TODAY +$45 Â· MONTH +$120 Â· Alpaca"
+        # Build a compact line: "TODAY +$45 · MONTH +$120 · Alpaca"
         bits = []
         pl = body.get("pl", {}) or {}
         for label, key in (("Today", "daily"),
@@ -417,10 +417,10 @@ class FriendsTab(QWidget):
                     f"<span style='color:{C['muted']};'>{label} (not sharing)</span>")
         if shows.get("broker"):
             brokers = body.get("broker") or []
-            bits.append(f"<span style='color:{C['muted']};'>Â· "
-                        f"{', '.join(brokers) or 'â€”'}</span>")
+            bits.append(f"<span style='color:{C['muted']};'>· "
+                        f"{', '.join(brokers) or '—'}</span>")
         else:
-            bits.append(f"<span style='color:{C['muted']};'>Â· broker (not sharing)</span>")
+            bits.append(f"<span style='color:{C['muted']};'>· broker (not sharing)</span>")
         line = "  ".join(bits)
         # Find the matching accepted row and append the summary label
         for i in range(self._accepted_layout.count()):
@@ -447,7 +447,7 @@ class FriendsTab(QWidget):
         row.setStyleSheet(
             f"background:{C['panel2']};border:1px solid {C['border']};"
             f"border-radius:8px;")
-        # V4.0.0 â€” outer layout is now VERTICAL so an async friend-summary
+        # V4.0.0 — outer layout is now VERTICAL so an async friend-summary
         # line can stack underneath the header without breaking layout.
         outer = QVBoxLayout(row)
         outer.setContentsMargins(14, 8, 14, 8)
@@ -469,36 +469,36 @@ class FriendsTab(QWidget):
         hl.addWidget(mw, 1)
 
         if action == "respond":
-            accept = QPushButton("âœ“  Accept")
+            accept = QPushButton("✓  Accept")
             accept.setObjectName("addBotBtn")
             accept.clicked.connect(
                 lambda _, fid=e["friendship_id"]: self._respond(fid, True))
-            decline = QPushButton("âœ•  Decline")
+            decline = QPushButton("✕  Decline")
             decline.setObjectName("dangerBtn")
             decline.clicked.connect(
                 lambda _, fid=e["friendship_id"]: self._respond(fid, False))
             hl.addWidget(accept)
             hl.addWidget(decline)
         elif action == "view":
-            view = QPushButton("ðŸ‘  View")
+            view = QPushButton("👁  View")
             view.setObjectName("toolBtn")
             view.clicked.connect(
                 lambda _, uname=peer["username"]: self._view_profile(uname))
-            unfriend = QPushButton("âœ•  Unfriend")
+            unfriend = QPushButton("✕  Unfriend")
             unfriend.setObjectName("dangerBtn")
             unfriend.clicked.connect(
                 lambda _, uid=peer["id"]: self._unfriend(uid, peer["username"]))
             hl.addWidget(view)
             hl.addWidget(unfriend)
         elif action == "cancel":
-            cancel = QPushButton("âœ•  Cancel")
+            cancel = QPushButton("✕  Cancel")
             cancel.setObjectName("dangerBtn")
             cancel.clicked.connect(
                 lambda _, fid=e["friendship_id"]: self._respond(fid, False))
             hl.addWidget(cancel)
         return row
 
-    # â”€â”€ Actions â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── Actions ─────────────────────────────────────────────────────
 
     def _send_request(self, username: str):
         w = _HttpWorker("POST", "/friends/request",
@@ -524,7 +524,7 @@ class FriendsTab(QWidget):
             ok, body, "Removed." if ok else None))
 
     def _view_profile(self, username: str):
-        """V3 wave 5 â€” swap to the in-place profile view, fetch both the
+        """V3 wave 5 — swap to the in-place profile view, fetch both the
         profile info and the friend's shareable bots, render in MetricCard
         style (matches the overview tab)."""
         self._profile_view.show_loading(username)
@@ -565,7 +565,7 @@ class FriendsTab(QWidget):
         if self._search_edit.text().strip():
             self._do_search()
 
-    # â”€â”€ Share settings â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── Share settings ──────────────────────────────────────────────
 
     def _refresh_settings(self):
         w = _HttpWorker("GET", "/share-settings")
@@ -594,14 +594,14 @@ class FriendsTab(QWidget):
         for key, pair in self._share_widgets.items():
             patch[f"share_{key}_friends"] = int(pair["friends"].isChecked())
             patch[f"share_{key}_public"]  = int(pair["public"].isChecked())
-        self._share_status.setText("Savingâ€¦")
+        self._share_status.setText("Saving…")
         self._share_status.setStyleSheet(f"color:{C['muted']};font-size:10px;")
         w = _HttpWorker("PUT", "/share-settings", payload=patch)
         self._spawn(w, self._on_share_saved)
 
     def _on_share_saved(self, ok: bool, body: dict):
         if ok:
-            self._share_status.setText("Saved âœ“")
+            self._share_status.setText("Saved ✓")
             self._share_status.setStyleSheet(
                 f"color:{C['green']};font-size:10px;")
         else:
@@ -612,7 +612,7 @@ class FriendsTab(QWidget):
         QTimer.singleShot(3000, lambda: self._share_status.setText(""))
 
 
-# â”€â”€ In-place friend profile view (V3 wave 5) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── In-place friend profile view (V3 wave 5) ────────────────────────
 
 class _FriendProfileView(QWidget):
     """Full-tab view showing a friend's shared profile + their bot
@@ -629,7 +629,7 @@ class _FriendProfileView(QWidget):
 
         # Back button row
         back_row = QHBoxLayout()
-        back = QPushButton("â†  Back to friends")
+        back = QPushButton("←  Back to friends")
         back.setObjectName("toolBtn")
         back.clicked.connect(parent_tab.show_list_view)
         back_row.addWidget(back)
@@ -665,10 +665,10 @@ class _FriendProfileView(QWidget):
         self.scroll.add(_SH2("SHARED STATS", C["green"]))
         self._stats_row = QHBoxLayout()
         self._stats_row.setSpacing(10)
-        self._card_broker  = _MC("BROKERS",       "â€”")
-        self._card_daily   = _MC("TODAY P/L",     "â€”")
-        self._card_monthly = _MC("THIS MONTH",    "â€”")
-        self._card_yearly  = _MC("THIS YEAR",     "â€”")
+        self._card_broker  = _MC("BROKERS",       "—")
+        self._card_daily   = _MC("TODAY P/L",     "—")
+        self._card_monthly = _MC("THIS MONTH",    "—")
+        self._card_yearly  = _MC("THIS YEAR",     "—")
         for card in (self._card_broker, self._card_daily,
                      self._card_monthly, self._card_yearly):
             self._stats_row.addWidget(card)
@@ -691,11 +691,11 @@ class _FriendProfileView(QWidget):
 
     def show_loading(self, username: str):
         self._name_lbl.setText(username)
-        self._handle_lbl.setText("Loadingâ€¦")
+        self._handle_lbl.setText("Loading…")
         self._tier_lbl.setText("")
         for c in (self._card_broker, self._card_daily,
                   self._card_monthly, self._card_yearly):
-            c.update_value("â€”")
+            c.update_value("—")
         self._clear_bots()
 
     def _clear_bots(self):
@@ -724,9 +724,9 @@ class _FriendProfileView(QWidget):
         if shows.get("broker"):
             brokers = profile.get("broker") or []
             self._card_broker.update_value(
-                ", ".join(brokers) if brokers else "â€”")
+                ", ".join(brokers) if brokers else "—")
         else:
-            self._card_broker.update_value("â€”",
+            self._card_broker.update_value("—",
                 sub="not shared" if tier != "self" else None)
 
         # P&L cards
@@ -741,7 +741,7 @@ class _FriendProfileView(QWidget):
                 card.update_value(f"{sign}${d['pl']:,.2f}", color,
                                    sub=f"{sign}{d['pct']:.2f}%")
             else:
-                card.update_value("â€”",
+                card.update_value("—",
                     sub="not shared" if tier != "self" else None)
 
         # Bots
@@ -788,16 +788,16 @@ class _FriendProfileView(QWidget):
         hw = QWidget(); hw.setLayout(head)
         v.addWidget(hw)
 
-        desc = QLabel(b.get("description") or "â€”")
+        desc = QLabel(b.get("description") or "—")
         desc.setStyleSheet(f"color:{C['muted']};font-size:11px;")
         desc.setWordWrap(True)
         v.addWidget(desc)
 
         meta = QLabel(
-            f"â¬‡ {b.get('downloads',0)}   Â·   "
-            f"{b.get('size_bytes',0)//1024} KB   Â·   "
+            f"⬇ {b.get('downloads',0)}   ·   "
+            f"{b.get('size_bytes',0)//1024} KB   ·   "
             f"{b.get('philosophy') or 'unspecified'}"
-            + (f"   Â·   â˜… {b['rating']:.1f}" if b.get("rating") else "")
+            + (f"   ·   ★ {b['rating']:.1f}" if b.get("rating") else "")
         )
         meta.setStyleSheet(f"color:{C['muted']};font-size:10px;")
         v.addWidget(meta)
@@ -805,7 +805,7 @@ class _FriendProfileView(QWidget):
         if allow_install:
             row_btn = QHBoxLayout()
             row_btn.addStretch()
-            install = QPushButton("â¬‡  Install to my library")
+            install = QPushButton("⬇  Install to my library")
             install.setObjectName("addBotBtn")
             install.clicked.connect(
                 lambda _, slug=b["slug"], name=b["name"]:
@@ -849,24 +849,19 @@ class _FriendProfileView(QWidget):
             # Register in local bot_registry so MORE BOTS picks it up
             try:
                 from core import data as _D
-                import json as _json
-                s = _D.load_settings()
-                reg = s.get("bot_registry",
-                            {"active": [], "silenced": [], "custom": []})
+                reg = _D.load_bot_registry()
                 existing = [c["id"] for c in reg.get("custom", [])]
                 if slug not in existing:
                     reg.setdefault("custom", []).append({
                         "id":     slug, "label":  name,
                         "script": str(dest), "color":  C["purple"],
                     })
-                    s["bot_registry"] = reg
-                    with open(_D.SETTINGS_FILE, "w", encoding="utf-8") as f:
-                        _json.dump(s, f, indent=2)
+                    _D.save_bot_registry(reg)
             except Exception as e:
                 print(f"[friend-install] registry update failed: {e}")
             QMessageBox.information(
                 self, "Bot installed",
-                f"'{name}' is now in your library. Open MORE BOTS â†’ "
+                f"'{name}' is now in your library. Open MORE BOTS → "
                 f"AVAILABLE TO ADD to activate it.")
 
         self._dl_worker = _DL()

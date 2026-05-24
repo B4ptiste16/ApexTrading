@@ -449,6 +449,43 @@ def load_settings() -> dict:
         return {}
 
 
+def bot_registry_key() -> str:
+    """Return the per-user, per-broker settings key for the bot registry.
+    Safe to call from any module — no Qt dependency.
+    Falls back to plain "bot_registry" when no user is logged in."""
+    try:
+        from ui.login import load_auth
+        auth = load_auth() or {}
+        uid = auth.get("user_id") or auth.get("email") or ""
+        broker = load_settings().get("broker_mode", "alpaca")
+        if uid:
+            return f"bot_registry_{uid}_{broker}"
+    except Exception:
+        pass
+    return "bot_registry"
+
+
+def load_bot_registry() -> dict:
+    """Load the per-user, per-broker bot registry from settings.
+    Falls back to the legacy global key for backward compatibility.
+    Always returns a dict with at least 'active', 'silenced', 'custom' keys."""
+    s   = load_settings()
+    key = bot_registry_key()
+    reg = s.get(key) or s.get("bot_registry") or {}
+    reg.setdefault("active",   [])
+    reg.setdefault("silenced", [])
+    reg.setdefault("custom",   [])
+    return reg
+
+
+def save_bot_registry(reg: dict) -> None:
+    """Persist *reg* under the per-user, per-broker settings key."""
+    s = load_settings()
+    s[bot_registry_key()] = reg
+    with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
+        json.dump(s, f, indent=2)
+
+
 def get_auto_schedule() -> bool:
     """Back-compat: True if any bot has auto-schedule enabled. Used
     elsewhere as a coarse 'is the schedule feature active' check."""
@@ -499,7 +536,7 @@ def get_auto_schedule_active_bots() -> list[str]:
     # Legacy migration — if the global flag was on, treat every active
     # bot from the registry as scheduled.
     if s.get("auto_schedule"):
-        reg = s.get("bot_registry", {})
+        reg = load_bot_registry()
         return list(reg.get("active", ["LONG", "SHORT", "DAY"]))
     return []
 
@@ -762,7 +799,8 @@ ENV_KEYS = [
 
 def read_env_keys() -> dict:
     """Read all managed keys from the data-folder .env, including custom-bot
-    slot keys (ALPACA_API_KEY_<SLUG> / ALPACA_SECRET_KEY_<SLUG>)."""
+    slot keys (ALPACA_API_KEY_<SLUG> / ALPACA_SECRET_KEY_<SLUG>) and
+    per-bot AI config (AI_PROVIDER_<SIDE>, AI_MODEL_<SIDE>, AI_MODE_<SIDE>)."""
     out = {k: "" for k in ENV_KEYS}
     try:
         with open(ENV_FILE, "r", encoding="utf-8") as f:
@@ -775,11 +813,41 @@ def read_env_keys() -> dict:
                 v = v.strip().strip('"').strip("'")
                 if (k in ENV_KEYS
                         or k.startswith("ALPACA_API_KEY_")
-                        or k.startswith("ALPACA_SECRET_KEY_")):
+                        or k.startswith("ALPACA_SECRET_KEY_")
+                        or k.startswith("AI_PROVIDER_")
+                        or k.startswith("AI_MODEL_")
+                        or k.startswith("AI_MODE_")):
                     out[k] = v
     except Exception:
         pass
     return out
+
+
+def get_bot_ai_config(side: str) -> dict:
+    """Return the per-bot AI config for *side* (LONG/SHORT/DAY/custom).
+
+    Keys: provider, model, mode.
+    Falls back to the global AI_PROVIDER / AI_MODEL / AI_MODE .env vars,
+    then to sensible defaults if nothing is set."""
+    s = side.upper()
+    env = read_env_keys()
+    provider = env.get(f"AI_PROVIDER_{s}") or env.get("AI_PROVIDER", "anthropic")
+    model    = env.get(f"AI_MODEL_{s}")    or env.get("AI_MODEL", "")
+    mode     = env.get(f"AI_MODE_{s}")     or env.get("AI_MODE", "vision")
+    return {"provider": provider, "model": model, "mode": mode}
+
+
+def set_bot_ai_config(side: str, provider: str, model: str, mode: str) -> None:
+    """Persist per-bot AI config as AI_PROVIDER_<SIDE> etc. in .env.
+
+    These are picked up by read_env_keys() and included in the credentials
+    sync so the Oracle bot runner receives them automatically."""
+    s = side.upper()
+    write_env_keys({
+        f"AI_PROVIDER_{s}": provider,
+        f"AI_MODEL_{s}":    model,
+        f"AI_MODE_{s}":     mode,
+    })
 
 
 def delete_env_keys(names: list[str]) -> None:
@@ -829,7 +897,10 @@ def write_env_keys(values: dict) -> None:
         if k in ENV_KEYS:
             return True
         return (k.startswith("ALPACA_API_KEY_")
-                or k.startswith("ALPACA_SECRET_KEY_"))
+                or k.startswith("ALPACA_SECRET_KEY_")
+                or k.startswith("AI_PROVIDER_")
+                or k.startswith("AI_MODEL_")
+                or k.startswith("AI_MODE_"))
     vals = {k: str(v).strip() for k, v in values.items()
             if _allow(k) and str(v).strip()}
     if not vals:

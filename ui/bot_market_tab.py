@@ -1,24 +1,24 @@
-﻿"""
-APEX Â· Bot Market tab  (V3.1.3)
-â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-Full marketplace experience â€” only appears in the tab bar when the
+"""
+APEX · Bot Market tab  (V3.1.3)
+─────────────────────────────────────────────────────────────────────
+Full marketplace experience — only appears in the tab bar when the
 user clicks "OPEN BOT MARKET" inside the MORE BOTS tab.
 
 Layout:
-  â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
-  â”‚  ðŸ›’ BOT MARKET                          [âœ• Close market] â”‚
-  â”‚  Browse, install and publish bots from the BAPTOU network. â”‚
-  â”œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¤
-  â”‚  ðŸ” [search...............]   [â¬†  Publish a bot]         â”‚
-  â”‚  Philosophy [â–¼]  Sort [â–¼]  Max â—Š [   ]  Min win % [   ]  â”‚
-  â”œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¤
-  â”‚   âœ¨ Featured     ðŸŽ¯ For You     ðŸ” Browse     ðŸ“Š Mine   â”‚â† sub-nav pills
-  â”‚   â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€                                              â”‚
-  â”‚                                                          â”‚
-  â”‚   [bot card]     [bot card]     [bot card]               â”‚â† 2-col grid
-  â”‚   [bot card]     [bot card]     [bot card]               â”‚
-  â”‚                                                          â”‚
-  â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
+  ┌──────────────────────────────────────────────────────────┐
+  │  🛒 BOT MARKET                          [✕ Close market] │
+  │  Browse, install and publish bots from the BAPTOU network. │
+  ├──────────────────────────────────────────────────────────┤
+  │  🔍 [search...............]   [⬆  Publish a bot]         │
+  │  Philosophy [▼]  Sort [▼]  Max ◊ [   ]  Min win % [   ]  │
+  ├──────────────────────────────────────────────────────────┤
+  │   ✨ Featured     🎯 For You     🔍 Browse     📊 Mine   │← sub-nav pills
+  │   ──────────                                              │
+  │                                                          │
+  │   [bot card]     [bot card]     [bot card]               │← 2-col grid
+  │   [bot card]     [bot card]     [bot card]               │
+  │                                                          │
+  └──────────────────────────────────────────────────────────┘
 """
 
 from __future__ import annotations
@@ -29,12 +29,12 @@ from typing import Optional
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QPushButton,
-    QFrame, QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox, QMessageBox,
+    QFrame, QLineEdit, QSpinBox, QDoubleSpinBox, QMessageBox,
     QStackedWidget, QInputDialog, QSizePolicy,
 )
 
 from ui.styles  import COLORS
-from ui.widgets import ScrollContent, SectionHeader
+from ui.widgets import ScrollContent, SectionHeader, NoScrollComboBox
 
 C = COLORS
 
@@ -76,7 +76,7 @@ class _HttpWorker(QThread):
 class BotMarketTab(QWidget):
     """The standalone marketplace. Opened via the MORE BOTS button."""
 
-    closed = pyqtSignal()   # emitted when user clicks âœ•
+    closed = pyqtSignal()   # emitted when user clicks ✕
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -92,12 +92,12 @@ class BotMarketTab(QWidget):
     def refresh(self):
         self._refresh_current_view()
 
-    # â”€â”€ Layout â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── Layout ─────────────────────────────────────────────────────
 
     def _build(self):
         s = self.scroll
 
-        # â”€â”€â”€ HERO â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ─── HERO ─────────────────────────────────────────────────
         hero = QFrame()
         hero.setStyleSheet(
             f"background:{C['panel']};border:1px solid {C['border']};"
@@ -107,13 +107,13 @@ class BotMarketTab(QWidget):
         hv.setSpacing(8)
 
         top_row = QHBoxLayout()
-        title = QLabel("ðŸ›’  BOT MARKET")
+        title = QLabel("🛒  BOT MARKET")
         title.setStyleSheet(
             f"font-family:'Syne',sans-serif;font-size:24px;font-weight:800;"
             f"color:{C['text']};letter-spacing:4px;")
         top_row.addWidget(title)
         top_row.addStretch()
-        close_btn = QPushButton("âœ•  Close market")
+        close_btn = QPushButton("✕  Close market")
         close_btn.setObjectName("toolBtn")
         close_btn.clicked.connect(self.closed.emit)
         top_row.addWidget(close_btn)
@@ -125,7 +125,7 @@ class BotMarketTab(QWidget):
         hv.addWidget(sub)
         s.add(hero)
 
-        # â”€â”€â”€ SEARCH + PUBLISH ROW â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ─── SEARCH + PUBLISH ROW ─────────────────────────────────
         search_wrap = QFrame()
         search_wrap.setStyleSheet("background:transparent;border:none;")
         sw = QVBoxLayout(search_wrap)
@@ -134,7 +134,7 @@ class BotMarketTab(QWidget):
 
         search_row = QHBoxLayout()
         self._search_edit = QLineEdit()
-        self._search_edit.setPlaceholderText("ðŸ”   Search bots by name or descriptionâ€¦")
+        self._search_edit.setPlaceholderText("🔍   Search bots by name or description…")
         self._search_edit.setFixedHeight(42)
         self._search_edit.setStyleSheet(
             f"background:{C['panel2']};color:{C['text']};"
@@ -143,7 +143,7 @@ class BotMarketTab(QWidget):
         self._search_edit.returnPressed.connect(self._refresh_current_view)
         search_row.addWidget(self._search_edit, 1)
 
-        publish_btn = QPushButton("â¬†  Publish a bot")
+        publish_btn = QPushButton("⬆  Publish a bot")
         publish_btn.setObjectName("addBotBtn")
         publish_btn.setFixedHeight(42)
         publish_btn.clicked.connect(self._publish_dialog)
@@ -156,7 +156,7 @@ class BotMarketTab(QWidget):
         filt_row.setSpacing(14)
 
         filt_row.addWidget(self._lbl("PHILOSOPHY"))
-        self._filt_philosophy = QComboBox()
+        self._filt_philosophy = NoScrollComboBox()
         self._filt_philosophy.addItem("All", "")
         for opt in ("long", "short", "day", "options", "momentum",
                     "mean-reversion", "scalping", "swing"):
@@ -165,7 +165,7 @@ class BotMarketTab(QWidget):
         filt_row.addWidget(self._filt_philosophy)
 
         filt_row.addWidget(self._lbl("SORT"))
-        self._filt_sort = QComboBox()
+        self._filt_sort = NoScrollComboBox()
         for label, key in (("Most downloaded", "downloads"),
                            ("Top rated",       "rating"),
                            ("Highest win rate","win_rate"),
@@ -175,7 +175,7 @@ class BotMarketTab(QWidget):
         self._filt_sort.currentIndexChanged.connect(self._refresh_current_view)
         filt_row.addWidget(self._filt_sort)
 
-        filt_row.addWidget(self._lbl("MAX â—Š"))
+        filt_row.addWidget(self._lbl("MAX ◊"))
         self._filt_max_price = QSpinBox()
         self._filt_max_price.setRange(0, 1_000_000)
         self._filt_max_price.setSingleStep(50)
@@ -201,7 +201,7 @@ class BotMarketTab(QWidget):
         sw.addWidget(fw)
         s.add(search_wrap)
 
-        # â”€â”€â”€ SUB-NAV PILLS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ─── SUB-NAV PILLS ────────────────────────────────────────
         nav_wrap = QFrame()
         nav_wrap.setStyleSheet("background:transparent;border:none;")
         nl = QVBoxLayout(nav_wrap)
@@ -211,10 +211,10 @@ class BotMarketTab(QWidget):
         pills = QHBoxLayout()
         pills.setSpacing(4)
         self._pills: dict[str, QPushButton] = {}
-        for key, label in (("featured",    "âœ¨  Featured"),
-                           ("recommended", "ðŸŽ¯  For You"),
-                           ("browse",      "ðŸ”  Browse all"),
-                           ("mine",        "ðŸ“Š  My published")):
+        for key, label in (("featured",    "✨  Featured"),
+                           ("recommended", "🎯  For You"),
+                           ("browse",      "🔍  Browse all"),
+                           ("mine",        "📊  My published")):
             btn = QPushButton(label)
             btn.setCheckable(True)
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -235,7 +235,7 @@ class BotMarketTab(QWidget):
         nl.addWidget(self._section_label)
         s.add(nav_wrap)
 
-        # â”€â”€â”€ RESULTS GRID (one column of cards) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ─── RESULTS GRID (one column of cards) ───────────────────
         self._results_box = QWidget()
         self._results_layout = QGridLayout(self._results_box)
         self._results_layout.setContentsMargins(0, 6, 0, 6)
@@ -253,7 +253,7 @@ class BotMarketTab(QWidget):
         s.add_stretch()
         self._set_view("featured")
 
-    # â”€â”€ small helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── small helpers ──────────────────────────────────────────────
 
     def _lbl(self, text: str) -> QLabel:
         l = QLabel(text)
@@ -300,7 +300,7 @@ class BotMarketTab(QWidget):
             if item and item.widget():
                 item.widget().deleteLater()
 
-    # â”€â”€ view switching â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── view switching ─────────────────────────────────────────────
 
     def _set_view(self, view: str):
         self._current_view = view
@@ -310,14 +310,14 @@ class BotMarketTab(QWidget):
             "featured":    "BOTS HAND-PICKED BY BAPTOU EDITORS",
             "recommended": "BOTS WE THINK YOU'LL LIKE",
             "browse":      "EVERY PUBLISHED BOT (filters apply)",
-            "mine":        "YOUR PUBLISHED BOTS â€” PUBLISHER ANALYTICS",
+            "mine":        "YOUR PUBLISHED BOTS — PUBLISHER ANALYTICS",
         }
         self._section_label.setText(labels.get(view, ""))
         self._refresh_current_view()
 
     def _refresh_current_view(self):
         self._clear_results()
-        self._status.setText("Loadingâ€¦")
+        self._status.setText("Loading…")
         self._status.setStyleSheet(
             f"color:{C['muted']};font-size:11px;padding:14px 0;")
         if self._current_view == "mine":
@@ -350,9 +350,9 @@ class BotMarketTab(QWidget):
         if not bots:
             empties = {
                 "featured":    "No featured bots yet. Check back soon.",
-                "recommended": "No personalised recommendations yet â€” install a few bots so we can learn what you like.",
+                "recommended": "No personalised recommendations yet — install a few bots so we can learn what you like.",
                 "browse":      "No bots match these filters.",
-                "mine":        "You haven't published any bots yet. Click â¬† Publish a bot above to share one with the BAPTOU community.",
+                "mine":        "You haven't published any bots yet. Click ⬆ Publish a bot above to share one with the BAPTOU community.",
             }
             self._status.setText(empties.get(self._current_view,
                                               "Nothing here."))
@@ -367,7 +367,7 @@ class BotMarketTab(QWidget):
             col = i % 2
             self._results_layout.addWidget(card, row, col)
 
-    # â”€â”€ Card factory â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── Card factory ───────────────────────────────────────────────
 
     def _make_card(self, b: dict, *, owned: bool) -> QWidget:
         accent = (C["orange"] if b.get("featured")
@@ -387,7 +387,7 @@ class BotMarketTab(QWidget):
         v.setContentsMargins(18, 16, 18, 16)
         v.setSpacing(10)
 
-        # Header â€” name + badges
+        # Header — name + badges
         head = QHBoxLayout()
         head.setSpacing(8)
         name = QLabel(b.get("name", b.get("slug", "?")))
@@ -397,8 +397,8 @@ class BotMarketTab(QWidget):
         name.setWordWrap(True)
         head.addWidget(name, 1)
         for cond, txt, col in (
-            (b.get("featured"),     "â­ FEATURED", C["orange"]),
-            (b.get("recommended"),  "âœ¦ RECO",      C["purple"]),
+            (b.get("featured"),     "⭐ FEATURED", C["orange"]),
+            (b.get("recommended"),  "✦ RECO",      C["purple"]),
         ):
             if cond:
                 badge = QLabel(txt)
@@ -422,9 +422,9 @@ class BotMarketTab(QWidget):
         ai_row = QHBoxLayout()
         ai_row.setSpacing(16)
         for prefix, ai_field, icon in (
-            ("Created by", "creator_ai", "ðŸ¤–"),
-            ("Runs with",  "runner_ai",  "âš¡"),
-            ("Works on",   "broker",     "ðŸ¦"),
+            ("Created by", "creator_ai", "🤖"),
+            ("Runs with",  "runner_ai",  "⚡"),
+            ("Works on",   "broker",     "🏦"),
         ):
             ai_val = b.get(ai_field, "").strip()
             if ai_val:
@@ -436,7 +436,7 @@ class BotMarketTab(QWidget):
         arw = QWidget(); arw.setLayout(ai_row)
         v.addWidget(arw)
 
-        # Stat strip â€” 4 columns
+        # Stat strip — 4 columns
         stat_row = QHBoxLayout()
         stat_row.setSpacing(10)
         for label, value, val_color in [
@@ -444,13 +444,13 @@ class BotMarketTab(QWidget):
              (b.get("philosophy") or "general").upper(),
              C["text"]),
             ("WIN RATE",
-             f"{b['win_rate_pct']:.0f}%" if b.get("win_rate_pct") else "â€”",
+             f"{b['win_rate_pct']:.0f}%" if b.get("win_rate_pct") else "—",
              C["green"] if (b.get("win_rate_pct") or 0) >= 50 else C["muted"]),
             ("DOWNLOADS",
              f"{b.get('downloads', 0):,}",
              C["muted"]),
             ("RATING",
-             f"â˜… {b['rating']:.1f}" if b.get("rating") else "â€”",
+             f"★ {b['rating']:.1f}" if b.get("rating") else "—",
              C["yellow"] if b.get("rating") else C["muted"]),
         ]:
             stat = QVBoxLayout()
@@ -468,12 +468,12 @@ class BotMarketTab(QWidget):
         sr = QWidget(); sr.setLayout(stat_row)
         v.addWidget(sr)
 
-        # Bottom â€” price + action
+        # Bottom — price + action
         bottom = QHBoxLayout()
         bottom.setSpacing(8)
         price = int(b.get("price_credits", 0))
         if price > 0:
-            price_lbl = QLabel(f"â—Š  {price:,} credits")
+            price_lbl = QLabel(f"◊  {price:,} credits")
             price_lbl.setStyleSheet(
                 f"color:{C['yellow']};font-size:13px;font-weight:700;")
         else:
@@ -485,11 +485,11 @@ class BotMarketTab(QWidget):
         bottom.addStretch()
 
         if owned:
-            stat = QLabel(f"ðŸ“Š  {b.get('downloads', 0)} installs")
+            stat = QLabel(f"📊  {b.get('downloads', 0)} installs")
             stat.setStyleSheet(f"color:{C['green']};font-size:11px;")
             bottom.addWidget(stat)
         else:
-            install = QPushButton("â¬‡  Install")
+            install = QPushButton("⬇  Install")
             install.setObjectName("addBotBtn")
             install.clicked.connect(
                 lambda _, slug=b["slug"], name=b["name"]:
@@ -499,7 +499,7 @@ class BotMarketTab(QWidget):
         v.addWidget(bw)
         return card
 
-    # â”€â”€ Install flow â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── Install flow ───────────────────────────────────────────────
 
     def _install(self, slug: str, name: str):
         from PyQt6.QtCore import QThread as _QT, pyqtSignal as _Sig
@@ -531,31 +531,26 @@ class BotMarketTab(QWidget):
             dest.write_bytes(blob)
             try:
                 from core import data as _D
-                import json as _json
-                s = _D.load_settings()
-                reg = s.get("bot_registry",
-                            {"active": [], "silenced": [], "custom": []})
+                reg = _D.load_bot_registry()
                 existing = [c["id"] for c in reg.get("custom", [])]
                 if slug not in existing:
                     reg.setdefault("custom", []).append({
                         "id":     slug, "label":  name,
                         "script": str(dest), "color":  C["purple"],
                     })
-                    s["bot_registry"] = reg
-                    with open(_D.SETTINGS_FILE, "w", encoding="utf-8") as f:
-                        _json.dump(s, f, indent=2)
+                    _D.save_bot_registry(reg)
             except Exception as e:
                 print(f"[market-install] registry update: {e}")
             QMessageBox.information(
                 self, "Bot installed",
                 f"'{name}' is now in your library.\n\n"
-                f"Open MORE BOTS â†’ AVAILABLE TO ADD to activate it.")
+                f"Open MORE BOTS → AVAILABLE TO ADD to activate it.")
 
         self._dl_worker = _DL()
         self._dl_worker.done.connect(_on)
         self._dl_worker.start()
 
-    # â”€â”€ Publish flow (delegates to MoreBotsTab so drag-drop stays one path) â”€â”€
+    # ── Publish flow (delegates to MoreBotsTab so drag-drop stays one path) ──
 
     def _publish_dialog(self):
         """Open the file picker, then hand the chosen .py to MoreBotsTab's

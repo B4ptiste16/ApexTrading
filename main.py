@@ -1,5 +1,5 @@
-﻿"""
-APEX Trading Platform â€” Desktop App  V7
+"""
+APEX Trading Platform — Desktop App  V7
 """
 
 import sys
@@ -53,12 +53,12 @@ import core.data   as D
 C = COLORS
 
 
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ─────────────────────────────────────────
 # WINDOW ICON
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ─────────────────────────────────────────
 
 def _app_icon() -> QIcon:
-    """v3.1.6 â€” return the APEX icon for the title bar.
+    """v3.1.6 — return the APEX icon for the title bar.
     Tries the frozen-bundle location first (sys._MEIPASS/assets), falls
     back to the source-tree location for dev runs. If neither exists,
     returns a blank QIcon so setWindowIcon doesn't crash."""
@@ -78,9 +78,9 @@ def _app_icon() -> QIcon:
     return QIcon()
 
 
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ─────────────────────────────────────────
 # SINGLE INSTANCE
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ─────────────────────────────────────────
 
 def _check_single_instance() -> bool:
     """Return False if another APEX instance is already running."""
@@ -90,12 +90,12 @@ def _check_single_instance() -> bool:
             None, False, "APEX_Trading_Platform_SingleInstance_v7")
         return ctypes.windll.kernel32.GetLastError() != 183
     except Exception:
-        return True   # can't check â€” allow launch
+        return True   # can't check — allow launch
 
 
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ─────────────────────────────────────────
 # GRADIENT BACKGROUND
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ─────────────────────────────────────────
 
 class GradientBackground(QWidget):
     """Central widget that paints a subtle diagonal gradient."""
@@ -109,9 +109,9 @@ class GradientBackground(QWidget):
         painter.fillRect(self.rect(), gradient)
 
 
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ─────────────────────────────────────────
 # STATUS DOT  (blinking indicator)
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ─────────────────────────────────────────
 
 class StatusDot(QLabel):
     """Coloured blinking ● for bot status."""
@@ -164,9 +164,9 @@ class StatusDot(QLabel):
         )
 
 
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ─────────────────────────────────────────
 # TAB QUICK CONTROLS  (> [ ] X)
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ─────────────────────────────────────────
 
 class TabQuickControls(QWidget):
     play_clicked   = pyqtSignal()
@@ -193,7 +193,7 @@ class TabQuickControls(QWidget):
             btn.setFixedSize(16, 16)
 
         # Pack: play / stop (mutually exclusive), then breathing room,
-        # then the remove X. V7.1.1 â€” the X used to sit flush against
+        # then the remove X. V7.1.1 — the X used to sit flush against
         # the play button which made mis-clicks easy.
         row.addWidget(self._play)
         row.addWidget(self._stop)
@@ -210,9 +210,9 @@ class TabQuickControls(QWidget):
         self._stop.setVisible(running)
 
 
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ─────────────────────────────────────────
 # BOT REGISTRY
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ─────────────────────────────────────────
 
 BUILTIN_BOTS = {
     "LONG": {
@@ -221,8 +221,9 @@ BUILTIN_BOTS = {
         "color":       C["green"],
         "description": "Momentum + mean-reversion portfolio. "
                        "Uses Claude Vision on charts to rank candidates.",
-        "cost":        "~$0.05â€“0.20 / day",
-        "account":     "Alpaca â€” 1 dedicated API key pair",
+        "cost":        "~$0.05–0.20 / day",
+        "account":     "Alpaca — 1 dedicated API key pair",
+        "brokers":     ["alpaca"],
     },
     "SHORT": {
         "label":       "SHORT",
@@ -230,8 +231,9 @@ BUILTIN_BOTS = {
         "color":       C["red"],
         "description": "Bear momentum, defensive in BULL regime. "
                        "Sells short on weakness, covers on strength.",
-        "cost":        "~$0.03â€“0.12 / day",
-        "account":     "Alpaca â€” 1 dedicated API key pair",
+        "cost":        "~$0.03–0.12 / day",
+        "account":     "Alpaca — 1 dedicated API key pair",
+        "brokers":     ["alpaca"],
     },
     "DAY": {
         "label":       "DAY",
@@ -239,18 +241,52 @@ BUILTIN_BOTS = {
         "color":       C["orange"],
         "description": "Single high-conviction intraday bracket orders. "
                        "ATR-based stop-loss and take-profit.",
-        "cost":        "~$0.02â€“0.08 / day",
-        "account":     "Alpaca â€” 1 dedicated API key pair",
+        "cost":        "~$0.02–0.08 / day",
+        "account":     "Alpaca — 1 dedicated API key pair",
+        "brokers":     ["alpaca"],
     },
 }
 
 MAX_ACTIVE_BOTS = 5
 
 
+def _registry_key() -> str:
+    """Return a per-user, per-broker settings key so each account+broker
+    has its own independent bot list and stats.  Delegates to the
+    core.data helper so the logic lives in one place."""
+    return D.bot_registry_key()
+
+
 def _load_registry() -> dict:
     s = D.load_settings()
-    default = {"active": ["LONG","SHORT","DAY"], "silenced": [], "custom": []}
-    reg = s.get("bot_registry", default)
+    broker = s.get("broker_mode", "alpaca")
+    # Default active bots depend on the broker:
+    # • Alpaca  → all three built-ins active and visible
+    # • Others  → no active bot tabs; built-ins silenced in the More Bots list
+    if broker == "alpaca":
+        default = {"active": ["LONG","SHORT","DAY"], "silenced": [], "custom": []}
+    else:
+        default = {
+            "active":   ["LONG", "SHORT", "DAY"],
+            "silenced": ["LONG", "SHORT", "DAY"],
+            "custom":   [],
+        }
+    key = _registry_key()
+    reg = s.get(key)
+    if reg is None:
+        if broker == "alpaca":
+            # Migration path 1: per-user key without broker suffix (prev version)
+            try:
+                from ui.login import load_auth
+                auth = load_auth() or {}
+                uid = auth.get("user_id") or auth.get("email") or ""
+                if uid:
+                    reg = s.get(f"bot_registry_{uid}")
+            except Exception:
+                pass
+        if reg is None:
+            # Migration path 2: legacy global key
+            reg = dict(s.get("bot_registry", default))
     # Ensure all keys exist
     for k in default:
         reg.setdefault(k, default[k])
@@ -259,14 +295,14 @@ def _load_registry() -> dict:
 
 def _save_registry(reg: dict):
     s = D.load_settings()
-    s["bot_registry"] = reg
+    s[_registry_key()] = reg
     with open(D.SETTINGS_FILE, "w", encoding="utf-8") as f:
         json.dump(s, f, indent=2)
 
 
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ─────────────────────────────────────────
 # MORE BOTS TAB
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ─────────────────────────────────────────
 
 class MoreBotsTab(QWidget):
     """Manage active/silenced bots + upload custom bots."""
@@ -289,7 +325,7 @@ class MoreBotsTab(QWidget):
         from ui.widgets import SectionHeader
         s = self.scroll
 
-        # â”€â”€ ACTIVE BOTS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── ACTIVE BOTS ──────────────────────────────────────
         s.add(SectionHeader("ACTIVE BOTS", C["green"]))
 
         info = QLabel(
@@ -307,7 +343,7 @@ class MoreBotsTab(QWidget):
         self._active_layout.setContentsMargins(0, 4, 0, 4)
         s.add(self._active_grid)
 
-        # â”€â”€ AVAILABLE TO ADD â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── AVAILABLE TO ADD ─────────────────────────────────
         s.add(SectionHeader("AVAILABLE TO ADD", C["purple"]))
         self._avail_grid = QWidget()
         self._avail_layout = QGridLayout(self._avail_grid)
@@ -320,7 +356,7 @@ class MoreBotsTab(QWidget):
             f"color:{C['muted']};font-size:11px;padding:4px 0;")
         self._avail_layout.addWidget(self._none_lbl, 0, 0)
 
-        # â”€â”€ SILENCED BOTS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── SILENCED BOTS ────────────────────────────────────
         s.add(SectionHeader("SILENCED BOTS", C["muted"]))
         self._silenced_grid = QWidget()
         self._silenced_layout = QGridLayout(self._silenced_grid)
@@ -333,13 +369,13 @@ class MoreBotsTab(QWidget):
             f"color:{C['muted']};font-size:11px;padding:4px 0;")
         self._silenced_layout.addWidget(self._none_sil, 0, 0)
 
-        # â”€â”€ UPLOAD CUSTOM BOT â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── UPLOAD CUSTOM BOT ────────────────────────────────
         s.add(SectionHeader("UPLOAD CUSTOM BOT", C["yellow"]))
         custom_info = QLabel(
             "Drag-and-drop a .py file anywhere on the APEX window, or "
             "click Browse below. The script must expose a main() "
             "function. Read the skeleton guide first if you're new to "
-            "writing bots â€” it explains every constraint and includes "
+            "writing bots — it explains every constraint and includes "
             "a minimal working example.")
         custom_info.setStyleSheet(f"color:{C['muted']};font-size:11px;")
         custom_info.setWordWrap(True)
@@ -352,7 +388,7 @@ class MoreBotsTab(QWidget):
         skel_btn = QPushButton("Open skeleton guide")
         skel_btn.setObjectName("toolBtn")
         skel_btn.clicked.connect(self._open_skeleton_guide)
-        # V4.0.0 â€” explicit Publish button so the user can test a bot
+        # V4.0.0 — explicit Publish button so the user can test a bot
         # locally first, then publish without going through BOT MARKET.
         publish_btn = QPushButton("Publish to marketplace")
         publish_btn.setObjectName("addBotBtn")
@@ -368,9 +404,9 @@ class MoreBotsTab(QWidget):
         uw.setLayout(upload_row)
         s.add(uw)
 
-        # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-        # V3.1.5 â€” Bot library lock
-        # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ─────────────────────────────────────────────────────
+        # V3.1.5 — Bot library lock
+        # ─────────────────────────────────────────────────────
         lock_wrap = QFrame()
         lock_wrap.setStyleSheet(
             f"background:{C['panel2']};border:1px solid {C['border']};"
@@ -393,11 +429,11 @@ class MoreBotsTab(QWidget):
         lv.addWidget(lhw)
 
         lock_desc = QLabel(
-            "Encrypt every custom bot's .py file â†’ .apex so the bot "
+            "Encrypt every custom bot's .py file → .apex so the bot "
             "library can't be opened by a text editor or sync utility. "
-            "<b>Casual protection only</b> â€” anyone with APEX.exe can "
+            "<b>Casual protection only</b> — anyone with APEX.exe can "
             "extract the key. For real isolation, run bots in cloud "
-            "mode (Tools â†’ AUTOMATION).")
+            "mode (Tools → AUTOMATION).")
         lock_desc.setStyleSheet(f"color:{C['muted']};font-size:11px;line-height:1.5;")
         lock_desc.setWordWrap(True)
         lv.addWidget(lock_desc)
@@ -413,12 +449,12 @@ class MoreBotsTab(QWidget):
         s.add(lock_wrap)
         self._refresh_lock_state()
 
-        # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-        # V3.1.3 â€” BOT MARKET launcher
+        # ─────────────────────────────────────────────────────
+        # V3.1.3 — BOT MARKET launcher
         # The full marketplace lives in its own tab (ui/bot_market_tab.py).
         # It only appears in the tab bar once the user opens it from here,
         # keeping the MORE BOTS view focused on local bot management.
-        # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ─────────────────────────────────────────────────────
         market_wrap = QFrame()
         market_wrap.setStyleSheet(
             f"background:{C['panel']};border:1px solid {C['border']};"
@@ -433,7 +469,7 @@ class MoreBotsTab(QWidget):
         mv.addWidget(title)
         sub = QLabel("Browse, install and publish bots from the APEX network. "
                       "Featured picks, personalised recommendations, full search, "
-                      "publisher analytics â€” open it in its own tab.")
+                      "publisher analytics — open it in its own tab.")
         sub.setStyleSheet(f"color:{C['muted']};font-size:11px;line-height:1.6;")
         sub.setWordWrap(True)
         mv.addWidget(sub)
@@ -464,17 +500,17 @@ class MoreBotsTab(QWidget):
         mv.addWidget(ow)
         s.add(market_wrap)
 
-        # â”€â”€ ACCOUNT LIMITS INFO â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── ACCOUNT LIMITS INFO ──────────────────────────────
         s.add(SectionHeader("ACCOUNT LIMITS", C["muted"]))
         limits = QLabel(
             "Alpaca paper trading:\n"
-            "  â€¢ Each bot requires its own paper account and API key pair.\n"
-            "  â€¢ You can create multiple free paper accounts in Alpaca.\n"
-            "  â€¢ No hard limit, but 3â€“5 is practical.\n\n"
+            "  • Each bot requires its own paper account and API key pair.\n"
+            "  • You can create multiple free paper accounts in Alpaca.\n"
+            "  • No hard limit, but 3–5 is practical.\n\n"
             "IBKR (Interactive Brokers):\n"
-            "  â€¢ Multiple bots can share a single TWS/Gateway connection\n"
+            "  • Multiple bots can share a single TWS/Gateway connection\n"
             "    by using different clientId values.\n"
-            "  â€¢ APEX uses clientId 1, 2, 3â€¦ per bot automatically."
+            "  • APEX uses clientId 1, 2, 3… per bot automatically."
         )
         limits.setStyleSheet(
             f"font-family:'JetBrains Mono';font-size:11px;"
@@ -490,19 +526,38 @@ class MoreBotsTab(QWidget):
         active   = reg["active"]
         silenced = reg["silenced"]
         custom   = reg.get("custom", [])
+        broker   = D.load_settings().get("broker_mode", "alpaca")
 
+        def _broker_ok(side: str) -> bool:
+            """Return True if this bot is compatible with the current broker."""
+            info = BUILTIN_BOTS.get(side)
+            if info:
+                return broker in info.get("brokers", ["alpaca"])
+            # Custom bots: check their broker tag; default = compatible with all
+            for c in custom:
+                if c.get("id") == side:
+                    return broker in c.get("brokers", [broker])
+            return True
+
+        # ACTIVE section — only broker-compatible, non-silenced bots
         self._rebuild_grid(
             self._active_layout,
-            [s for s in active if s not in silenced],
+            [s for s in active if s not in silenced and _broker_ok(s)],
             mode="active",
         )
+        # SILENCED section — all silenced bots (including incompatible ones so the
+        # user can see they exist but are unavailable on this broker)
         self._rebuild_grid(
             self._silenced_layout,
             [s for s in active if s in silenced],
             mode="silenced",
         )
-        # Available = built-ins not in active + custom not in active
-        all_known = list(BUILTIN_BOTS.keys()) + [c["id"] for c in custom]
+        # AVAILABLE section — built-ins + custom compatible with current broker, not already active
+        compatible_builtins = [
+            k for k, v in BUILTIN_BOTS.items()
+            if broker in v.get("brokers", ["alpaca"])
+        ]
+        all_known = compatible_builtins + [c["id"] for c in custom]
         available = [b for b in all_known if b not in active]
         if available:
             self._none_lbl.setVisible(False)
@@ -516,12 +571,12 @@ class MoreBotsTab(QWidget):
         self._none_sil.setVisible(len(sil_list) == 0)
 
     def _open_bot_market(self):
-        """V3.1.3 â€” tell ApexWindow to reveal + focus the BOT MARKET tab."""
+        """V3.1.3 — tell ApexWindow to reveal + focus the BOT MARKET tab."""
         win = self.window()
         if hasattr(win, "_open_bot_market"):
             win._open_bot_market()
 
-    # â”€â”€ V3.1.5 â€” Library lock / unlock â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── V3.1.5 — Library lock / unlock ──────────────────────
 
     def _refresh_lock_state(self):
         from core.paths  import DATA_DIR
@@ -554,7 +609,7 @@ class MoreBotsTab(QWidget):
             unlocked = secure.unlock_bot_library(bots_dir)
             self._sync_registry_after_lock(unlocked, locked=False)
             self._upload_msg.setText(
-                f"âœ“ Unlocked {len(unlocked)} bot{'s' if len(unlocked)!=1 else ''}")
+                f"✓ Unlocked {len(unlocked)} bot{'s' if len(unlocked)!=1 else ''}")
         else:
             if QMessageBox.question(
                     self, "Lock library",
@@ -567,7 +622,7 @@ class MoreBotsTab(QWidget):
             locked = secure.lock_bot_library(bots_dir)
             self._sync_registry_after_lock(locked, locked=True)
             self._upload_msg.setText(
-                f"âœ“ Locked {len(locked)} bot{'s' if len(locked)!=1 else ''}")
+                f"✓ Locked {len(locked)} bot{'s' if len(locked)!=1 else ''}")
         QTimer.singleShot(4000, lambda: self._upload_msg.setText(""))
         self._refresh_lock_state()
 
@@ -576,14 +631,14 @@ class MoreBotsTab(QWidget):
         points to whichever file extension currently exists on disk."""
         from core.paths import DATA_DIR
         s = D.load_settings()
-        reg = s.get("bot_registry",
-                    {"active": [], "silenced": [], "custom": []})
+        key = _registry_key()
+        reg = s.get(key, {"active": [], "silenced": [], "custom": []})
         new_ext = ".apex" if locked else ".py"
         for c in reg.get("custom", []):
             if c.get("id") in slugs:
                 old = Path(c.get("script", ""))
                 c["script"] = str(old.with_suffix(new_ext))
-        s["bot_registry"] = reg
+        s[key] = reg
         with open(D.SETTINGS_FILE, "w", encoding="utf-8") as f:
             json.dump(s, f, indent=2)
 
@@ -606,7 +661,7 @@ class MoreBotsTab(QWidget):
     def _make_bot_card(self, side: str, mode: str) -> QFrame:
         info = BUILTIN_BOTS.get(side, {
             "label": side, "icon": "o", "color": C["purple"],
-            "description": "Custom bot", "cost": "â€”", "account": "â€”",
+            "description": "Custom bot", "cost": "—", "account": "—",
         })
         color   = info["color"]
         opacity = "0.45" if mode == "silenced" else "1.0"
@@ -697,7 +752,8 @@ class MoreBotsTab(QWidget):
             reg["silenced"].remove(side)
         _save_registry(reg)
         self.bot_removed.emit(side)
-        self.refresh()
+        # Defer refresh so the clicked button is not destroyed mid-click-event
+        QTimer.singleShot(0, self.refresh)
 
     def _silence(self, side: str):
         reg = _load_registry()
@@ -705,7 +761,7 @@ class MoreBotsTab(QWidget):
             reg["silenced"].append(side)
         _save_registry(reg)
         self.bot_silenced.emit(side)
-        self.refresh()
+        QTimer.singleShot(0, self.refresh)
 
     def _unsilence(self, side: str):
         reg = _load_registry()
@@ -713,7 +769,7 @@ class MoreBotsTab(QWidget):
             reg["silenced"].remove(side)
         _save_registry(reg)
         self.bot_unsilenced.emit(side)
-        self.refresh()
+        QTimer.singleShot(0, self.refresh)
 
     def _open_skeleton_guide(self):
         """V7.1.1: open BOT_SKELETON.md so the user can read or paste
@@ -765,11 +821,11 @@ class MoreBotsTab(QWidget):
             })
             _save_registry(reg)
 
-        self._upload_msg.setText(f"âœ“ {Path(path).name} uploaded â€” appears in Available")
+        self._upload_msg.setText(f"✓ {Path(path).name} uploaded — appears in Available")
         QTimer.singleShot(4000, lambda: self._upload_msg.setText(""))
         self.refresh()
 
-    # â”€â”€ V7.1+ public bot library â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── V7.1+ public bot library ────────────────────────────
     # NOTE: the actual marketplace UI moved to ui/bot_market_tab.py in V3.1.3.
     # _install_public_bot stays here so the old drag-and-drop install
     # paths in ApexWindow still work.
@@ -834,9 +890,11 @@ class MoreBotsTab(QWidget):
         if path:
             self._publish_bot_with_path(path)
 
-    def _publish_bot_with_path(self, path: str):
+    def _publish_bot_with_path(self, path: str, *, prefill: dict | None = None):
         """Upload a known .py file to the public marketplace. Called
-        directly by the drag-and-drop handler in ApexWindow."""
+        directly by the drag-and-drop handler in ApexWindow.
+        Optional `prefill` dict can supply default values for the dialogs
+        (keys: name, description, tags, philosophy, creator_ai, runner_ai)."""
         from PyQt6.QtWidgets import QInputDialog
         from ui.login import load_auth, load_server_url
 
@@ -849,9 +907,10 @@ class MoreBotsTab(QWidget):
                 "create one from the start screen.")
             return
 
+        pf = prefill or {}
         blob = Path(path).read_bytes()
-        # V3.3.0 â€” similarity gate. Run a pre-flight check against
-        # every existing published bot. Block â‰¥85%, warn â‰¥60%.
+        # V3.3.0 — similarity gate. Run a pre-flight check against
+        # every existing published bot. Block ≥85%, warn ≥60%.
         try:
             import requests as _rq
             r = _rq.post(
@@ -864,7 +923,7 @@ class MoreBotsTab(QWidget):
                 top = matches[0] if matches else None
                 if top and top["score"] >= 0.85:
                     QMessageBox.critical(
-                        self, "Too similar â€” cannot publish",
+                        self, "Too similar — cannot publish",
                         f"Your bot is <b>{int(top['score']*100)}% similar</b> "
                         f"to <code>{top['slug']}</code>. BAPTOU rejects "
                         f"near-duplicates to keep the marketplace useful.<br>"
@@ -874,7 +933,7 @@ class MoreBotsTab(QWidget):
                 if top and top["score"] >= 0.60:
                     msg = ("Your bot is <b>{:.0%}</b> similar to "
                            "<code>{}</code>.<br>That's high enough to "
-                           "publish but worth a heads-up â€” buyers may "
+                           "publish but worth a heads-up — buyers may "
                            "complain it's a re-skin.<br><br>"
                            "Publish anyway?").format(top["score"], top["slug"])
                     if QMessageBox.question(
@@ -884,40 +943,71 @@ class MoreBotsTab(QWidget):
                     ) != QMessageBox.StandardButton.Yes:
                         return
         except Exception as e:
-            # Network/server problems shouldn't block publishing â€” just log.
+            # Network/server problems shouldn't block publishing — just log.
             print(f"[publish] similarity check failed: {e}")
         name, ok = QInputDialog.getText(
-            self, "Bot name", "Display name:", text=Path(path).stem)
+            self, "Bot name", "Display name:",
+            text=pf.get("name") or Path(path).stem)
         if not ok or not name.strip():
             return
         desc, _ = QInputDialog.getText(
-            self, "Description", "One-line description:")
+            self, "Description", "One-line description:",
+            text=pf.get("description", ""))
         tags, _ = QInputDialog.getText(
-            self, "Tags", "Comma-separated tags (optional):")
-        # V3.1.1 â€” capture philosophy + price so the listing surfaces in
+            self, "Tags", "Comma-separated tags (optional):",
+            text=pf.get("tags", ""))
+        # V3.1.1 — capture philosophy + price so the listing surfaces in
         # the new filters and the publisher can monetise.
         philos_choices = ["long", "short", "day", "options", "momentum",
                           "mean-reversion", "scalping", "swing", "other"]
+        pf_phil = pf.get("philosophy", "")
+        pf_idx  = philos_choices.index(pf_phil) if pf_phil in philos_choices else 0
         philos, ok_p = QInputDialog.getItem(
             self, "Philosophy",
             "Trading philosophy (helps users find your bot):",
-            philos_choices, 0, False)
+            philos_choices, pf_idx, False)
         if not ok_p:
             philos = ""
         price, _ = QInputDialog.getInt(
             self, "Price",
             "Price in BAPTOU credits  (0 = free):", 0, 0, 1_000_000, 10)
-        # V4.1.0 â€” AI transparency fields
+        # V4.1.0 — AI transparency fields
+        from PyQt6.QtWidgets import QDialog, QDialogButtonBox, QCheckBox, QScrollArea
         ai_choices = ["Claude (Anthropic)", "GPT-4 (OpenAI)", "Gemini (Google)",
-                      "Llama (Groq)", "Custom / Other"]
+                      "Llama (Groq)", "Grok (xAI)", "Custom / Other"]
+        pf_cai = pf.get("creator_ai", "")
+        cai_idx = next((i for i,c in enumerate(ai_choices)
+                        if pf_cai.lower() in c.lower()), 0)
         creator_ai, _ = QInputDialog.getItem(
             self, "Creator AI",
             "Which AI model was used to GENERATE this bot?",
-            ai_choices, 0, False)
-        runner_ai, _ = QInputDialog.getItem(
-            self, "Runner AI",
-            "Which AI model RUNS the bot (scores candidates at runtime)?",
-            ai_choices, 0, False)
+            ai_choices, cai_idx, False)
+
+        # Runner AI: allow selecting multiple models (comma-separated in storage)
+        run_dlg = QDialog(self)
+        run_dlg.setWindowTitle("Runner AI models")
+        run_dlg.setMinimumWidth(340)
+        run_vl = QVBoxLayout(run_dlg)
+        run_vl.addWidget(QLabel(
+            "Which AI model(s) can RUN this bot?\n"
+            "(Select all that apply — stored as a comma-separated list.)"))
+        run_checks = []
+        for ai in ai_choices:
+            cb = QCheckBox(ai)
+            run_vl.addWidget(cb)
+            run_checks.append(cb)
+        run_btns = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok |
+            QDialogButtonBox.StandardButton.Cancel)
+        run_btns.accepted.connect(run_dlg.accept)
+        run_btns.rejected.connect(run_dlg.reject)
+        run_vl.addWidget(run_btns)
+        if run_dlg.exec() == QDialog.DialogCode.Accepted:
+            selected = [cb.text() for cb in run_checks if cb.isChecked()]
+            runner_ai = ", ".join(selected) if selected else ""
+        else:
+            runner_ai = ""
+
         broker_choices = ["Alpaca", "IBKR (Interactive Brokers)", "Alpaca + IBKR"]
         broker, _ = QInputDialog.getItem(
             self, "Compatible broker",
@@ -973,14 +1063,25 @@ class MoreBotsTab(QWidget):
             box = QMessageBox.information if ok else QMessageBox.warning
             box(self, "Publish bot", msg)
             if ok:
-                self._refresh_library()
+                self.refresh()
+                # Also refresh the Bot Market tab so the listing shows up immediately
+                try:
+                    win = self.window()
+                    bmt = getattr(win, "bot_market_tab", None)
+                    if bmt:
+                        QTimer.singleShot(800, lambda: (
+                            bmt.refresh(),
+                            bmt._set_view("mine"),
+                        ))
+                except Exception:
+                    pass
         self._pub_worker.done.connect(_on_pub)
         self._pub_worker.start()
 
 
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ─────────────────────────────────────────
 # SWEEP LABEL  (shimmer animation for MARKET CLOSED)
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ─────────────────────────────────────────
 
 class SweepLabel(QLabel):
     """QLabel that paints a right-to-left shimmer when sweep is active."""
@@ -1026,9 +1127,9 @@ class SweepLabel(QLabel):
         painter.end()
 
 
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ─────────────────────────────────────────
 # UPDATE WORKERS
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ─────────────────────────────────────────
 
 class UpdateWorker(QThread):
     progress = pyqtSignal(int, str)
@@ -1054,9 +1155,9 @@ class UpdateChecker(QThread):
             self.update_available.emit(info)
 
 
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ─────────────────────────────────────────
 # MAIN WINDOW
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ─────────────────────────────────────────
 
 class ApexWindow(QMainWindow):
 
@@ -1067,7 +1168,7 @@ class ApexWindow(QMainWindow):
         self.setMinimumSize(1280, 800)
         self.resize(1440, 900)
         self.setStyleSheet(DARK_STYLESHEET)
-        self.setWindowIcon(_app_icon())   # v3.1.6 â€” fixes the exe-style window icon
+        self.setWindowIcon(_app_icon())   # v3.1.6 — fixes the exe-style window icon
 
         # State
         self._bot_tabs:   dict[str, BotTab]            = {}
@@ -1086,7 +1187,7 @@ class ApexWindow(QMainWindow):
         # Header
         root_layout.addWidget(self._build_header())
 
-        # V4.0.0 â€” content body is a QStackedWidget so we can swap the
+        # V4.0.0 — content body is a QStackedWidget so we can swap the
         # entire window between the Alpaca tabbed UI and the
         # "coming-very-soon" placeholder for not-yet-supported brokers
         # (IBKR / TradingView). The header stays visible in both modes
@@ -1095,26 +1196,26 @@ class ApexWindow(QMainWindow):
         self._content_stack = _QStack()
         root_layout.addWidget(self._content_stack, 1)
 
-        # â”€â”€ TAB WIDGET â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── TAB WIDGET ──────────────────────────────────────
         self.tabs = QTabWidget()
         self.tabs.setTabPosition(QTabWidget.TabPosition.North)
         self.tabs.setDocumentMode(True)
         self.tabs.setObjectName("mainTabs")
         # V7.1.4: Chrome-style tab reordering. We enable movable on the
         # whole bar, then in _on_tab_moved we revert any move that
-        # touches OVERVIEW / MORE BOTS / UNIVERSE / TOOLS â€” only
-        # bot-tab â†” bot-tab moves are accepted, and the new order is
+        # touches OVERVIEW / MORE BOTS / UNIVERSE / TOOLS — only
+        # bot-tab ↔ bot-tab moves are accepted, and the new order is
         # persisted to the bot registry.
         self.tabs.setMovable(True)
         self.tabs.tabBar().tabMoved.connect(self._on_tab_moved)
         self._suppress_tab_move = False
-        # V4.0.0 â€” page 0 of the stack is the full Alpaca tabbed UI
+        # V4.0.0 — page 0 of the stack is the full Alpaca tabbed UI
         self._content_stack.addWidget(self.tabs)
-        # Page 1 â€” the "coming soon" placeholder used by IBKR / TradingView
+        # Page 1 — the "coming soon" placeholder used by IBKR / TradingView
         self._coming_soon_page = self._build_coming_soon_page()
         self._content_stack.addWidget(self._coming_soon_page)
 
-        # â”€â”€ STATIC TABS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── STATIC TABS ─────────────────────────────────────
         self.overview_tab  = OverviewTab()
         self.more_bots_tab = MoreBotsTab()
         self.universe_tab  = UniverseTab()
@@ -1126,7 +1227,7 @@ class ApexWindow(QMainWindow):
         self.bot_market_tab.closed.connect(self._close_bot_market)
         self.tools_tab     = ToolsTab()
 
-        # V4.1.0 â€” Manual trading tab (hidden until toggle is on)
+        # V4.1.0 — Manual trading tab (hidden until toggle is on)
         self.manual_tab = ManualTradingTab()
         self.manual_tab.switch_off_requested.connect(
             lambda: self._toggle_manual_mode(force_off=True))
@@ -1134,16 +1235,16 @@ class ApexWindow(QMainWindow):
         self._overview_idx  = self.tabs.addTab(self.overview_tab,  "OVERVIEW")
         self._morebots_idx  = self.tabs.addTab(self.more_bots_tab, "MORE BOTS")
 
-        # V3.1.3 â€” BOT MARKET is a "summon-able" tab.
+        # V3.1.3 — BOT MARKET is a "summon-able" tab.
         self._botmarket_idx = self.tabs.addTab(self.bot_market_tab,
                                                 "BOT MARKET")
 
-        # V4.1.0 â€” MANUAL TRADING is a "summon-able" tab (shown when toggle is ON)
+        # V4.1.0 — MANUAL TRADING is a "summon-able" tab (shown when toggle is ON)
         self._manual_idx = self.tabs.addTab(self.manual_tab, "MANUAL")
 
         # Corner row reads:
-        #   UNIVERSE Â· MAKE BOT Â· FRIENDS Â· ACCOUNT Â· ADMIN Â· TOOLS
-        # (ADMIN is hidden for non-admin users â€” see _refresh_admin_visibility.)
+        #   UNIVERSE · MAKE BOT · FRIENDS · ACCOUNT · ADMIN · TOOLS
+        # (ADMIN is hidden for non-admin users — see _refresh_admin_visibility.)
         self._universe_idx  = self.tabs.addTab(self.universe_tab, "")
         self._makebot_idx   = self.tabs.addTab(self.make_bot_tab, "")
         self._friends_idx   = self.tabs.addTab(self.friends_tab,  "")
@@ -1156,12 +1257,12 @@ class ApexWindow(QMainWindow):
                     self._admin_idx, self._tools_idx):
             self.tabs.tabBar().setTabVisible(idx, False)
         # Startup state applied after corner is built (corner buttons need to exist)
-        # â€” deferred to _apply_manual_mode_ui() called at end of _setup_ui
+        # — deferred to _apply_manual_mode_ui() called at end of _setup_ui
 
-        # â”€â”€ CORNER WIDGET (Universe / Tools) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── CORNER WIDGET (Universe / Tools) ────────────────
         self.tabs.setCornerWidget(self._build_corner(), Qt.Corner.TopRightCorner)
 
-        # â”€â”€ DYNAMIC BOT TABS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── DYNAMIC BOT TABS ─────────────────────────────────
         self._insert_bot_tabs()
 
         # Connect more-bots signals
@@ -1202,28 +1303,28 @@ class ApexWindow(QMainWindow):
 
         self._setup_tray()
         QTimer.singleShot(600, self._refresh_all)
-        # v1.2.0 â€” restore cloud-bot UI state on startup. If any cloud
+        # v1.2.0 — restore cloud-bot UI state on startup. If any cloud
         # bots are still running on Oracle (the server keeps them alive
         # across desktop restarts), light up their tabs without making
         # the user click > again.
         QTimer.singleShot(3000, self._resume_cloud_bots)
-        # V3 wave 5 â€” credits + admin visibility refresh, fires shortly
+        # V3 wave 5 — credits + admin visibility refresh, fires shortly
         # after launch and then every 60 s.
         QTimer.singleShot(1500, self._refresh_user_meta)
         self._meta_timer = QTimer()
         self._meta_timer.timeout.connect(self._refresh_user_meta)
         self._meta_timer.start(60_000)
-        # V3.3.0 â€” pull any bots removed by moderation that we used to
+        # V3.3.0 — pull any bots removed by moderation that we used to
         # have installed, and delete them locally.
         QTimer.singleShot(4500, self._sync_revocations)
-        # V4.0.1 â€” show the T&C acceptance modal if the user hasn't
+        # V4.0.1 — show the T&C acceptance modal if the user hasn't
         # ticked it yet. Defer so the main window has time to paint.
         QTimer.singleShot(2000, self._check_tos_acceptance)
-        # V4.0.0 â€” apply the saved broker mode AFTER the tabs are wired
+        # V4.0.0 — apply the saved broker mode AFTER the tabs are wired
         # so the stack is fully populated before we switch pages.
         QTimer.singleShot(0, lambda: self._apply_broker_mode(
             self._current_broker_mode()))
-        # V4.3.0 â€” restore manual mode UI state after all tabs exist
+        # V4.3.0 — restore manual mode UI state after all tabs exist
         QTimer.singleShot(0, lambda: self._apply_manual_mode_ui(
             self._is_manual_mode()))
 
@@ -1231,10 +1332,13 @@ class ApexWindow(QMainWindow):
         # drag a bot script in and we'll offer to install it locally or
         # publish it to the public library.
         self.setAcceptDrops(True)
-        # Align corner widget height to the tab bar once the window has painted
+        # Align corner widget height to the tab bar once the window has painted.
+        # Run at 200ms AND 800ms — the first fires before most paints, the
+        # second catches DPI-aware size hints that settle after the first frame.
         QTimer.singleShot(200, self._sync_corner_height)
+        QTimer.singleShot(800, self._sync_corner_height)
 
-    # â”€â”€ DRAG & DROP  (V7.1.1) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── DRAG & DROP  (V7.1.1) ────────────────────────────────
 
     def dragEnterEvent(self, event):
         md = event.mimeData()
@@ -1276,7 +1380,7 @@ class ApexWindow(QMainWindow):
         local_btn = box.addButton(
             "Add to my library",   QMessageBox.ButtonRole.AcceptRole)
         pub_btn   = box.addButton(
-            "Publish publiclyâ€¦",   QMessageBox.ButtonRole.ActionRole)
+            "Publish publicly…",   QMessageBox.ButtonRole.ActionRole)
         box.addButton("Cancel",    QMessageBox.ButtonRole.RejectRole)
         box.exec()
         clicked = box.clickedButton()
@@ -1315,7 +1419,7 @@ class ApexWindow(QMainWindow):
         # we shortcut by writing a tiny shim that uses our pre-set path.
         self.more_bots_tab._publish_bot_with_path(path)
 
-    # â”€â”€ HEADER â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── HEADER ──────────────────────────────────────────────
 
     def _build_header(self) -> QWidget:
         header = QFrame()
@@ -1369,18 +1473,18 @@ class ApexWindow(QMainWindow):
 
         # V7.1.7: explicit Quit button so the user doesn't have to
         # dig into the system-tray menu to actually exit. The window
-        # X button still hides-to-tray (bots keep running) â€” this
+        # X button still hides-to-tray (bots keep running) — this
         # button does a real cleanup + QApplication.quit().
         self.quit_btn = QPushButton("QUIT")
         self.quit_btn.setObjectName("quitBtn")
         self.quit_btn.setToolTip(
             "Fully quit BAPTOU (stops all running bots).\n"
-            "The window X button minimises to the tray instead â€” "
+            "The window X button minimises to the tray instead — "
             "your bots keep running headless.")
         self.quit_btn.clicked.connect(self._quit_app)
         layout.addWidget(self.quit_btn)
 
-        # V4.1.0 â€” manual trading mode toggle (iPhone-style ON/OFF)
+        # V4.1.0 — manual trading mode toggle (iPhone-style ON/OFF)
         self._manual_mode_btn = QPushButton(self._manual_mode_label())
         self._manual_mode_btn.setObjectName("manualModeBtn")
         self._manual_mode_btn.setCheckable(True)
@@ -1391,11 +1495,11 @@ class ApexWindow(QMainWindow):
         self._manual_mode_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._manual_mode_btn.setToolTip(
             "Toggle between AI Auto-trading and Manual trading mode.\n"
-            "In Manual mode you place orders yourself â€” great for trading vs friends.")
+            "In Manual mode you place orders yourself — great for trading vs friends.")
         self._manual_mode_btn.clicked.connect(self._toggle_manual_mode)
         layout.addWidget(self._manual_mode_btn)
 
-        # V3.2.0 â€” broker-mode selector.
+        # V3.2.0 — broker-mode selector.
         self._broker_mode_btn = QPushButton(self._current_broker_label())
         self._broker_mode_btn.setObjectName("brokerModeBtn")
         self._broker_mode_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
@@ -1405,8 +1509,8 @@ class ApexWindow(QMainWindow):
         self._broker_mode_btn.clicked.connect(self._show_broker_menu)
         layout.addWidget(self._broker_mode_btn)
 
-        # V3 wave 5 â€” credit balance chip (clickable â†’ Credit Shop)
-        self.credits_chip = QPushButton("â—Š  â€” credits")
+        # V3 wave 5 — credit balance chip (clickable → Credit Shop)
+        self.credits_chip = QPushButton("— credits")
         self.credits_chip.setObjectName("creditsChip")
         self.credits_chip.setStyleSheet(
             f"QPushButton#creditsChip{{"
@@ -1422,12 +1526,12 @@ class ApexWindow(QMainWindow):
         self.credits_chip.clicked.connect(self._open_credit_shop)
         layout.addWidget(self.credits_chip)
 
-        # Logged-in user chip â€” V3.0.1: clickable, opens an account menu
+        # Logged-in user chip — V3.0.1: clickable, opens an account menu
         # with Switch account / Sign out so the user doesn't have to dig
         # into the system-tray menu.
         display = self._user.get("display_name") or self._user.get("username", "")
         if display:
-            self.user_chip_btn = QPushButton(f"â–¸  {display}  â–¾")
+            self.user_chip_btn = QPushButton(f"{display}  v")
             self.user_chip_btn.setObjectName("userChipBtn")
             self.user_chip_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
             self.user_chip_btn.setToolTip("Click to switch account or sign out")
@@ -1436,7 +1540,7 @@ class ApexWindow(QMainWindow):
 
         return header
 
-    # â”€â”€ V4.1.0 â€” manual trading mode toggle â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── V4.1.0 — manual trading mode toggle ─────────────────
 
     def _is_manual_mode(self) -> bool:
         try:
@@ -1452,23 +1556,23 @@ class ApexWindow(QMainWindow):
         Safe to call at any time after _setup_tabs + _insert_bot_tabs."""
         tb = self.tabs.tabBar()
 
-        # â”€â”€ Bot tabs (OVERVIEW, dynamic bots, MORE BOTS, BOT MARKET) â”€â”€
+        # ── Bot tabs (OVERVIEW, dynamic bots, MORE BOTS, BOT MARKET) ──
         tb.setTabVisible(self._overview_idx,  not on)
         tb.setTabVisible(self._morebots_idx,  not on)
         tb.setTabVisible(self._botmarket_idx, False)   # always hidden from bar
         for idx in self._tab_indices.values():
             tb.setTabVisible(idx, not on)
 
-        # â”€â”€ MANUAL tab â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── MANUAL tab ─────────────────────────────────────────────────
         tb.setTabVisible(self._manual_idx, on)
 
-        # â”€â”€ Corner buttons â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── Corner buttons ─────────────────────────────────────────────
         if hasattr(self, "_corner_universe"):
             self._corner_universe.setVisible(not on)
         if hasattr(self, "_corner_makebot"):
             self._corner_makebot.setVisible(not on)
 
-        # â”€â”€ Navigate to the right tab â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── Navigate to the right tab ──────────────────────────────────
         if on:
             self.tabs.setCurrentIndex(self._manual_idx)
             if hasattr(self, "manual_tab"):
@@ -1476,7 +1580,7 @@ class ApexWindow(QMainWindow):
         else:
             self.tabs.setCurrentIndex(self._overview_idx)
 
-        # â”€â”€ Friends tab: switch display mode â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── Friends tab: switch display mode ───────────────────────────
         if hasattr(self, "friends_tab") and hasattr(self.friends_tab,
                                                     "set_manual_mode"):
             self.friends_tab.set_manual_mode(on)
@@ -1500,10 +1604,10 @@ class ApexWindow(QMainWindow):
         if hasattr(self, "tabs") and hasattr(self, "_manual_idx"):
             self._apply_manual_mode_ui(new_state)
 
-    # â”€â”€ V3.2.0 â€” broker-mode selector â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── V3.2.0 — broker-mode selector ───────────────────────
 
     BROKER_MODES = {
-        # value â†’ (display label, status)
+        # value → (display label, status)
         "alpaca":     ("Alpaca",      "active"),
         "ibkr":       ("IBKR",        "coming"),
         "tradingview":("TradingView", "coming"),
@@ -1538,13 +1642,17 @@ class ApexWindow(QMainWindow):
                 self.tools_tab.rebuild_for_mode(mode)
         except Exception as e:
             print(f"[broker-mode] tools rebuild: {e}")
-        # V4.0.0 â€” flip the whole content stack so non-Alpaca modes get
+        # V4.0.0 — flip the whole content stack so non-Alpaca modes get
         # the coming-soon placeholder instead of stale Alpaca data.
         self._apply_broker_mode(mode)
+        # Rebuild bot tabs so the new broker's registry is reflected:
+        # • Alpaca → LONG/SHORT/DAY tabs restored from per-broker registry
+        # • IBKR / others → no Alpaca-only tabs, built-ins appear silenced
+        QTimer.singleShot(0, self._rebuild_broker_bot_tabs)
 
     def _build_coming_soon_page(self) -> QWidget:
         """The full-window placeholder shown when broker_mode is anything
-        other than 'alpaca'. Stays minimal â€” title, mode, a description,
+        other than 'alpaca'. Stays minimal — title, mode, a description,
         and a 'switch back to Alpaca' hint."""
         wrap = QFrame()
         wrap.setStyleSheet(f"background:transparent;border:none;")
@@ -1553,7 +1661,7 @@ class ApexWindow(QMainWindow):
         v.setSpacing(18)
         v.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        icon = QLabel("ðŸš§")
+        icon = QLabel("🚧")
         icon.setStyleSheet("font-size:72px;background:transparent;")
         icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
         v.addWidget(icon)
@@ -1589,7 +1697,7 @@ class ApexWindow(QMainWindow):
         desc.setMaximumWidth(640)
         v.addWidget(desc, alignment=Qt.AlignmentFlag.AlignCenter)
 
-        # "Switch back" button â€” one click to return to Alpaca
+        # "Switch back" button — one click to return to Alpaca
         back = QPushButton("Switch back to Alpaca")
         back.setObjectName("addBotBtn")
         back.setFixedHeight(44)
@@ -1609,17 +1717,59 @@ class ApexWindow(QMainWindow):
         else:
             label = self.BROKER_MODES.get(mode, (mode.title(), "coming"))[0]
             self._coming_soon_title.setText(
-                f"{label.upper()}  â€”  COMING VERY SOON")
+                f"{label.upper()}  —  COMING VERY SOON")
             self._coming_soon_sub.setText(
-                f"Mode: {label}    Â·    Not yet wired end-to-end")
+                f"Mode: {label}    ·    Not yet wired end-to-end")
             self._content_stack.setCurrentIndex(1)
+
+    def _rebuild_broker_bot_tabs(self):
+        """Tear down all existing bot tabs and re-insert from the current
+        broker's registry. Called whenever the user switches broker mode so:
+        • Alpaca  → LONG/SHORT/DAY tabs come back (from per-broker registry)
+        • IBKR    → no Alpaca-only tabs; built-ins silenced in More Bots
+        • Others  → no compatible built-in tabs (coming-soon page shown)"""
+        # Stop any running bots first (safe to call even if not running)
+        for side, tab in list(self._bot_tabs.items()):
+            bot_ctrl = getattr(tab, "bot_ctrl", None)
+            if bot_ctrl:
+                try:
+                    if bot_ctrl.is_running():
+                        bot_ctrl.stop_bot()
+                except Exception:
+                    pass
+
+        # Remove all existing bot tabs
+        for side in list(self._bot_tabs.keys()):
+            try:
+                self._remove_bot_tab(side)
+            except Exception as e:
+                print(f"[broker-switch] remove {side}: {e}")
+
+        # Re-insert tabs for the new broker's registry
+        try:
+            self._insert_bot_tabs()
+        except Exception as e:
+            print(f"[broker-switch] insert: {e}")
+
+        # Refresh More Bots panel so section counts update
+        if hasattr(self, "more_bots_tab"):
+            try:
+                self.more_bots_tab.refresh()
+            except Exception as e:
+                print(f"[broker-switch] more-bots refresh: {e}")
+
+        # Refresh Overview after a small delay (data workers need to spin up)
+        if hasattr(self, "overview_tab"):
+            QTimer.singleShot(300, lambda: (
+                getattr(self.overview_tab, "refresh", lambda: None)()
+            ))
 
     def _show_broker_menu(self):
         menu = QMenu(self)
         menu.setStyleSheet(self.styleSheet())
         current = self._current_broker_mode()
         for key, (label, status) in self.BROKER_MODES.items():
-            text = f"{'â€¢  ' if key == current else '   '}{label}"
+            text = f"{'> ' if key == current else '  '}{label}"
             if status == "coming":
                 text += "    (coming very soon)"
             act = QAction(text, self)
@@ -1631,7 +1781,7 @@ class ApexWindow(QMainWindow):
         menu.exec(pos)
 
     def _show_account_menu(self):
-        """V3 wave 5 â€” drop-down anchored under the user chip. Lists any
+        """V3 wave 5 — drop-down anchored under the user chip. Lists any
         OTHER saved accounts for one-click switch (no re-login required),
         plus 'Add account' which takes you to the login window."""
         from ui.login import list_saved_accounts, activate_saved_account
@@ -1643,7 +1793,7 @@ class ApexWindow(QMainWindow):
                   if int(a.get("user", {}).get("id", 0)) != int(current_id or 0)]
 
         if others:
-            hdr = QAction("â—  Switch to saved account", self)
+            hdr = QAction("Switch account", self)
             hdr.setEnabled(False)
             menu.addAction(hdr)
             for acc in others:
@@ -1657,7 +1807,7 @@ class ApexWindow(QMainWindow):
                 menu.addAction(act)
             menu.addSeparator()
 
-        add_act = QAction("âž•  Add / sign in to another account", self)
+        add_act = QAction("+ Add / sign in to another account", self)
         add_act.triggered.connect(self._sign_out)
         menu.addAction(add_act)
 
@@ -1670,7 +1820,7 @@ class ApexWindow(QMainWindow):
         menu.exec(pos)
 
     def _switch_to_saved_account(self, user_id: int):
-        """One-click switch to a previously-saved account â€” no login
+        """One-click switch to a previously-saved account — no login
         prompt. The saved token is reused; if it has expired the next
         API call will 401 and TokenVerifyWorker boots us to the login
         screen as usual."""
@@ -1683,7 +1833,7 @@ class ApexWindow(QMainWindow):
         self._user = acc["user"]
         display = self._user.get("display_name") or self._user.get("username", "")
         if hasattr(self, "user_chip_btn"):
-            self.user_chip_btn.setText(f"â–¸  {display}  â–¾")
+            self.user_chip_btn.setText(f"{display}  v")
         self.statusBar().showMessage(f"Switched to {display}")
         # Refresh account-scoped tabs against the new user
         try:
@@ -1696,7 +1846,7 @@ class ApexWindow(QMainWindow):
         QTimer.singleShot(500, self._refresh_all)
         QTimer.singleShot(2500, self._resume_cloud_bots)
 
-    # â”€â”€ CORNER WIDGET â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── CORNER WIDGET ────────────────────────────────────────
 
     def _build_corner(self) -> QWidget:
         w = QWidget()
@@ -1706,12 +1856,12 @@ class ApexWindow(QMainWindow):
         row.setSpacing(0)
         row.setAlignment(Qt.AlignmentFlag.AlignVCenter)
 
-        self._corner_universe = QPushButton("âœ¦  UNIVERSE")
-        self._corner_makebot  = QPushButton("âš’  MAKE BOT")
-        self._corner_friends  = QPushButton("â˜º  FRIENDS")
-        self._corner_account  = QPushButton("âš‡  ACCOUNT")
-        self._corner_admin    = QPushButton("â™›  ADMIN")      # V3 wave 5
-        self._corner_tools    = QPushButton("âš™  TOOLS")
+        self._corner_universe = QPushButton("UNIVERSE")
+        self._corner_makebot  = QPushButton("MAKE BOT")
+        self._corner_friends  = QPushButton("FRIENDS")
+        self._corner_account  = QPushButton("ACCOUNT")
+        self._corner_admin    = QPushButton("ADMIN")           # V3 wave 5
+        self._corner_tools    = QPushButton("TOOLS")
 
         for btn in (self._corner_universe, self._corner_makebot,
                     self._corner_friends, self._corner_account,
@@ -1721,7 +1871,7 @@ class ApexWindow(QMainWindow):
             btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
             row.addWidget(btn)
 
-        # ADMIN corner button is hidden by default â€” _refresh_admin_visibility
+        # ADMIN corner button is hidden by default — _refresh_admin_visibility
         # un-hides it once /auth/me returns a non-USER role.
         self._corner_admin.setVisible(False)
 
@@ -1749,8 +1899,18 @@ class ApexWindow(QMainWindow):
             corner = self.tabs.cornerWidget(_Qt.Corner.TopRightCorner)
             if corner and h > 0:
                 corner.setFixedHeight(h)
+                # Also enforce the same height on each button so they don't
+                # overflow or under-fill the bar
+                for btn in corner.findChildren(QPushButton):
+                    btn.setFixedHeight(h)
         except Exception as e:
             print(f"[corner-height] {e}")
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        # Re-align the corner buttons on every resize in case the tab bar
+        # changed height (e.g. font/DPI change after first paint).
+        QTimer.singleShot(0, self._sync_corner_height)
 
     def _switch_corner(self, idx: int, btn: QPushButton):
         self.tabs.setCurrentIndex(idx)
@@ -1775,12 +1935,19 @@ class ApexWindow(QMainWindow):
                 b.style().unpolish(b)
                 b.style().polish(b)
 
-    # â”€â”€ BOT TAB MANAGEMENT â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── BOT TAB MANAGEMENT ──────────────────────────────────
 
     def _insert_bot_tabs(self):
-        """Insert bot tabs based on registry (between Overview and More Bots)."""
+        """Insert bot tabs based on registry (between Overview and More Bots).
+        Bots that are not compatible with the current broker are skipped — they
+        still live in the registry (so they appear in the More Bots silenced list)
+        but no tab is created for them."""
         reg = _load_registry()
+        broker = D.load_settings().get("broker_mode", "alpaca")
         for side in reg["active"]:
+            info = BUILTIN_BOTS.get(side)
+            if info and broker not in info.get("brokers", ["alpaca"]):
+                continue  # Alpaca-only bot — don't create a tab on IBKR / other brokers
             self._add_bot_tab(side, silenced=side in reg["silenced"])
 
     def _add_bot_tab(self, side: str, silenced: bool = False):
@@ -1803,7 +1970,7 @@ class ApexWindow(QMainWindow):
 
         tab = BotTab(side) if side in BUILTIN_BOTS else BotTab.__new__(BotTab)
         if side not in BUILTIN_BOTS:
-            # Minimal init for custom bot â€” treat like a generic BotTab
+            # Minimal init for custom bot — treat like a generic BotTab
             BotTab.__init__(tab, side)
 
         self._bot_tabs[side] = tab
@@ -1830,7 +1997,7 @@ class ApexWindow(QMainWindow):
             # The BOT MARKET tab keeps whatever visibility the user
             # set last; the others stay hidden behind the corner buttons.
             if hidden == self._botmarket_idx:
-                # leave alone â€” visibility is toggled by _open_bot_market
+                # leave alone — visibility is toggled by _open_bot_market
                 pass
             else:
                 self.tabs.tabBar().setTabVisible(hidden, False)
@@ -1891,7 +2058,7 @@ class ApexWindow(QMainWindow):
         self._tab_indices.pop(side, None)
         tab.deleteLater()
 
-    # â”€â”€ V7.1.4: drag-reorder bot tabs only â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── V7.1.4: drag-reorder bot tabs only ──────────────────
 
     def _on_tab_moved(self, from_idx: int, to_idx: int):
         """Called by QTabBar after a user drags a tab to a new slot.
@@ -1904,15 +2071,15 @@ class ApexWindow(QMainWindow):
         # The valid bot-tab range is everything strictly between the
         # Overview tab and the MORE BOTS tab. (Universe + Tools live
         # past MORE BOTS but are hidden, so we don't need to guard
-        # against landing on them â€” drag won't visit invisible tabs.)
-        # After the move, _morebots_idx may have shifted by Â±1 if the
+        # against landing on them — drag won't visit invisible tabs.)
+        # After the move, _morebots_idx may have shifted by ±1 if the
         # move crossed boundaries (it shouldn't, but be defensive).
         bot_lo = self._overview_idx + 1
         bot_hi = self._morebots_idx        # exclusive
         in_range = lambda i: bot_lo <= i < bot_hi
 
         if not (in_range(from_idx) and in_range(to_idx)):
-            # Move would have shuffled a static tab â€” undo it.
+            # Move would have shuffled a static tab — undo it.
             self._suppress_tab_move = True
             try:
                 self.tabs.tabBar().moveTab(to_idx, from_idx)
@@ -1920,7 +2087,7 @@ class ApexWindow(QMainWindow):
                 self._suppress_tab_move = False
             return
 
-        # Accepted â€” rebuild the registry's active-bot order from the
+        # Accepted — rebuild the registry's active-bot order from the
         # current tab sequence.
         reg = _load_registry()
         old_order = list(reg.get("active", []))
@@ -1932,7 +2099,7 @@ class ApexWindow(QMainWindow):
                     new_order.append(side)
                     break
         # Preserve any active bots that aren't currently tabbed (e.g.
-        # the user silenced one â€” it's in `active` but not in the bar).
+        # the user silenced one — it's in `active` but not in the bar).
         tabless = [s for s in old_order if s not in new_order]
         reg["active"] = new_order + tabless
         _save_registry(reg)
@@ -1941,7 +2108,7 @@ class ApexWindow(QMainWindow):
         # via QTimer.singleShot(0) so the drag animation completes
         # first (the user felt a brief freeze otherwise) AND use the
         # lightweight reorder path that just shuffles the existing
-        # block widgets in their layout â€” no Alpaca refetch.
+        # block widgets in their layout — no Alpaca refetch.
         ov = getattr(self, "overview_tab", None)
         if ov and hasattr(ov, "reorder_active_bots"):
             QTimer.singleShot(0, ov.reorder_active_bots)
@@ -1965,7 +2132,7 @@ class ApexWindow(QMainWindow):
         if dot:
             dot.set_state("silenced" if silenced else "stopped")
 
-    # â”€â”€ REGISTRY SIGNALS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── REGISTRY SIGNALS ─────────────────────────────────────
 
     def _on_bot_added(self, side: str):
         # V7.1.1: deferred so the click that triggered the add can fully
@@ -2036,10 +2203,10 @@ class ApexWindow(QMainWindow):
         except Exception as e:
             print(f"[overview sync] {e}")
 
-    # â”€â”€ BOT MARKET show / hide â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── BOT MARKET show / hide ───────────────────────────────
 
     def _open_bot_market(self):
-        """V3.1.3 â€” invoked from MoreBotsTab's 'ðŸ›’ Open Bot Market'
+        """V3.1.3 — invoked from MoreBotsTab's '🛒 Open Bot Market'
         button. Reveal the tab in the bar, switch focus to it, and ask
         the market to refresh (so it shows fresh server data even if
         the user opened it a long time after launch)."""
@@ -2059,7 +2226,7 @@ class ApexWindow(QMainWindow):
             # entered from.
             self.tabs.setCurrentIndex(self._morebots_idx)
 
-    # â”€â”€ CLOUD RESUME â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── CLOUD RESUME ─────────────────────────────────────────
 
     def _resume_cloud_bots(self):
         """Ask each cloud-flagged bot's controller to query Oracle for
@@ -2072,7 +2239,7 @@ class ApexWindow(QMainWindow):
                 except Exception as e:
                     print(f"[cloud-resume] {side}: {e}")
 
-    # â”€â”€ V3 wave 5 â€” credits chip + admin tab visibility â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── V3 wave 5 — credits chip + admin tab visibility ─────────────
 
     def _refresh_user_meta(self):
         """Hit /auth/me + /credits/me to update the credit chip and the
@@ -2114,12 +2281,12 @@ class ApexWindow(QMainWindow):
         self._meta_workers.append(w)
         w.start()
 
-    # â”€â”€ V4.0.1 â€” Terms of Service acceptance â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── V4.0.1 — Terms of Service acceptance ─────────────────
 
     def _check_tos_acceptance(self):
         """Hit /auth/tos and pop a modal if the user hasn't accepted yet.
         The modal blocks (modal exec) until the user explicitly clicks
-        I Accept â€” Decline closes the app via _sign_out."""
+        I Accept — Decline closes the app via _sign_out."""
         class _W(QThread):
             done = pyqtSignal(dict)
             def run(self_):
@@ -2181,7 +2348,7 @@ class ApexWindow(QMainWindow):
         if dlg.exec() == QDialog.DialogCode.Accepted:
             self._send_tos_acceptance()
         else:
-            # User declined â†’ sign out so they can re-think
+            # User declined → sign out so they can re-think
             self.statusBar().showMessage("T&C declined. Signing out.")
             QTimer.singleShot(800, self._sign_out)
 
@@ -2210,7 +2377,7 @@ class ApexWindow(QMainWindow):
         w.start()
 
     def _sync_revocations(self):
-        """V3.3.0 â€” ask the server which of our installed bots have been
+        """V3.3.0 — ask the server which of our installed bots have been
         removed by moderation, delete them locally."""
         class _W(QThread):
             done = pyqtSignal(list)
@@ -2255,18 +2422,18 @@ class ApexWindow(QMainWindow):
                     p.unlink(missing_ok=True)
                 except Exception:
                     pass
-        # Remove from bot_registry
+        # Remove from bot_registry (per-user-broker key)
         try:
             s = D.load_settings()
-            reg = s.get("bot_registry",
-                        {"active": [], "silenced": [], "custom": []})
+            rk = _registry_key()
+            reg = s.get(rk, {"active": [], "silenced": [], "custom": []})
             reg["custom"] = [c for c in reg.get("custom", [])
                               if c.get("id") not in slugs]
             reg["active"] = [a for a in reg.get("active", [])
                               if a not in slugs]
             reg["silenced"] = [a for a in reg.get("silenced", [])
                                 if a not in slugs]
-            s["bot_registry"] = reg
+            s[rk] = reg
             with open(D.SETTINGS_FILE, "w", encoding="utf-8") as f:
                 json.dump(s, f, indent=2)
         except Exception as e:
@@ -2276,36 +2443,36 @@ class ApexWindow(QMainWindow):
             self, "Bots removed by moderation",
             f"{len(slugs)} bot{'s' if len(slugs)!=1 else ''} you had "
             f"installed were removed by BAPTOU moderators and have been "
-            f"deleted from your library:\n\n  Â· "
-            + "\n  Â· ".join(slugs) +
+            f"deleted from your library:\n\n  · "
+            + "\n  · ".join(slugs) +
             "\n\nIf they were paid bots, the credits have been refunded "
             "to your BAPTOU balance.")
 
     def _open_credit_shop(self):
         """Open the Credit Shop dialog. Balance passed in so we skip
-        an extra round-trip â€” it'll be refreshed inside the dialog."""
+        an extra round-trip — it'll be refreshed inside the dialog."""
         try:
             bal = int(self.credits_chip.text().split()[1].replace(",", ""))
         except Exception:
             bal = 0
         dlg = CreditShopDialog(parent=self, current_balance=bal)
         dlg.balance_refreshed.connect(
-            lambda b: self.credits_chip.setText(f"â—Š  {b:,} credits"))
+            lambda b: self.credits_chip.setText(f"{b:,} credits"))
         dlg.exec()
 
     def _on_user_meta_loaded(self, me: dict, balance: int):
-        # Credits chip â€” always update
+        # Credits chip — always update
         if hasattr(self, "credits_chip"):
-            self.credits_chip.setText(f"â—Š  {balance:,} credits")
-        # Admin corner button â€” show only for admin roles
+            self.credits_chip.setText(f"{balance:,} credits")
+        # Admin corner button — show only for admin roles
         role = (me or {}).get("role", "USER")
         is_admin = role in ("ADMIN", "SUB_BOSS_ADMIN", "BOSS_ADMIN")
         if hasattr(self, "_corner_admin"):
             self._corner_admin.setVisible(is_admin)
             if is_admin:
-                self._corner_admin.setToolTip(f"Admin dashboard Â· role: {role}")
+                self._corner_admin.setToolTip(f"Admin dashboard · role: {role}")
 
-    # â”€â”€ QUICK CONTROLS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── QUICK CONTROLS ───────────────────────────────────────
 
     def _quick_play(self, side: str):
         tab = self._bot_tabs.get(side)
@@ -2326,7 +2493,7 @@ class ApexWindow(QMainWindow):
         if bot_ctrl and bot_ctrl.is_running():
             bot_ctrl.stop_bot()
 
-    # â”€â”€ BOT STATUS SIGNAL â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── BOT STATUS SIGNAL ────────────────────────────────────
 
     def _on_bot_status_changed(self, side: str, is_running: bool):
         mkt_open = self._mkt_open_prev
@@ -2351,7 +2518,7 @@ class ApexWindow(QMainWindow):
         if hasattr(self, "overview_tab"):
             self.overview_tab.update_bot_status(side, state)
 
-    # â”€â”€ TRAY â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── TRAY ─────────────────────────────────────────────────
 
     def _setup_tray(self):
         try:
@@ -2394,11 +2561,11 @@ class ApexWindow(QMainWindow):
         display = user.get("display_name") or user.get("username", "")
         # Update the clickable chip in the header (v3.0.1)
         if hasattr(self, "user_chip_btn"):
-            self.user_chip_btn.setText(f"â–¸  {display}  â–¾")
+            self.user_chip_btn.setText(f"{display}  v")
         # Legacy QLabel fallback (in case it survives from older builds)
         for child in self.centralWidget().findChildren(QLabel):
-            if child.text().startswith("â–¸  "):
-                child.setText(f"â–¸  {display}")
+            if child.text().startswith("▸  "):
+                child.setText(f"▸  {display}")
                 break
         self.show()
         self.raise_()
@@ -2432,12 +2599,12 @@ class ApexWindow(QMainWindow):
         if hasattr(self, "tray"):
             self.tray.showMessage(
                 "BAPTOU",
-                "Running in background â€” your bots keep trading.\n"
+                "Running in background — your bots keep trading.\n"
                 "Use the QUIT button in the header to fully exit.",
                 QSystemTrayIcon.MessageIcon.Information, 2500)
 
     def _quit_app(self):
-        """v1.2.3 â€” explicit quit. Cloud bots live on Oracle and keep
+        """v1.2.3 — explicit quit. Cloud bots live on Oracle and keep
         trading independently of the desktop; only LOCAL bots die when
         APEX quits. Confirmation dialog now distinguishes the two so the
         user knows what will and won't happen."""
@@ -2462,7 +2629,7 @@ class ApexWindow(QMainWindow):
                     f"{'s' if len(local_running) > 1 else ''} "
                     f"will stop:</b> {', '.join(local_running)}<br>"
                     f"<span style='color:#7a8597;font-size:11px;'>"
-                    f"Running on this laptop â€” they die when APEX "
+                    f"Running on this laptop — they die when APEX "
                     f"quits.</span>")
             if cloud_running:
                 parts.append(
@@ -2486,7 +2653,7 @@ class ApexWindow(QMainWindow):
 
     def _teardown_for_quit(self):
         """Stop LOCAL bots only, hide the tray icon, save state.
-        Cloud bots live on Oracle and must survive desktop quit â€” the
+        Cloud bots live on Oracle and must survive desktop quit — the
         whole point of cloud mode is 24/7 trading independent of this
         machine. Called from closeEvent when _user_requested_quit
         is True."""
@@ -2508,14 +2675,14 @@ class ApexWindow(QMainWindow):
         except Exception:
             pass
 
-    # â”€â”€ CLOCK â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── CLOCK ────────────────────────────────────────────────
 
     def _tick_clock(self):
         from datetime import datetime
         self.clock_label.setText(
-            datetime.now().strftime("%a %d %b %Y  â€”  %H:%M:%S"))
+            datetime.now().strftime("%a %d %b %Y  —  %H:%M:%S"))
 
-    # â”€â”€ REFRESH â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── REFRESH ──────────────────────────────────────────────
 
     def _refresh_all(self):
         """V7.1.11: bot-tab refresh is async (returns immediately, the
@@ -2523,7 +2690,7 @@ class ApexWindow(QMainWindow):
         wrap around tab.refresh() was a no-op for visual wobble
         because the actual card mutations happen in _on_data, which
         runs after this method has already re-enabled updates. The
-        wobble fix now lives in BotTab._on_data â€” here we just kick
+        wobble fix now lives in BotTab._on_data — here we just kick
         off the fetch and refresh the market status."""
         self.statusBar().showMessage("Refreshing data...")
         try:
@@ -2579,11 +2746,11 @@ class ApexWindow(QMainWindow):
         except Exception:
             pass
 
-    # â”€â”€ AUTO-TRADE SCHEDULE â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── AUTO-TRADE SCHEDULE ──────────────────────────────────
 
     def _tick_schedule(self):
         """V7.1.10: per-bot auto-schedule. Each bot has its own
-        checkbox in Tools â†’ AUTOMATION; only the checked ones get
+        checkbox in Tools → AUTOMATION; only the checked ones get
         started/stopped on the market-open / market-close edge."""
         try:
             scheduled = set(D.get_auto_schedule_active_bots())
@@ -2608,7 +2775,7 @@ class ApexWindow(QMainWindow):
                             print(f"[schedule] start {side}: {e}")
                 if started:
                     self.statusBar().showMessage(
-                        f"Auto-schedule: market OPEN â€” started "
+                        f"Auto-schedule: market OPEN — started "
                         f"{', '.join(started)}")
             elif (not is_open) and self._mkt_open_prev in (None, True):
                 stopped = []
@@ -2625,17 +2792,17 @@ class ApexWindow(QMainWindow):
                             print(f"[schedule] stop {side}: {e}")
                 if stopped:
                     self.statusBar().showMessage(
-                        f"Auto-schedule: market CLOSED â€” stopped "
+                        f"Auto-schedule: market CLOSED — stopped "
                         f"{', '.join(stopped)}")
             self._mkt_open_prev = is_open
         except Exception as e:
             print(f"[schedule] tick error: {e}")
 
-    # â”€â”€ AUTO-UPDATE â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── AUTO-UPDATE ──────────────────────────────────────────
 
     def _maybe_auto_update(self):
         """V7.1.3: notification-only. The check runs in the background
-        and surfaces an "UPDATE AVAILABLE" banner in the header â€” the
+        and surfaces an "UPDATE AVAILABLE" banner in the header — the
         actual download and install only happens when the user clicks
         that banner. No more silent-install races, no more loops, no
         more market-hours gating: the user is in control.
@@ -2725,9 +2892,9 @@ class ApexWindow(QMainWindow):
         restart_app()
 
 
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ─────────────────────────────────────────
 # BOT ENTRY POINT (frozen build)
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ─────────────────────────────────────────
 
 def _run_bot(side: str) -> int:
     import io
@@ -2764,12 +2931,12 @@ def _run_bot(side: str) -> int:
     return 0
 
 
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ─────────────────────────────────────────
 # ENTRY POINT
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ─────────────────────────────────────────
 
 def _install_exception_handler():
-    """v3.1.9 â€” replace Python's default 'print to stderr and die'
+    """v3.1.9 — replace Python's default 'print to stderr and die'
     behaviour with a friendly QMessageBox + writing the traceback to
     DATA_DIR/apex_crash.log. The app keeps running afterwards."""
     import traceback as _tb
@@ -2815,7 +2982,7 @@ def main():
     app = QApplication(sys.argv)
     app.setApplicationName("BAPTOU Trading Platform")
     app.setApplicationVersion(get_current_version())
-    app.setWindowIcon(_app_icon())          # v3.1.6 â€” default for every window
+    app.setWindowIcon(_app_icon())          # v3.1.6 — default for every window
     app.setQuitOnLastWindowClosed(False)
     _install_exception_handler()
 
@@ -2849,10 +3016,10 @@ def main():
     stored = load_auth()
 
     if stored and stored.get("token"):
-        # â”€â”€ Have a stored token: launch immediately, verify in background â”€â”€
+        # ── Have a stored token: launch immediately, verify in background ──
         _launch(stored.get("user", {}))
 
-        # Background token verification â€” if expired show re-login dialog
+        # Background token verification — if expired show re-login dialog
         def _on_token_invalid():
             clear_auth()
             mw = getattr(app, "_main_window", None)
@@ -2873,12 +3040,12 @@ def main():
         verify = TokenVerifyWorker(stored["token"], srv_url)
         verify.valid.connect(lambda u: save_auth(stored["token"], u))   # refresh user info
         verify.invalid.connect(_on_token_invalid)
-        # offline â†’ do nothing (keep user logged in)
+        # offline → do nothing (keep user logged in)
         app._token_verify = verify
         QTimer.singleShot(3_000, verify.start)   # defer 3s so app opens first
 
     else:
-        # â”€â”€ No token: show login window â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── No token: show login window ──────────────────────────────────────
         login = LoginWindow()
         login.auth_success.connect(
             lambda tok, usr: _on_login_success(login, tok, usr))

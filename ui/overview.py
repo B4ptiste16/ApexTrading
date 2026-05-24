@@ -9,7 +9,7 @@ from pathlib import Path
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QFrame, QGridLayout, QFileDialog, QSizePolicy, QTextEdit, QComboBox,
+    QFrame, QGridLayout, QFileDialog, QSizePolicy, QTextEdit,
     QLineEdit, QCheckBox,
 )
 from PyQt6.QtCore import Qt, QTimer
@@ -17,6 +17,7 @@ from PyQt6.QtCore import Qt, QTimer
 from ui.styles  import COLORS, BOT_COLOR
 from ui.widgets import (
     ChartView, MetricCard, SectionHeader, ScrollContent, DataTable,
+    NoScrollComboBox,
 )
 from core import data as D
 from core import charts as CH
@@ -60,7 +61,7 @@ class OverviewTab(QWidget):
         # V7.1.4: Sort dropdown drives the block order in the row.
         # V7.1.6: Period dropdown drives the timeframe used by every
         # block's PERIOD P/L card. Both choices persist.
-        self._sort_combo = QComboBox()
+        self._sort_combo = NoScrollComboBox()
         for key, label in self._SORT_OPTIONS:
             self._sort_combo.addItem(label, key)
         try:
@@ -75,7 +76,7 @@ class OverviewTab(QWidget):
         # V7.1.10: renamed from _period_combo to _pl_period_combo so it
         # doesn't shadow the existing _period_combo() method that builds
         # the PORTFOLIO VALUE chart's period selector below.
-        self._pl_period_combo = QComboBox()
+        self._pl_period_combo = NoScrollComboBox()
         self._pl_period_combo.addItems(["1D", "1W", "1M", "3M", "6M", "1Y"])
         self._pl_period_combo.setFixedWidth(56)
         try:
@@ -166,7 +167,7 @@ class OverviewTab(QWidget):
         metrics haven't been fetched yet (first render before
         refresh() has run)."""
         try:
-            reg = D.load_settings().get("bot_registry", {})
+            reg = D.load_bot_registry()
         except Exception:
             reg = {}
         active   = reg.get("active",   ["LONG", "SHORT", "DAY"])
@@ -382,7 +383,7 @@ class OverviewTab(QWidget):
         )
 
     def _period_combo(self) -> QComboBox:
-        self.period_combo = QComboBox()
+        self.period_combo = NoScrollComboBox()
         self.period_combo.addItems(["1D","1W","1M","3M","6M","1Y"])
         self.period_combo.setFixedWidth(80)
         self.period_combo.currentTextChanged.connect(
@@ -823,7 +824,6 @@ class ToolsTab(QWidget):
         fl.setHorizontalSpacing(10)
         fl.setVerticalSpacing(8)
 
-        from PyQt6.QtWidgets import QComboBox as _QCombo
         # V4.0.2 — slot dropdown includes the user's custom bots so an
         # Alpaca key can be assigned to e.g. a 'crypto' bot, not just
         # the three built-ins.
@@ -832,7 +832,7 @@ class ToolsTab(QWidget):
                         ("SHORT",   "SHORT bot"),
                         ("DAY",     "DAY bot")]
         try:
-            reg = D.load_settings().get("bot_registry", {})
+            reg = D.load_bot_registry()
             for c in reg.get("custom", []):
                 slug = str(c.get("id", "")).upper()
                 if slug and slug not in {s for s, _ in SIDE_OPTIONS}:
@@ -865,7 +865,7 @@ class ToolsTab(QWidget):
             fl.addWidget(QLabel("Secret"), i*3 + 2, 0)
             fl.addWidget(sec_ed,            i*3 + 2, 1, 1, 2)
 
-            assign = _QCombo()
+            assign = NoScrollComboBox()
             for val, lbl in SIDE_OPTIONS:
                 assign.addItem(lbl, val)
             idx = next((j for j, (v, _) in enumerate(SIDE_OPTIONS)
@@ -968,20 +968,18 @@ class ToolsTab(QWidget):
         s.add(manual_frame)
 
     def _build_ai_key_section(self, s):
-        """AI provider + mode selector.
-        Provider/model/key stored in .env as AI_PROVIDER, AI_MODEL, and the
-        per-provider key var. AI_MODE = vision | text controls whether bots
-        generate charts before calling AI."""
-        from core.ai_client import (PROVIDER_LABELS, PROVIDER_MODELS,
-                                    PROVIDER_ENV_KEY, provider_supports_vision)
+        """AI provider API key entry.
+        Only stores API keys here — provider/model/mode are chosen
+        per-bot under each bot's LAST AI SIGNAL section."""
+        from core.ai_client import PROVIDER_LABELS, PROVIDER_ENV_KEY
 
-        s.add(SectionHeader("AI PROVIDER", C["yellow"]))
+        s.add(SectionHeader("AI PROVIDER KEYS", C["yellow"]))
 
         # Hint text
         hint = QLabel(
-            "Pick which AI powers your bots. "
+            "Enter the API key for each AI provider you want to use. "
             "Groq (Llama) and Google Gemini are completely FREE. "
-            "Text mode skips chart generation — faster and works with Groq.")
+            "Choose which provider and model each bot uses from the bot's own tab.")
         hint.setStyleSheet(f"color:{C['muted']};font-size:11px;")
         hint.setWordWrap(True)
         s.add(hint)
@@ -1000,10 +998,10 @@ class ToolsTab(QWidget):
         afl.setSpacing(8)
         afl.setColumnStretch(1, 1)
 
-        # Row 0: Provider dropdown
+        # Row 0: Provider selector (chooses which key to display/edit)
         prov_lbl = QLabel("Provider")
         prov_lbl.setStyleSheet(f"color:{C['text']};font-size:12px;")
-        self._ai_provider_combo = QComboBox()
+        self._ai_provider_combo = NoScrollComboBox()
         self._ai_provider_combo.setStyleSheet(
             f"background:{C['panel2']};color:{C['text']};"
             f"border:1px solid {C['border']};border-radius:4px;padding:4px;")
@@ -1015,17 +1013,7 @@ class ToolsTab(QWidget):
         afl.addWidget(prov_lbl, 0, 0)
         afl.addWidget(self._ai_provider_combo, 0, 1)
 
-        # Row 1: Model dropdown
-        model_lbl = QLabel("Model")
-        model_lbl.setStyleSheet(f"color:{C['text']};font-size:12px;")
-        self._ai_model_combo = QComboBox()
-        self._ai_model_combo.setStyleSheet(
-            f"background:{C['panel2']};color:{C['text']};"
-            f"border:1px solid {C['border']};border-radius:4px;padding:4px;")
-        afl.addWidget(model_lbl, 1, 0)
-        afl.addWidget(self._ai_model_combo, 1, 1)
-
-        # Row 2: API key field
+        # Row 1: API key field
         key_lbl = QLabel("API key")
         key_lbl.setStyleSheet(f"color:{C['text']};font-size:12px;")
         self._ai_key_edit = QLineEdit()
@@ -1034,26 +1022,10 @@ class ToolsTab(QWidget):
             f"background:{C['panel2']};color:{C['text']};"
             f"border:1px solid {C['border']};border-radius:4px;"
             f"padding:5px;font-family:'JetBrains Mono';font-size:11px;")
-        afl.addWidget(key_lbl, 2, 0)
-        afl.addWidget(self._ai_key_edit, 2, 1)
+        afl.addWidget(key_lbl, 1, 0)
+        afl.addWidget(self._ai_key_edit, 1, 1)
 
-        # Row 3: AI Mode toggle (Vision vs Text)
-        mode_lbl = QLabel("Mode")
-        mode_lbl.setStyleSheet(f"color:{C['text']};font-size:12px;")
-        self._ai_mode_combo = QComboBox()
-        self._ai_mode_combo.setStyleSheet(
-            f"background:{C['panel2']};color:{C['text']};"
-            f"border:1px solid {C['border']};border-radius:4px;padding:4px;")
-        self._ai_mode_combo.addItem("Vision  (charts → AI)", "vision")
-        self._ai_mode_combo.addItem("Text-only  (no charts — works with Groq)", "text")
-        saved_mode = cur.get("AI_MODE", "vision")
-        mode_idx = self._ai_mode_combo.findData(saved_mode)
-        if mode_idx >= 0:
-            self._ai_mode_combo.setCurrentIndex(mode_idx)
-        afl.addWidget(mode_lbl, 3, 0)
-        afl.addWidget(self._ai_mode_combo, 3, 1)
-
-        # Row 4: show key checkbox + save button
+        # Row 2: show key checkbox + save button
         ai_show = QCheckBox("Show key")
         ai_show.setStyleSheet(f"color:{C['muted']};font-size:10px;")
         ai_show.toggled.connect(lambda on:
@@ -1062,45 +1034,28 @@ class ToolsTab(QWidget):
         ai_save = QPushButton("Save")
         ai_save.setObjectName("toolBtn")
         ai_save.clicked.connect(self._save_ai_key)
-        afl.addWidget(ai_show, 4, 0)
-        afl.addWidget(ai_save, 4, 1)
+        afl.addWidget(ai_show, 2, 0)
+        afl.addWidget(ai_save, 2, 1)
 
-        # Row 5: status message
+        # Row 3: status message
         self._ai_save_msg = QLabel("")
         self._ai_save_msg.setStyleSheet(f"color:{C['green']};font-size:11px;")
-        afl.addWidget(self._ai_save_msg, 5, 0, 1, 2)
+        afl.addWidget(self._ai_save_msg, 3, 0, 1, 2)
 
-        # Row 6: where-to-get-key link per provider
+        # Row 4: where-to-get-key link per provider
         self._ai_key_hint = QLabel("")
         self._ai_key_hint.setStyleSheet(
             f"color:{C['muted']};font-size:10px;")
         self._ai_key_hint.setOpenExternalLinks(True)
-        afl.addWidget(self._ai_key_hint, 6, 0, 1, 2)
+        afl.addWidget(self._ai_key_hint, 4, 0, 1, 2)
 
         s.add(ai_frame)
 
-        # Wire up provider change → update model list + key field + hint + mode
+        # Wire up provider change → fill key field + hint
         def _on_provider_changed(_idx):
             prov = self._ai_provider_combo.currentData()
-            models = PROVIDER_MODELS.get(prov, [])
-            saved_model = cur.get("AI_MODEL", "")
-            self._ai_model_combo.clear()
-            for m in models:
-                self._ai_model_combo.addItem(m)
-            idx = self._ai_model_combo.findText(saved_model)
-            if idx >= 0:
-                self._ai_model_combo.setCurrentIndex(idx)
-            # Fill key field
             env_var = PROVIDER_ENV_KEY.get(prov, "ANTHROPIC_API_KEY")
             self._ai_key_edit.setText(cur.get(env_var, ""))
-            # Force text mode if provider doesn't support vision
-            if not provider_supports_vision(prov):
-                self._ai_mode_combo.setCurrentIndex(
-                    self._ai_mode_combo.findData("text"))
-                self._ai_mode_combo.setEnabled(False)
-            else:
-                self._ai_mode_combo.setEnabled(True)
-            # Update hint
             _HINTS = {
                 "anthropic": "Get key: <a href='https://console.anthropic.com'>console.anthropic.com</a> (paid)",
                 "google":    "Get FREE key: <a href='https://aistudio.google.com'>aistudio.google.com</a> — 1 500 req/day, resets daily",
@@ -1110,7 +1065,7 @@ class ToolsTab(QWidget):
             self._ai_key_hint.setText(_HINTS.get(prov, ""))
 
         self._ai_provider_combo.currentIndexChanged.connect(_on_provider_changed)
-        # Trigger once to populate model list + key from saved state
+        # Trigger once to fill key from saved state
         _on_provider_changed(0)
 
     def _save_alpaca_slots(self):
@@ -1144,7 +1099,7 @@ class ToolsTab(QWidget):
         # doesn't leave a stale key behind.
         candidate_sides = ["LONG", "SHORT", "DAY"]
         try:
-            reg = D.load_settings().get("bot_registry", {})
+            reg = D.load_bot_registry()
             candidate_sides += [str(c.get("id", "")).upper()
                                  for c in reg.get("custom", [])]
         except Exception:
@@ -1184,18 +1139,13 @@ class ToolsTab(QWidget):
         from PyQt6.QtCore import QTimer as _QT
         from core.ai_client import PROVIDER_ENV_KEY
         prov      = self._ai_provider_combo.currentData() or "anthropic"
-        model     = self._ai_model_combo.currentText().strip()
         key_value = self._ai_key_edit.text().strip()
-        mode      = self._ai_mode_combo.currentData() or "vision"
         env_var   = PROVIDER_ENV_KEY.get(prov, "ANTHROPIC_API_KEY")
-        to_write  = {"AI_PROVIDER": prov, "AI_MODEL": model, "AI_MODE": mode}
         if key_value:
-            to_write[env_var] = key_value
-        D.write_env_keys(to_write)
+            D.write_env_keys({env_var: key_value})
         prov_label = self._ai_provider_combo.currentText()
-        mode_label = "text" if mode == "text" else "vision"
         self._ai_save_msg.setText(
-            f"✓ {prov_label} ({mode_label}) saved — bots use it on next start")
+            f"✓ {prov_label} key saved — sync to Oracle to use it on cloud bots")
         self._ai_save_msg.setStyleSheet(f"color:{C['green']};font-size:11px;")
         _QT.singleShot(5000, lambda: self._ai_save_msg.setText(""))
 
@@ -1555,7 +1505,7 @@ class ToolsTab(QWidget):
         self._auto_sched_checks.clear()
 
         try:
-            reg = D.load_settings().get("bot_registry", {})
+            reg = D.load_bot_registry()
         except Exception:
             reg = {}
         active   = reg.get("active",   ["LONG", "SHORT", "DAY"])
@@ -1615,7 +1565,7 @@ class ToolsTab(QWidget):
         self._cloud_checks.clear()
 
         try:
-            reg = D.load_settings().get("bot_registry", {})
+            reg = D.load_bot_registry()
         except Exception:
             reg = {}
         active   = reg.get("active",   ["LONG", "SHORT", "DAY"])

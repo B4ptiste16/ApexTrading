@@ -1,9 +1,9 @@
-﻿"""
-APEX  Â·  Make Your Own Bot tab  (V7.1.9)
-â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+"""
+APEX  ·  Make Your Own Bot tab  (V7.1.9)
+────────────────────────────────────────────────────────────────────────
 Lets the user describe a trading bot in plain English and have an AI
 generate the Python file that APEX can run. The user supplies their own
-AI API key â€” Anthropic (Claude), OpenAI (GPT), or any OpenAI-compatible
+AI API key — Anthropic (Claude), OpenAI (GPT), or any OpenAI-compatible
 endpoint via OpenRouter.
 
 The generated file follows the APEX bot contract documented in
@@ -12,7 +12,7 @@ print-with-flush logging, no GUI, no extra dependencies. The skeleton
 guide is sent to the model as the system prompt so the model always
 produces a file APEX can actually launch.
 
-No external SDK is required at runtime â€” we hit the providers' HTTP
+No external SDK is required at runtime — we hit the providers' HTTP
 APIs directly with `requests`, which is already in the desktop app's
 dependencies.
 """
@@ -29,7 +29,7 @@ import requests
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
 from PyQt6.QtGui  import QFont
 from PyQt6.QtWidgets import (
-    QCheckBox, QComboBox, QFileDialog, QFrame, QGridLayout, QHBoxLayout,
+    QCheckBox, QFileDialog, QFrame, QGridLayout, QHBoxLayout,
     QLabel, QLineEdit, QMessageBox, QPlainTextEdit, QPushButton,
     QSizePolicy, QVBoxLayout, QWidget,
 )
@@ -37,16 +37,16 @@ from PyQt6.QtWidgets import (
 from core      import data as D
 from core.paths import DATA_DIR
 from ui.styles import COLORS
-from ui.widgets import ScrollContent, SectionHeader
+from ui.widgets import ScrollContent, SectionHeader, NoScrollComboBox
 
 C = COLORS
 
 
-# â”€â”€ Provider / model catalogue â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── Provider / model catalogue ────────────────────────────────────────
 
 # Each provider entry knows:
-#   url      â€” HTTP endpoint
-#   models   â€” list of (label_for_dropdown, raw_model_id)
+#   url      — HTTP endpoint
+#   models   — list of (label_for_dropdown, raw_model_id)
 #   build_req(prompt, system, key, model) -> (headers, json_body)
 #   extract_text(response_json) -> str  (the generated code)
 
@@ -83,7 +83,7 @@ def _openai_extract(j: dict) -> str:
         return ""
 
 
-# V3.1.5 â€” Google Gemini's free tier (60 req/min, 1500/day per project)
+# V3.1.5 — Google Gemini's free tier (60 req/min, 1500/day per project)
 # uses a slightly different request shape than OpenAI's. system prompt
 # goes into `system_instruction`, user message into `contents`.
 
@@ -108,7 +108,7 @@ def _gemini_extract(j: dict) -> str:
 
 
 def _apex_free_build(prompt: str, system: str, key: str, model: str) -> tuple[dict, dict]:
-    """The 'Free (via APEX)' option doesn't need an API key â€” it routes
+    """The 'Free (via APEX)' option doesn't need an API key — it routes
     through the APEX server which uses APEX's own pooled Anthropic key.
     Rate-limited to 5 calls / hour / signed-in user."""
     from ui.login import load_auth, load_server_url
@@ -126,8 +126,8 @@ def _apex_free_extract(j: dict) -> str:
 
 
 PROVIDERS = {
-    "âœ¨  Via APEX  (uses your APEX credits)": {
-        # Sentinel URL â€” the worker replaces it with the X-Apex-Endpoint
+    "✨  Via APEX  (uses your APEX credits)": {
+        # Sentinel URL — the worker replaces it with the X-Apex-Endpoint
         # header value at request time (so the server URL is dynamic).
         "url":     "__apex_dynamic__",
         "models":  [
@@ -138,8 +138,8 @@ PROVIDERS = {
         "free":    True,
         "credits": True,
     },
-    "ðŸŽ  Google Gemini  (free 1500/day)": {
-        # Gemini's URL embeds the model â€” {model} placeholder resolved
+    "🎁  Google Gemini  (free 1500/day)": {
+        # Gemini's URL embeds the model — {model} placeholder resolved
         # in the worker just before the POST. Free tier: ~1500 req/day,
         # 60 RPM. Get a key at https://aistudio.google.com/apikey.
         "url":     "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
@@ -152,14 +152,14 @@ PROVIDERS = {
         "extract": _gemini_extract,
         "free":    True,
     },
-    "ðŸŽ  Groq  (free, fast Llama)": {
+    "🎁  Groq  (free, fast Llama)": {
         # Groq has an OpenAI-compatible API. Free tier: ~14k tokens/min,
         # 30 RPM. Key at https://console.groq.com/keys.
         "url":     "https://api.groq.com/openai/v1/chat/completions",
         "models":  [
             ("Llama 3.3 70B  (recommended)",   "llama-3.3-70b-versatile"),
             ("Llama 3.1 8B Instant",           "llama-3.1-8b-instant"),
-            ("Mixtral 8Ã—7B",                   "mixtral-8x7b-32768"),
+            ("Mixtral 8×7B",                   "mixtral-8x7b-32768"),
             ("Gemma 2 9B",                     "gemma2-9b-it"),
         ],
         "build":   _openai_build,
@@ -197,7 +197,7 @@ PROVIDERS = {
             ("Meta Llama 4 405B",            "meta-llama/llama-4-405b"),
             ("xAI Grok 4",                   "x-ai/grok-4"),
             ("Mistral Large 2",              "mistralai/mistral-large-2"),
-            ("Customâ€¦ (type a slug)",        "__custom__"),
+            ("Custom… (type a slug)",        "__custom__"),
         ],
         "build":   _openai_build,    # same wire format as OpenAI
         "extract": _openai_extract,
@@ -205,7 +205,7 @@ PROVIDERS = {
 }
 
 
-# â”€â”€ System prompt â€” defines the bot contract for the model â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── System prompt — defines the bot contract for the model ────────────
 
 def _load_skeleton_guide() -> str:
     """Read BOT_SKELETON.md from the bundled install (or repo) so the
@@ -228,20 +228,20 @@ _SYSTEM_PROMPT = (
     "You are a senior algorithmic-trading engineer writing a single "
     "Python file that runs inside the APEX Trading Platform. The user "
     "describes the trading strategy and you produce ONLY the .py file "
-    "contents â€” no markdown, no explanations, no triple-backtick "
+    "contents — no markdown, no explanations, no triple-backtick "
     "fences. The file MUST follow the APEX bot contract described "
     "below. If the user's description is ambiguous, make reasonable "
     "defaults and add a comment near the top explaining your choices.\n\n"
-    "â•â•â• APEX BOT CONTRACT â•â•â•\n\n"
+    "═══ APEX BOT CONTRACT ═══\n\n"
     "{guide}\n\n"
-    "â•â•â• OUTPUT RULES â•â•â•\n\n"
-    "â€¢ Output ONLY raw Python source. No prose before or after.\n"
-    "â€¢ The first non-blank line is a triple-quoted module docstring "
+    "═══ OUTPUT RULES ═══\n\n"
+    "• Output ONLY raw Python source. No prose before or after.\n"
+    "• The first non-blank line is a triple-quoted module docstring "
     "  summarising what the bot does.\n"
-    "â€¢ Use `print(..., flush=True)` for all logs.\n"
-    "â€¢ Read keys from os.environ â€” never hardcode.\n"
-    "â€¢ Define a top-level main() function that contains the bot loop.\n"
-    "â€¢ Single file, <1MB, no extra pip dependencies beyond the "
+    "• Use `print(..., flush=True)` for all logs.\n"
+    "• Read keys from os.environ — never hardcode.\n"
+    "• Define a top-level main() function that contains the bot loop.\n"
+    "• Single file, <1MB, no extra pip dependencies beyond the "
     "  packages already listed in the contract."
 )
 
@@ -255,7 +255,7 @@ def _make_system_prompt() -> str:
     return _SYSTEM_PROMPT.format(guide=guide)
 
 
-# â”€â”€ Worker thread for the API call â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── Worker thread for the API call ───────────────────────────────────
 
 class _GenerateWorker(QThread):
     done    = pyqtSignal(bool, str)     # ok, code-or-error-text
@@ -274,7 +274,7 @@ class _GenerateWorker(QThread):
         if not cfg:
             self.done.emit(False, f"Unknown provider: {self.provider}")
             return
-        self.progress.emit(f"Calling {self.provider}â€¦")
+        self.progress.emit(f"Calling {self.provider}…")
         headers, body = cfg["build"](
             self.prompt, _make_system_prompt(), self.key, self.model)
         url = cfg["url"]
@@ -286,7 +286,7 @@ class _GenerateWorker(QThread):
                 self.done.emit(False,
                     "APEX server URL not configured. Sign in first.")
                 return
-        # V3.1.5 â€” Gemini's URL embeds the model in the path.
+        # V3.1.5 — Gemini's URL embeds the model in the path.
         if "{model}" in url:
             url = url.format(model=self.model)
         try:
@@ -327,7 +327,7 @@ class _GenerateWorker(QThread):
         self.done.emit(True, cleaned)
 
 
-# â”€â”€ Tab widget â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── Tab widget ────────────────────────────────────────────────────────
 
 class MakeBotTab(QWidget):
 
@@ -338,12 +338,14 @@ class MakeBotTab(QWidget):
         self.scroll = ScrollContent()
         root.addWidget(self.scroll)
         self._worker: Optional[_GenerateWorker] = None
+        self._meta_worker = None
+        self._last_meta: dict = {}
         self._build()
 
     def refresh(self):  # called by ApexWindow on tab activate
         pass
 
-    # â”€â”€ Layout â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── Layout ────────────────────────────────────────────────────────
 
     def _build(self):
         s = self.scroll
@@ -352,7 +354,7 @@ class MakeBotTab(QWidget):
         intro = QLabel(
             "Describe a trading strategy in plain English and let an "
             "AI write the bot for you. The generated file follows the "
-            "APEX bot contract (read it via Tools â†’ Open skeleton "
+            "APEX bot contract (read it via Tools → Open skeleton "
             "guide) and can be saved to your local library or "
             "published to the public bot store on the APEX server."
         )
@@ -360,18 +362,18 @@ class MakeBotTab(QWidget):
         intro.setWordWrap(True)
         s.add(intro)
 
-        # â”€â”€ Mode toggle: Create new vs Improve existing â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── Mode toggle: Create new vs Improve existing ────────────
         mode_row = QHBoxLayout()
         mode_lbl = QLabel("Mode:")
         mode_lbl.setStyleSheet(f"color:{C['text']};font-size:11px;")
-        self._mode_combo = QComboBox()
-        self._mode_combo.addItem("âœ¨  Create a new bot", "create")
-        self._mode_combo.addItem("ðŸ”§  Improve an existing bot", "improve")
+        self._mode_combo = NoScrollComboBox()
+        self._mode_combo.addItem("✨  Create a new bot", "create")
+        self._mode_combo.addItem("🔧  Improve an existing bot", "improve")
         self._mode_combo.currentIndexChanged.connect(self._on_mode_changed)
 
         self._existing_lbl = QLabel("Existing bot:")
         self._existing_lbl.setStyleSheet(f"color:{C['text']};font-size:11px;")
-        self._existing_combo = QComboBox()
+        self._existing_combo = NoScrollComboBox()
         self._existing_combo.setMinimumWidth(220)
         self._refresh_existing_bots()
 
@@ -386,7 +388,7 @@ class MakeBotTab(QWidget):
         self._existing_lbl.setVisible(False)
         self._existing_combo.setVisible(False)
 
-        # â”€â”€ Provider + Model + Key form â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── Provider + Model + Key form ─────────────────────────────
         form = QFrame()
         form.setStyleSheet(
             f"background:{C['panel']};border:1px solid {C['border']};"
@@ -398,16 +400,16 @@ class MakeBotTab(QWidget):
 
         # Provider
         fg.addWidget(self._lbl("AI provider"), 0, 0)
-        self._provider_combo = QComboBox()
+        self._provider_combo = NoScrollComboBox()
         for name in PROVIDERS:
             self._provider_combo.addItem(name)
         self._provider_combo.currentTextChanged.connect(self._on_provider_changed)
         fg.addWidget(self._provider_combo, 0, 1)
 
-        # APEX-credits badge â€” purple â†’ green gradient, only shown when
+        # APEX-credits badge — purple → green gradient, only shown when
         # the "Via APEX" provider is picked. Shows live cost + balance
         # (the worker refreshes balance after each successful generation).
-        self._free_badge = QLabel("â—Š 10 / gen  Â·  balance: â€”")
+        self._free_badge = QLabel("◊ 10 / gen  ·  balance: —")
         self._free_badge.setStyleSheet(
             "background: qlineargradient(x1:0, y1:0, x2:1, y2:0,"
             f"  stop:0 {C['purple']}, stop:1 #2eea88);"
@@ -419,7 +421,7 @@ class MakeBotTab(QWidget):
 
         # Model
         fg.addWidget(self._lbl("Model"), 1, 0)
-        self._model_combo = QComboBox()
+        self._model_combo = NoScrollComboBox()
         fg.addWidget(self._model_combo, 1, 1)
 
         # Custom model slug (only for OpenRouter "__custom__")
@@ -430,8 +432,8 @@ class MakeBotTab(QWidget):
         self._custom_model_edit.setStyleSheet(self._input_css())
         fg.addWidget(self._custom_model_edit, 1, 2)
 
-        # API key â€” V3.1.9: per-provider key memory. Each provider has
-        # its own slot in settings â†’ switching from Gemini to Claude
+        # API key — V3.1.9: per-provider key memory. Each provider has
+        # its own slot in settings → switching from Gemini to Claude
         # and back restores each one's key without retyping.
         fg.addWidget(self._lbl("API key"), 2, 0)
         self._key_edit = QLineEdit()
@@ -457,7 +459,7 @@ class MakeBotTab(QWidget):
 
         s.add(form)
 
-        # â”€â”€ Description â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── Description ───────────────────────────────────────────
         s.add(SectionHeader("WHAT SHOULD THE BOT DO?", C["yellow"]))
         desc_help = QLabel(
             "Plain English. Mention: when to buy / sell, position "
@@ -480,9 +482,9 @@ class MakeBotTab(QWidget):
             "available cash. Skip if VIX > 25.")
         s.add(self._desc)
 
-        # â”€â”€ Generate button + status â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── Generate button + status ──────────────────────────────
         btn_row = QHBoxLayout()
-        self._gen_btn = QPushButton("âœ¨  Generate bot")
+        self._gen_btn = QPushButton("✨  Generate bot")
         self._gen_btn.setObjectName("addBotBtn")
         self._gen_btn.clicked.connect(self._on_generate)
         btn_row.addWidget(self._gen_btn)
@@ -494,7 +496,7 @@ class MakeBotTab(QWidget):
         bw.setLayout(btn_row)
         s.add(bw)
 
-        # â”€â”€ Generated code viewer â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── Generated code viewer ─────────────────────────────────
         s.add(SectionHeader("GENERATED CODE", C["green"]))
         self._code = QPlainTextEdit()
         self._code.setStyleSheet(
@@ -507,12 +509,12 @@ class MakeBotTab(QWidget):
             "appear here. You can hand-edit it before saving.")
         s.add(self._code)
 
-        # â”€â”€ Save / publish buttons â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── Save / publish buttons ────────────────────────────────
         save_row = QHBoxLayout()
-        self._save_btn = QPushButton("ðŸ’¾  Save to my library")
+        self._save_btn = QPushButton("💾  Save to my library")
         self._save_btn.setObjectName("toolBtn")
         self._save_btn.clicked.connect(self._on_save_local)
-        self._pub_btn  = QPushButton("â˜  Save & publish to APEX store")
+        self._pub_btn  = QPushButton("☁  Save & publish to APEX store")
         self._pub_btn.setObjectName("toolBtn")
         self._pub_btn.clicked.connect(self._on_save_and_publish)
         self._save_msg = QLabel("")
@@ -529,7 +531,7 @@ class MakeBotTab(QWidget):
         # Populate the model dropdown for the initial provider
         self._on_provider_changed(self._provider_combo.currentText())
 
-    # â”€â”€ Small helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── Small helpers ────────────────────────────────────────────────
 
     def _lbl(self, text: str) -> QLabel:
         w = QLabel(text)
@@ -543,7 +545,7 @@ class MakeBotTab(QWidget):
             f"padding:6px 10px;font-family:'JetBrains Mono';font-size:11px;"
         )
 
-    # â”€â”€ Provider-driven model list â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── Provider-driven model list ────────────────────────────────────
 
     def _provider_slot(self, name: str) -> str:
         """Stable settings key per provider. The settings file has one
@@ -586,19 +588,19 @@ class MakeBotTab(QWidget):
         cfg = PROVIDERS.get(name) or {}
         for label, slug in cfg.get("models", []):
             self._model_combo.addItem(label, slug)
-        # Show the custom-slug field when the OpenRouter "Customâ€¦"
+        # Show the custom-slug field when the OpenRouter "Custom…"
         # option is selected
         self._model_combo.currentIndexChanged.connect(self._refresh_custom_visibility)
         self._refresh_custom_visibility()
-        # V3.1.9 â€” restore the saved key for this provider
+        # V3.1.9 — restore the saved key for this provider
         if hasattr(self, "_key_edit"):
             self._key_edit.setText(self._load_key_for(name))
-        # V3.1.5 â€” three flavours of "free":
-        #   â€¢ APEX-credits  (cfg.credits=True)  â†’ no key needed, badge
-        #     shows current credit balance, charged 10 â—Š per gen
-        #   â€¢ Provider free tier (Gemini / Groq) â†’ user pastes their own
+        # V3.1.5 — three flavours of "free":
+        #   • APEX-credits  (cfg.credits=True)  → no key needed, badge
+        #     shows current credit balance, charged 10 ◊ per gen
+        #   • Provider free tier (Gemini / Groq) → user pastes their own
         #     free-tier key, badge says "FREE TIER", call costs nothing
-        #   â€¢ Paid (Anthropic / OpenAI / OpenRouter) â†’ user pastes a key,
+        #   • Paid (Anthropic / OpenAI / OpenRouter) → user pastes a key,
         #     no badge
         is_free     = bool(cfg.get("free"))
         is_credits  = bool(cfg.get("credits"))
@@ -607,11 +609,11 @@ class MakeBotTab(QWidget):
             self._key_edit.setEnabled(not is_credits)
             if is_credits:
                 self._key_edit.setPlaceholderText(
-                    "Not required â€” generation costs APEX credits")
-            elif name.startswith("ðŸŽ  Google"):
+                    "Not required — generation costs APEX credits")
+            elif name.startswith("🎁  Google"):
                 self._key_edit.setPlaceholderText(
                     "Get a free key at aistudio.google.com/apikey")
-            elif name.startswith("ðŸŽ  Groq"):
+            elif name.startswith("🎁  Groq"):
                 self._key_edit.setPlaceholderText(
                     "Get a free key at console.groq.com/keys")
             else:
@@ -619,8 +621,8 @@ class MakeBotTab(QWidget):
         if is_credits:
             self._refresh_credit_balance()
         elif is_free:
-            # Provider free tier â€” show a static "FREE TIER" badge
-            self._free_badge.setText("FREE TIER  âœ¨")
+            # Provider free tier — show a static "FREE TIER" badge
+            self._free_badge.setText("FREE TIER  ✨")
 
     def _refresh_credit_balance(self):
         """Fetch /api/makebot/price so the badge shows live cost + balance."""
@@ -648,10 +650,10 @@ class MakeBotTab(QWidget):
 
         def _on(cost, balance):
             if balance < 0:
-                self._free_badge.setText(f"â—Š {cost} / gen  Â·  balance: ?")
+                self._free_badge.setText(f"◊ {cost} / gen  ·  balance: ?")
             else:
                 self._free_badge.setText(
-                    f"â—Š {cost} / gen  Â·  balance: {balance:,}")
+                    f"◊ {cost} / gen  ·  balance: {balance:,}")
 
         self._bal_worker = _BalWorker()
         self._bal_worker.done.connect(_on)
@@ -685,15 +687,15 @@ class MakeBotTab(QWidget):
         try:
             for side, path in D.BOT_SCRIPTS.items():
                 self._existing_combo.addItem(
-                    f"âŸ¦built-inâŸ§  {side}", str(path))
+                    f"⟦built-in⟧  {side}", str(path))
         except Exception:
             pass
         # Custom user bots
         try:
-            reg = D.load_settings().get("bot_registry", {})
+            reg = D.load_bot_registry()
             for c in reg.get("custom", []):
                 self._existing_combo.addItem(
-                    f"âŸ¦customâŸ§  {c.get('label', c['id'])}",
+                    f"⟦custom⟧  {c.get('label', c['id'])}",
                     c.get("script", ""))
         except Exception:
             pass
@@ -708,7 +710,7 @@ class MakeBotTab(QWidget):
             return self._custom_model_edit.text().strip()
         return slug or ""
 
-    # â”€â”€ Generate action â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── Generate action ──────────────────────────────────────────────
 
     def _on_generate(self):
         prov = self._provider_combo.currentText()
@@ -725,12 +727,12 @@ class MakeBotTab(QWidget):
             return
         # APEX-credits: no key needed at all.
         # Provider free-tier (Gemini / Groq): user still needs their
-        # own (free) API key â€” paste it after signing up.
+        # own (free) API key — paste it after signing up.
         if not is_credits and not key:
             QMessageBox.warning(self, "Missing key",
                 "Paste your API key for the chosen provider. For the "
                 "free tiers, grab one from the link in the key-field "
-                "placeholder â€” it takes ~1 minute.")
+                "placeholder — it takes ~1 minute.")
             return
         if len(prompt) < 20:
             QMessageBox.warning(self, "Description too short",
@@ -764,13 +766,13 @@ class MakeBotTab(QWidget):
                 f"{prompt}\n"
                 "=== END REQUESTED CHANGES ===\n\n"
                 "Output the full improved file. Do not output prose, "
-                "markdown fences, or partial diffs â€” only the complete "
+                "markdown fences, or partial diffs — only the complete "
                 "new Python source."
             )
 
         self._gen_btn.setEnabled(False)
-        self._gen_btn.setText("Generatingâ€¦")
-        self._status.setText("Calling the model â€” this can take 20-40 s.")
+        self._gen_btn.setText("Generating…")
+        self._status.setText("Calling the model — this can take 20-40 s.")
         self._status.setStyleSheet(f"color:{C['muted']};font-size:11px;")
 
         self._worker = _GenerateWorker(
@@ -782,28 +784,101 @@ class MakeBotTab(QWidget):
 
     def _on_generated(self, ok: bool, payload: str):
         self._gen_btn.setEnabled(True)
-        self._gen_btn.setText("âœ¨  Generate bot")
+        self._gen_btn.setText("✨  Generate bot")
         if not ok:
             self._status.setText(payload)
             self._status.setStyleSheet(f"color:{C['red']};font-size:11px;")
             return
-        self._status.setText("Done â€” review the code below.")
+        self._status.setText("Done — review the code below.")
         self._status.setStyleSheet(f"color:{C['green']};font-size:11px;")
         self._code.setPlainText(payload)
-        # V3.1.4 â€” if we used the APEX-credits provider, refresh the
+        self._last_meta: dict = {}
+        # V3.1.4 — if we used the APEX-credits provider, refresh the
         # badge so the user sees the updated balance immediately.
         prov = self._provider_combo.currentText()
         cfg  = PROVIDERS.get(prov) or {}
         if cfg.get("credits"):
             self._refresh_credit_balance()
+        # Auto-generate publish metadata in background using the same AI
+        self._generate_meta_async(payload, prov)
 
-    # â”€â”€ Save / publish â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    def _generate_meta_async(self, code: str, prov: str):
+        """Ask the same AI to summarise the bot for the publish form."""
+        cfg = PROVIDERS.get(prov) or {}
+        if cfg.get("credits"):
+            return   # skip for APEX-credits to avoid charging extra credits
+        key   = self._key_edit.text().strip()
+        model = self._resolved_model_slug()
+        if not key or not model:
+            return
+
+        meta_prompt = (
+            "Here is a trading-bot Python file. Analyse it and output ONLY a "
+            "valid JSON object (no markdown fences, no extra text) with these "
+            "exact keys:\n"
+            "  \"name\"        — short human-readable name, 3-5 words\n"
+            "  \"description\" — one sentence describing what the bot does\n"
+            "  \"tags\"        — comma-separated list of 3-5 relevant trading tags\n"
+            "  \"philosophy\"  — EXACTLY one of: long, short, day, options, "
+            "momentum, mean-reversion, scalping, swing, other\n\n"
+            "The file:\n\n" + code[:6000]
+        )
+
+        class _MetaWorker(QThread):
+            done = pyqtSignal(dict)
+            def __init__(self_, p, m, k, pr):
+                super().__init__()
+                self_.provider = p; self_.model = m
+                self_.key = k; self_.prompt = pr
+
+            def run(self_):
+                cfg2 = PROVIDERS.get(self_.provider) or {}
+                try:
+                    hdrs, body = cfg2["build"](
+                        self_.prompt,
+                        "You are a concise JSON generator. Output only JSON.",
+                        self_.key, self_.model)
+                    url = cfg2["url"]
+                    if "{model}" in url:
+                        url = url.format(model=self_.model)
+                    r = requests.post(url, headers=hdrs, json=body, timeout=30)
+                    if r.ok:
+                        raw = cfg2["extract"](r.json()).strip()
+                        for fence in ("```json", "```"):
+                            if raw.startswith(fence):
+                                raw = raw[len(fence):].lstrip("\n")
+                        if raw.endswith("```"):
+                            raw = raw[:-3].rstrip()
+                        import json as _json
+                        meta = _json.loads(raw)
+                        self_.done.emit(meta)
+                    else:
+                        self_.done.emit({})
+                except Exception as e:
+                    print(f"[make-bot] meta gen: {e}")
+                    self_.done.emit({})
+
+        def _on_meta(meta: dict):
+            if not meta:
+                return
+            self._last_meta = meta
+            if not self._name_edit.text().strip() and meta.get("name"):
+                self._name_edit.setText(meta["name"])
+            self._status.setText(
+                f"Done — AI named it \"{meta.get('name','')}\" "
+                f"({meta.get('philosophy','')}). Review & edit, then save.")
+
+        self._meta_worker = _MetaWorker(prov, model, key, meta_prompt)
+        self._meta_worker.done.connect(_on_meta)
+        self._meta_worker.start()
+
+    # ── Save / publish ───────────────────────────────────────────────
 
     def _on_save_local(self):
         code = self._code.toPlainText().strip()
         name = self._name_edit.text().strip()
         if not code:
-            self._toast("Nothing to save â€” generate or paste code first.", err=True)
+            self._toast("Nothing to save — generate or paste code first.", err=True)
             return
         if not name:
             self._toast("Give the bot a name first.", err=True)
@@ -818,9 +893,7 @@ class MakeBotTab(QWidget):
 
         # Register in the user's bot registry so MORE BOTS picks it up
         try:
-            s = D.load_settings()
-            reg = s.get("bot_registry",
-                        {"active": [], "silenced": [], "custom": []})
+            reg = D.load_bot_registry()
             existing = [c["id"] for c in reg.get("custom", [])]
             if slug not in existing:
                 reg.setdefault("custom", []).append({
@@ -829,19 +902,18 @@ class MakeBotTab(QWidget):
                     "script": str(dest),
                     "color":  C["purple"],
                 })
-                s["bot_registry"] = reg
-                with open(D.SETTINGS_FILE, "w", encoding="utf-8") as f:
-                    json.dump(s, f, indent=2)
+                D.save_bot_registry(reg)
         except Exception as e:
             print(f"[make-bot] registry update failed: {e}")
 
         self._toast(f"Saved {slug}.py to your library. "
-                    f"See it in MORE BOTS â†’ AVAILABLE TO ADD.")
+                    f"See it in MORE BOTS → AVAILABLE TO ADD.")
 
     def _on_save_and_publish(self):
         """Save locally first, then ask the parent ApexWindow to
         publish using the existing marketplace flow (which prompts
-        for tags / description and authenticates against the server)."""
+        for tags / description and authenticates against the server).
+        Pre-fills the publish dialogs with any AI-generated metadata."""
         self._on_save_local()
         code = self._code.toPlainText().strip()
         if not code:
@@ -852,16 +924,26 @@ class MakeBotTab(QWidget):
         path = DATA_DIR / "bots" / f"{slug}.py"
         if not path.exists():
             return
+        # Build prefill from AI-generated metadata + current UI state
+        prov = self._provider_combo.currentText()
+        meta = getattr(self, "_last_meta", {})
+        prefill = {
+            "name":        name or meta.get("name", ""),
+            "description": meta.get("description", ""),
+            "tags":        meta.get("tags", ""),
+            "philosophy":  meta.get("philosophy", ""),
+            "creator_ai":  prov,   # the AI that made this bot
+        }
         # Walk up to the ApexWindow and use MoreBotsTab._publish_bot_with_path
         win = self.window()
         more = getattr(win, "more_bots_tab", None)
         if more and hasattr(more, "_publish_bot_with_path"):
-            more._publish_bot_with_path(str(path))
+            more._publish_bot_with_path(str(path), prefill=prefill)
         else:
             self._toast("Saved locally. Open MORE BOTS to publish manually.",
                         err=False)
 
-    # â”€â”€ Toast helper â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── Toast helper ─────────────────────────────────────────────────
 
     def _toast(self, msg: str, err: bool = False):
         color = C["red"] if err else C["green"]
