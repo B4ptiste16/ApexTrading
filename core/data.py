@@ -92,18 +92,15 @@ _clients = {}
 def get_client(side: str):
     if not HAS_ALPACA:
         return None
+    side = side.upper()
     if side in _clients:
         return _clients[side]
-    key_map = {
-        "LONG":  ("ALPACA_API_KEY_LONG",  "ALPACA_SECRET_KEY_LONG"),
-        "SHORT": ("ALPACA_API_KEY_SHORT", "ALPACA_SECRET_KEY_SHORT"),
-        "DAY":   ("ALPACA_API_KEY_DAY",   "ALPACA_SECRET_KEY_DAY"),
-    }
+    # Build env-var names dynamically so any custom bot slug (e.g. "CRYPTO")
+    # resolves to ALPACA_API_KEY_CRYPTO / ALPACA_SECRET_KEY_CRYPTO.
     fallback_key    = os.getenv("ALPACA_API_KEY", "")
     fallback_secret = os.getenv("ALPACA_SECRET_KEY", "")
-    k, s = key_map.get(side, ("",""))
-    api_key    = os.getenv(k, fallback_key)
-    api_secret = os.getenv(s, fallback_secret)
+    api_key    = os.getenv(f"ALPACA_API_KEY_{side}",    fallback_key)
+    api_secret = os.getenv(f"ALPACA_SECRET_KEY_{side}", fallback_secret)
     if not api_key or not api_secret:
         return None
     try:
@@ -756,7 +753,8 @@ ENV_KEYS = [
 
 
 def read_env_keys() -> dict:
-    """Current values of the managed keys from the data-folder .env."""
+    """Read all managed keys from the data-folder .env, including custom-bot
+    slot keys (ALPACA_API_KEY_<SLUG> / ALPACA_SECRET_KEY_<SLUG>)."""
     out = {k: "" for k in ENV_KEYS}
     try:
         with open(ENV_FILE, "r", encoding="utf-8") as f:
@@ -765,8 +763,12 @@ def read_env_keys() -> dict:
                 if not line or line.startswith("#") or "=" not in line:
                     continue
                 k, _, v = line.partition("=")
-                if k.strip() in out:
-                    out[k.strip()] = v.strip().strip('"').strip("'")
+                k = k.strip()
+                v = v.strip().strip('"').strip("'")
+                if (k in ENV_KEYS
+                        or k.startswith("ALPACA_API_KEY_")
+                        or k.startswith("ALPACA_SECRET_KEY_")):
+                    out[k] = v
     except Exception:
         pass
     return out

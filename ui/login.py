@@ -1,5 +1,5 @@
-"""
-APEX Login / Sign-Up Window — V7+
+﻿"""
+APEX Login / Sign-Up Window â€” V7+
 Shown before the main app when no valid auth token is stored.
 """
 
@@ -24,7 +24,7 @@ from ui.styles  import COLORS
 
 C = COLORS
 
-# ── Persisted paths ───────────────────────────────────────────────────────────
+# â”€â”€ Persisted paths â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 AUTH_FILE     = DATA_DIR / "apex_auth.json"
 ACCOUNTS_FILE = DATA_DIR / "apex_accounts.json"   # V3 wave 5
@@ -32,7 +32,7 @@ SRV_CFG       = DATA_DIR / "apex_server.json"
 DEFAULT_URL   = "http://localhost:8000"
 
 
-# ── Auth-file helpers (used by main.py too) ───────────────────────────────────
+# â”€â”€ Auth-file helpers (used by main.py too) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def load_server_url() -> str:
     try:
@@ -75,7 +75,7 @@ def clear_auth() -> None:
         pass
 
 
-# ── V3 wave 5 — Multi-account storage ────────────────────────────────
+# â”€â”€ V3 wave 5 â€” Multi-account storage â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def _load_accounts_file() -> list[dict]:
     try:
@@ -141,7 +141,7 @@ def forget_saved_account(user_id: int) -> None:
                           if int(a.get("user", {}).get("id", 0)) != int(user_id)])
 
 
-# ── Worker threads ────────────────────────────────────────────────────────────
+# â”€â”€ Worker threads â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 class _PingWorker(QThread):
     result = pyqtSignal(bool)
@@ -214,8 +214,8 @@ class _GoogleOAuthWorker(QThread):
                     "<html><body style='font-family:sans-serif;"
                     "padding:40px;text-align:center;background:#0c0f16;"
                     "color:#d8dde8;'><h2 style='color:#3fb89a;letter-spacing:4px;'>"
-                    "◈ APEX</h2><p>Sign-in received. You can close this tab "
-                    "and return to APEX.</p></body></html>"
+                    "â—ˆ APEX</h2><p>Sign-in received. You can close this tab "
+                    "and return to BAPTOU.</p></body></html>"
                 ).encode("utf-8")
                 self_inner.send_response(200)
                 self_inner.send_header("Content-Type", "text/html")
@@ -258,7 +258,7 @@ class _GoogleOAuthWorker(QThread):
             self.failure.emit(f"Google: {result['error']}")
             return
         if result.get("state") != state:
-            self.failure.emit("OAuth state mismatch — aborted for safety.")
+            self.failure.emit("OAuth state mismatch â€” aborted for safety.")
             return
         code = result.get("code")
         if not code:
@@ -275,7 +275,7 @@ class _GoogleOAuthWorker(QThread):
             if not r.ok:
                 detail = r.json().get("detail", r.text) if r.headers.get(
                     "content-type", "").startswith("application/json") else r.text
-                self.failure.emit(f"APEX server: {detail}")
+                self.failure.emit(f"BAPTOU server: {detail}")
                 return
             body = r.json()
             self.success.emit(body["token"], body["user"])
@@ -311,12 +311,12 @@ class AuthWorker(QThread):
                 self.failure.emit(msg)
         except requests.ConnectionError:
             self.failure.emit(
-                "Cannot reach APEX server.\n"
+                "Cannot reach BAPTOU server.\n"
                 "Make sure the server is running, or click  Configure  "
                 "to set the correct server URL."
             )
         except requests.Timeout:
-            self.failure.emit("Connection timed out — server may still be starting up.")
+            self.failure.emit("Connection timed out â€” server may still be starting up.")
         except Exception as e:
             self.failure.emit(str(e))
 
@@ -324,7 +324,7 @@ class AuthWorker(QThread):
 class TokenVerifyWorker(QThread):
     valid   = pyqtSignal(dict)   # refreshed user dict
     invalid = pyqtSignal()
-    offline = pyqtSignal()       # can't reach server — don't log out
+    offline = pyqtSignal()       # can't reach server â€” don't log out
 
     def __init__(self, token: str, server_url: str):
         super().__init__()
@@ -348,7 +348,7 @@ class TokenVerifyWorker(QThread):
             self.invalid.emit()
 
 
-# ── Gradient background base ──────────────────────────────────────────────────
+# â”€â”€ Gradient background base â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 class _GradWidget(QWidget):
     def paintEvent(self, _):
@@ -359,7 +359,7 @@ class _GradWidget(QWidget):
         p.fillRect(self.rect(), g)
 
 
-# ── Shared widget factories ───────────────────────────────────────────────────
+# â”€â”€ Shared widget factories â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 _INPUT_SS = f"""
 QLineEdit {{
@@ -450,7 +450,7 @@ def _pw_row(field: QLineEdit) -> QWidget:
     hl.setContentsMargins(0, 0, 0, 0)
     hl.setSpacing(4)
     hl.addWidget(field)
-    toggle = QPushButton("👁")
+    toggle = QPushButton("ðŸ‘")
     toggle.setFixedSize(40, 40)
     toggle.setCheckable(True)
     toggle.setStyleSheet(_TOGGLE_SS)
@@ -471,7 +471,7 @@ def _divider() -> QFrame:
     return d
 
 
-# ── Adaptive QStackedWidget (auto-resizes to current page) ───────────────────
+# â”€â”€ Adaptive QStackedWidget (auto-resizes to current page) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 class _AdaptiveStack(QStackedWidget):
     def sizeHint(self):
@@ -487,7 +487,7 @@ class _AdaptiveStack(QStackedWidget):
         self.updateGeometry()
 
 
-# ── Login form ────────────────────────────────────────────────────────────────
+# â”€â”€ Login form â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 class _LoginView(QWidget):
     submitted       = pyqtSignal(str, str, bool)   # identifier, password, remember
@@ -543,7 +543,7 @@ class _LoginView(QWidget):
         row = QHBoxLayout()
         no_acc = QLabel("No account?")
         no_acc.setStyleSheet(f"color:{C['muted']};font-size:10px;background:transparent;")
-        lnk = QPushButton("Create one  →")
+        lnk = QPushButton("Create one  â†’")
         lnk.setStyleSheet(_LINK_SS)
         lnk.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         lnk.clicked.connect(self.go_signup)
@@ -565,13 +565,13 @@ class _LoginView(QWidget):
 
     def set_loading(self, v: bool):
         self.btn.setEnabled(not v)
-        self.btn.setText("LOGGING IN…" if v else "LOG IN")
+        self.btn.setText("LOGGING INâ€¦" if v else "LOG IN")
 
     def clear(self):
         self.pw_f.clear()
 
 
-# ── Signup form ───────────────────────────────────────────────────────────────
+# â”€â”€ Signup form â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 class _SignupView(QWidget):
     submitted  = pyqtSignal(str, str, str, str)   # email, password, username, display_name
@@ -623,7 +623,7 @@ class _SignupView(QWidget):
         row = QHBoxLayout()
         have = QLabel("Already have an account?")
         have.setStyleSheet(f"color:{C['muted']};font-size:10px;background:transparent;")
-        lnk = QPushButton("Log in  →")
+        lnk = QPushButton("Log in  â†’")
         lnk.setStyleSheet(_LINK2_SS)
         lnk.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         lnk.clicked.connect(self.go_login)
@@ -652,24 +652,24 @@ class _SignupView(QWidget):
 
     def set_loading(self, v: bool):
         self.btn.setEnabled(not v)
-        self.btn.setText("CREATING…" if v else "CREATE ACCOUNT")
+        self.btn.setText("CREATINGâ€¦" if v else "CREATE ACCOUNT")
 
     def clear(self):
         self.pw_f.clear()
         self.pw2_f.clear()
 
 
-# ── Main login window ─────────────────────────────────────────────────────────
+# â”€â”€ Main login window â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 class LoginWindow(_GradWidget):
     """
     Shown at startup when no valid token exists.
     Emits:
-      auth_success(token, user)  → main.py creates ApexWindow
-      guest_mode()               → user chose to continue without an account
+      auth_success(token, user)  â†’ main.py creates ApexWindow
+      guest_mode()               â†’ user chose to continue without an account
                                    (uses local API keys, no cloud sync)
     Back-compat alias:
-      offline_mode               → same as guest_mode
+      offline_mode               â†’ same as guest_mode
     """
 
     auth_success = pyqtSignal(str, dict)
@@ -679,7 +679,7 @@ class LoginWindow(_GradWidget):
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("APEX — Sign In")
+        self.setWindowTitle("APEX â€” Sign In")
         self.setMinimumSize(720, 580)
         self.resize(900, 700)
         self._server_url = load_server_url()
@@ -696,7 +696,7 @@ class LoginWindow(_GradWidget):
             (screen.height() - self.height()) // 2,
         )
 
-    # ── Layout ────────────────────────────────────────────────────────────────
+    # â”€â”€ Layout â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     def _build(self):
         root = QVBoxLayout(self)
@@ -727,7 +727,7 @@ class LoginWindow(_GradWidget):
         hl = QHBoxLayout(w)
         hl.setContentsMargins(0, 10, 14, 0)
         hl.addStretch()
-        btn = QPushButton("✕")
+        btn = QPushButton("âœ•")
         btn.setFixedSize(28, 28)
         btn.setStyleSheet(f"""
             QPushButton {{
@@ -744,7 +744,7 @@ class LoginWindow(_GradWidget):
         return w
 
     def _branding(self) -> QWidget:
-        """V4.1.0 — display assets/baptou_logo.png (the B graphic + the
+        """V4.1.0 â€” display assets/baptou_logo.png (the B graphic + the
         BAPTOU / TRADING text underneath, the user's actual logo) when
         the file exists. Falls back to a typographic version that
         matches the same aesthetic (big bold BAPTOU + thin -- TRADING --
@@ -758,7 +758,7 @@ class LoginWindow(_GradWidget):
         vl.setContentsMargins(0, 8, 0, 24)
         vl.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        # Locate the logo PNG — works in both dev (source root) and
+        # Locate the logo PNG â€” works in both dev (source root) and
         # frozen builds (sys._MEIPASS / assets/).
         import sys as _sys
         candidates = []
@@ -782,7 +782,7 @@ class LoginWindow(_GradWidget):
             vl.addWidget(pic)
             return w
 
-        # Typographic fallback — matches the new logo's styling
+        # Typographic fallback â€” matches the new logo's styling
         logo = QLabel("BAPTOU")
         logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
         logo.setStyleSheet(
@@ -813,7 +813,7 @@ class LoginWindow(_GradWidget):
         return w
 
     def _build_saved_accounts_section(self) -> QWidget:
-        """V3 wave 5 — one-click sign-in for previously-used accounts.
+        """V3 wave 5 â€” one-click sign-in for previously-used accounts.
         Hidden when no saved accounts exist."""
         wrap = QWidget()
         wrap.setStyleSheet("background:transparent;")
@@ -887,7 +887,7 @@ class LoginWindow(_GradWidget):
             lambda _, uid=u.get("id"): self._activate_saved(uid))
         hl.addWidget(name_btn, 1)
 
-        forget = QPushButton("×")
+        forget = QPushButton("Ã—")
         forget.setFixedSize(22, 22)
         forget.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         forget.setStyleSheet(f"""
@@ -957,7 +957,7 @@ class LoginWindow(_GradWidget):
         """)
         vl.addWidget(self._err)
 
-        # V3 wave 5 — saved accounts (one-click sign-in if previously
+        # V3 wave 5 â€” saved accounts (one-click sign-in if previously
         # signed in on this machine).
         self._saved_section = self._build_saved_accounts_section()
         vl.addWidget(self._saved_section)
@@ -972,7 +972,7 @@ class LoginWindow(_GradWidget):
         self._stack.addWidget(self._sv)   # 1
         vl.addWidget(self._stack)
 
-        # ── V7.1+: "or" separator + Google + Guest buttons ─────────
+        # â”€â”€ V7.1+: "or" separator + Google + Guest buttons â”€â”€â”€â”€â”€â”€â”€â”€â”€
         # These appear under both Login and Signup forms, giving the user
         # alternatives to the email/password flow without burying them in
         # the footer.
@@ -997,8 +997,8 @@ class LoginWindow(_GradWidget):
         vl.addWidget(sep_w)
         vl.addSpacing(12)
 
-        # V3.0.2 — Google OAuth via standard loopback flow.
-        self._google_btn = QPushButton("◯  Continue with Google")
+        # V3.0.2 â€” Google OAuth via standard loopback flow.
+        self._google_btn = QPushButton("â—¯  Continue with Google")
         self._google_btn.setFixedHeight(40)
         self._google_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         self._google_btn.setStyleSheet(f"""
@@ -1025,8 +1025,8 @@ class LoginWindow(_GradWidget):
         vl.addWidget(self._google_btn)
         vl.addSpacing(8)
 
-        # Guest button (active — emits guest_mode)
-        self._guest_btn = QPushButton("→  Continue as Guest")
+        # Guest button (active â€” emits guest_mode)
+        self._guest_btn = QPushButton("â†’  Continue as Guest")
         self._guest_btn.setFixedHeight(40)
         self._guest_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         self._guest_btn.setStyleSheet(f"""
@@ -1074,7 +1074,7 @@ class LoginWindow(_GradWidget):
         hl.setContentsMargins(30, 6, 30, 16)
         hl.setSpacing(6)
 
-        self._srv_dot = QLabel("●")
+        self._srv_dot = QLabel("â—")
         self._srv_dot.setStyleSheet(
             f"color:{C['muted']};font-size:8px;background:transparent;")
         hl.addWidget(self._srv_dot)
@@ -1096,14 +1096,14 @@ class LoginWindow(_GradWidget):
 
         hl.addStretch()
 
-        # V7.1+: Continue-offline link removed from the footer —
+        # V7.1+: Continue-offline link removed from the footer â€”
         # the prominent "Continue as Guest" button in the card now
         # serves that purpose, keeping the footer focused on server
         # connection diagnostics.
 
         return w
 
-    # ── View switching ────────────────────────────────────────────────────────
+    # â”€â”€ View switching â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     def _show_login(self):
         self._title.setText("LOG IN")
@@ -1117,7 +1117,7 @@ class LoginWindow(_GradWidget):
         self._clear_err()
         QTimer.singleShot(0, self.adjustSize)
 
-    # ── Auth actions ──────────────────────────────────────────────────────────
+    # â”€â”€ Auth actions â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     def _do_login(self, identifier: str, password: str, remember: bool):
         self._clear_err()
@@ -1151,7 +1151,7 @@ class LoginWindow(_GradWidget):
         self._workers.append(w)
         w.start()
 
-    # ── Google OAuth (V3 wave 4) ──────────────────────────────────────────
+    # â”€â”€ Google OAuth (V3 wave 4) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     def _start_google_oauth(self):
         """Standard loopback flow:
@@ -1163,24 +1163,24 @@ class LoginWindow(_GradWidget):
         All run inside a single background QThread so the UI never freezes."""
         # First check the server has Google OAuth configured
         self._google_btn.setEnabled(False)
-        self._google_btn.setText("◯  Asking server…")
+        self._google_btn.setText("â—¯  Asking serverâ€¦")
         try:
             r = requests.get(f"{self._server_url}/auth/google/config", timeout=6)
             cfg = r.json() if r.ok else {}
         except Exception as e:
             self._google_btn.setEnabled(True)
-            self._google_btn.setText("◯  Continue with Google")
+            self._google_btn.setText("â—¯  Continue with Google")
             self._show_err(f"Could not reach APEX server: {e}")
             return
         if not cfg.get("configured"):
             self._google_btn.setEnabled(True)
-            self._google_btn.setText("◯  Continue with Google")
+            self._google_btn.setText("â—¯  Continue with Google")
             self._show_err(
                 "Google sign-in not configured on the server. Ask the "
                 "admin to set GOOGLE_OAUTH_CLIENT_ID / SECRET.")
             return
 
-        self._google_btn.setText("◯  Waiting for browser sign-in…")
+        self._google_btn.setText("â—¯  Waiting for browser sign-inâ€¦")
         worker = _GoogleOAuthWorker(
             client_id=cfg["client_id"],
             server_url=self._server_url,
@@ -1195,7 +1195,7 @@ class LoginWindow(_GradWidget):
     def _on_google_done(self, worker, ok: bool, token: str,
                         user: dict, err: str):
         self._google_btn.setEnabled(True)
-        self._google_btn.setText("◯  Continue with Google")
+        self._google_btn.setText("â—¯  Continue with Google")
         if ok:
             save_auth(token, user)
             self.auth_success.emit(token, user)
@@ -1210,7 +1210,7 @@ class LoginWindow(_GradWidget):
     def _on_failure(self, msg: str):
         self._show_err(msg)
 
-    # ── Error display ─────────────────────────────────────────────────────────
+    # â”€â”€ Error display â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     def _show_err(self, msg: str):
         self._err.setText(msg)
@@ -1221,7 +1221,7 @@ class LoginWindow(_GradWidget):
         self._err.setVisible(False)
         self._err.setText("")
 
-    # ── Server ping ───────────────────────────────────────────────────────────
+    # â”€â”€ Server ping â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     def _ping(self):
         w = _PingWorker(self._server_url)
@@ -1239,7 +1239,7 @@ class LoginWindow(_GradWidget):
             f"font-size:10px;background:transparent;"
         )
 
-    # ── Server config ─────────────────────────────────────────────────────────
+    # â”€â”€ Server config â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     def _configure_server(self):
         url, ok = QInputDialog.getText(
@@ -1252,3 +1252,4 @@ class LoginWindow(_GradWidget):
             save_server_url(self._server_url)
             self._srv_lbl.setText(f"Server: {self._server_url}")
             self._ping()
+

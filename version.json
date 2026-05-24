@@ -1,4 +1,4 @@
 {
-  "version": "4.2.1",
-  "notes": "v4.2.1 — hotfix: slot order + version loop\n\n🔧 FIXES\n• API slot assignment now persists across restarts — custom bot keys no longer reset to DAY/SHORT positions after relaunch\n• Version loop after updates fixed — updater correctly reads the installed version so it no longer re-prompts to install the same update"
+  "version": "4.3.0",
+  "notes": "v4.3.0 — BAPTOU rebrand + custom bot key fix + manual mode\n\n🔧 FIXES\n• Custom bot API key now connects correctly — any bot slug (e.g. CRYPTO) resolves to its own ALPACA_API_KEY_<SLUG> entry\n• API key slot 2 no longer appears empty on restart — all custom slot keys are now read from .env on launch\n• Manual mode now fully swaps the UI — bot tabs, OVERVIEW, MORE BOTS, and corner buttons are hidden; only MANUAL tab is shown\n\n✨ NEW\n• Complete BAPTOU rebrand — all in-app text and dialogs updated\n• Friends tab shows manual mode banner when manual trading is active"
 }

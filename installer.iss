@@ -10,7 +10,7 @@
 ; -----------------------------------------------------
 
 #define MyAppName      "APEX Trading Platform"
-#define MyAppVersion   "4.2.1"
+#define MyAppVersion   "4.3.0"
 #define MyAppPublisher "APEX"
 #define MyAppExeName   "APEX.exe"
 
