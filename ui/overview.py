@@ -1795,15 +1795,12 @@ class ToolsTab(QWidget):
             self._sync_msg.setStyleSheet(f"color:{C['red']};font-size:10px;")
             return
 
-        # Build the payload from the in-form edits (no need to round-trip
-        # through .env — keys may have been edited but not saved yet).
-        payload = {
-            k: e.text().strip()
-            for k, e in self._key_edits.items()
-            if e.text().strip()
-        }
+        # Build the payload from .env (includes all built-in slots AND custom
+        # bot slots like ALPACA_API_KEY_CRYPTO that _key_edits never had).
+        all_keys = D.read_env_keys()
+        payload = {k: v for k, v in all_keys.items() if v}
         if not payload:
-            self._sync_msg.setText("No keys entered.")
+            self._sync_msg.setText("No keys saved yet — save your keys first.")
             self._sync_msg.setStyleSheet(f"color:{C['muted']};font-size:10px;")
             return
 

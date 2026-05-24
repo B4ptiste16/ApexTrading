@@ -1,4 +1,4 @@
 {
-  "version": "4.5.0",
-  "notes": "v4.5.0 — Groq (free text AI) + text-only mode\n\n✨ NEW\n• Groq (Llama 3.3 70B) added as AI provider — completely FREE, 14 400 req/day, resets daily. Get key at console.groq.com\n• Text-only mode: bots skip chart generation and send numeric data directly to AI — faster, cheaper, works with Groq\n• AI Mode toggle in Tools: Vision (charts → AI) or Text-only (no charts)\n• Groq automatically forces text mode (no image support)\n• All 4 providers: Anthropic, Google Gemini (FREE), xAI Grok, Groq (FREE)"
+  "version": "4.5.1",
+  "notes": "v4.5.1 — hotfix: cloud bot key sync now includes all slots\n\n🐛 FIXED\n• Sync keys to APEX server now correctly uploads ALL Alpaca slots (including CRYPTO, custom bots) — previously only IBKR keys were synced, causing \"No Alpaca keys synced\" error when starting cloud crypto bot\n• Build: google.generativeai bundled more efficiently (smaller installer)"
 }
