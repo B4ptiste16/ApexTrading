@@ -1382,6 +1382,24 @@ def run_once():
     save_state(state)
 
 
+_DAY_PHILOSOPHY = (
+    "I open intraday LONG bracket trades only — entry, take-profit, "
+    "and hard stop all submitted as a single bracket order. I never "
+    "short. I never hold overnight. I exit any open position close to "
+    "the close. I want clean breakout-of-resistance setups on liquid "
+    "names with favorable risk-reward. I will close any short position "
+    "(I cannot manage it), any position without a paired bracket "
+    "exit, and any position that has been held longer than one session.")
+
+
+def _day_ai_caller(prompt: str):
+    try:
+        return call_ai_text(prompt, _AI_PROVIDER, _AI_MODEL, _AI_KEY)
+    except Exception as e:
+        print(f"[transition] AI call failed: {e}", flush=True)
+        return None
+
+
 def main():
     print("=" * 65)
     print("APEX DAY BOT  -  Bracket Order Strategy")
@@ -1399,9 +1417,23 @@ def main():
           + (f"... +{len(tickers)-10} more" if len(tickers) > 10 else ""))
     print()
 
+    # V4.6.2 — transition cleanup
+    try:
+        from core import transition as _T
+        _acct = trading_client.get_account()
+        _T.record_account_or_flag_transition("DAY", _acct.id)
+    except Exception as _e:
+        print(f"[transition] DAY init failed: {_e}", flush=True)
+
     while True:
         try:
             clock = trading_client.get_clock()
+            try:
+                from core import transition as _T
+                _T.maybe_run_cleanup("DAY", trading_client,
+                                     _day_ai_caller, _DAY_PHILOSOPHY)
+            except Exception as _e:
+                print(f"[transition] DAY cleanup error: {_e}", flush=True)
 
             if clock.is_open:
                 can_trade, reason = is_good_trading_time()

@@ -1565,6 +1565,26 @@ def run_once():
     write_outputs(signal, action, before, after, state, regime, saved)
 
 
+_LONG_PHILOSOPHY = (
+    "I open LONG (buy) positions only, sized by ATR risk, targeting "
+    "multi-day swing moves on highly liquid US large-caps. I never short. "
+    "I trail stops using ATR multiples and exit on time decay after "
+    f"{TIME_STOP_DAYS} days. I want long-side trend continuation "
+    "candidates — I will close any short position, any oversized position, "
+    "any position with a thesis I cannot articulate as long-momentum, "
+    "and any position with deep unrealized loss that exceeds my trailing "
+    "stop budget.")
+
+
+def _long_ai_caller(prompt: str):
+    """Plain-text AI call used by transition cleanup (no charts)."""
+    try:
+        return call_ai_text(prompt, _AI_PROVIDER, _AI_MODEL, _AI_KEY)
+    except Exception as e:
+        print(f"[transition] AI call failed: {e}", flush=True)
+        return None
+
+
 def main():
     print("=" * 65)
     print("APEX LONG BOT v2   -  Vision + Technical Analysis")
@@ -1574,9 +1594,26 @@ def main():
     print(f"Regime:   BULL={BULL_REGIME_MAX_POS} pos | BEAR={BEAR_REGIME_MAX_POS} pos")
     print("=" * 65)
 
+    # V4.6.2 — transition cleanup: detect account flips and queue a
+    # 15-min-before-open reorganisation of any inherited basket.
+    try:
+        from core import transition as _T
+        _acct = trading_client.get_account()
+        _T.record_account_or_flag_transition("LONG", _acct.id)
+    except Exception as _e:
+        print(f"[transition] LONG init failed: {_e}", flush=True)
+
     while True:
         try:
             clock = trading_client.get_clock()
+            # Run inherited-basket cleanup if pending and we are inside
+            # the cleanup window (15 min before open OR market is open).
+            try:
+                from core import transition as _T
+                _T.maybe_run_cleanup("LONG", trading_client,
+                                     _long_ai_caller, _LONG_PHILOSOPHY)
+            except Exception as _e:
+                print(f"[transition] LONG cleanup error: {_e}", flush=True)
 
             if clock.is_open:
                 elapsed = seconds_since_open()

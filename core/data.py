@@ -946,19 +946,73 @@ UNIVERSE_FILES = {
     "DAY":   ROOT / "daybot_universe.txt",
 }
 
+# V4.6.2 — file-name convention for custom-bot universes. A bot with
+# slug "crypto" gets its tickers from "crypto_universe.txt" (and the
+# universe tab will display it automatically alongside the built-ins).
+def universe_path_for(side: str) -> Path:
+    """Canonical universe-file path for a built-in OR custom bot side."""
+    s = side.upper()
+    if s in UNIVERSE_FILES:
+        return UNIVERSE_FILES[s]
+    # Custom bot — lowercase slug + _universe.txt convention
+    return ROOT / f"{side.lower()}_universe.txt"
+
+
+def discover_universe_files() -> dict:
+    """V4.6.2 — return {SIDE: Path} for every universe file we know
+    about: the three built-ins + every registered custom bot + any
+    *_universe.txt found in ROOT (covers manual additions). Used by
+    the Universe tab so a new crypto bot appears immediately."""
+    found: dict[str, Path] = dict(UNIVERSE_FILES)
+    # Custom bots from the per-broker registry
+    try:
+        reg = load_bot_registry()
+        for c in reg.get("custom", []):
+            slug = str(c.get("id", "")).strip()
+            if not slug:
+                continue
+            side = slug.upper()
+            if side not in found:
+                found[side] = universe_path_for(side)
+    except Exception:
+        pass
+    # Any free-floating *_universe.txt left on disk
+    try:
+        for p in ROOT.glob("*_universe.txt"):
+            stem = p.stem
+            if stem.endswith("_universe"):
+                stem = stem[:-len("_universe")]
+            # Built-in stems → canonical side
+            stem_map = {"longbot": "LONG", "shortbot": "SHORT",
+                        "daybot":  "DAY"}
+            side = stem_map.get(stem, stem.upper())
+            if side not in found:
+                found[side] = p
+    except Exception:
+        pass
+    return found
+
+
 UNIVERSE_SCRIPT = ROOT / "universe_manager.py"
 
 
 def read_universe_breakdown() -> dict:
     """
-    Parse the three universe files into:
+    Parse every discovered universe file into:
       {"LONG":[{"Ticker","Note"}...], "SHORT":[...], "DAY":[...],
-       "counts":{"LONG":n,...}}
+       "<CUSTOM>": [...], "counts":{"LONG":n,...}, "sides":["LONG",...]}
     Comment/header lines (starting with #) are skipped; an inline
     '# note' after a ticker is captured as the reason it was chosen.
+    V4.6.2: now covers custom bot universes (e.g. crypto_universe.txt).
     """
-    out = {"counts": {}}
-    for side, path in UNIVERSE_FILES.items():
+    out: dict = {"counts": {}, "sides": []}
+    files = discover_universe_files()
+    # Stable ordering: built-ins first (LONG, SHORT, DAY), then custom alpha.
+    builtin_order = ["LONG", "SHORT", "DAY"]
+    ordered_sides = [s for s in builtin_order if s in files] + sorted(
+        [s for s in files if s not in builtin_order])
+    for side in ordered_sides:
+        path = files[side]
         rows = []
         try:
             with open(path, "r", encoding="utf-8") as f:
@@ -978,6 +1032,7 @@ def read_universe_breakdown() -> dict:
             pass
         out[side] = rows
         out["counts"][side] = len(rows)
+        out["sides"].append(side)
     return out
 
 

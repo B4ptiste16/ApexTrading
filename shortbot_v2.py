@@ -1538,6 +1538,26 @@ def run_once():
     write_outputs(signal, action, before, after, state, regime, saved)
 
 
+_SHORT_PHILOSOPHY = (
+    "I open SHORT positions only, sized by ATR risk, targeting "
+    "mean-reversion fades on overextended US large-caps. I never go long. "
+    "I trail stops using ATR multiples and exit on time decay after "
+    f"{TIME_STOP_DAYS} days. I want short-side fade candidates — I will "
+    "close any long position outright (I cannot manage it), any short "
+    "position whose unrealized loss already exceeds my trailing stop "
+    "budget, and any position with a thesis I cannot articulate as "
+    "mean-reversion / overextension.")
+
+
+def _short_ai_caller(prompt: str):
+    """Plain-text AI call used by transition cleanup (no charts)."""
+    try:
+        return call_ai_text(prompt, _AI_PROVIDER, _AI_MODEL, _AI_KEY)
+    except Exception as e:
+        print(f"[transition] AI call failed: {e}", flush=True)
+        return None
+
+
 def main():
     print("=" * 65)
     print("APEX SHORT BOT v2   -  Vision + Technical Analysis")
@@ -1547,9 +1567,23 @@ def main():
     print(f"Regime:   BULL={BULL_REGIME_MAX_POS} pos max | BEAR={BEAR_REGIME_MAX_POS} pos max")
     print("=" * 65)
 
+    # V4.6.2 — transition cleanup
+    try:
+        from core import transition as _T
+        _acct = trading_client.get_account()
+        _T.record_account_or_flag_transition("SHORT", _acct.id)
+    except Exception as _e:
+        print(f"[transition] SHORT init failed: {_e}", flush=True)
+
     while True:
         try:
             clock = trading_client.get_clock()
+            try:
+                from core import transition as _T
+                _T.maybe_run_cleanup("SHORT", trading_client,
+                                     _short_ai_caller, _SHORT_PHILOSOPHY)
+            except Exception as _e:
+                print(f"[transition] SHORT cleanup error: {_e}", flush=True)
 
             if clock.is_open:
                 elapsed = seconds_since_open()
