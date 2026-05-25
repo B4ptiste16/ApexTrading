@@ -370,7 +370,36 @@ _SYSTEM_PROMPT_TRADE = (
     "request `response_format={'type':'json_object'}` when the provider "
     "supports it (Groq + OpenAI do).\n"
     "• AI-driven bots: ALWAYS wrap the LLM call in try/except and fall "
-    "back to HOLD on any error. A flaky API call must never crash the bot."
+    "back to HOLD on any error. A flaky API call must never crash the bot.\n\n"
+    "═══ STRATEGY VIABILITY RULES (READ CAREFULLY) ═══\n\n"
+    "An AI-generated strategy must produce ACTUAL trades, not be stuck "
+    "in a no-op loop. Common dead-end patterns to AVOID:\n\n"
+    "❌ Comparing a regression `prediction[-1]` against a fixed "
+    "  multiple of a long-term MEAN (e.g. mean*1.1 / mean*0.9). The "
+    "  regression line and the mean are on completely different scales — "
+    "  the result is deterministic per regime (always BUY in bear / "
+    "  always SHORT in bull) and skipped by validators.\n\n"
+    "✅ Compare predictions to CURRENT PRICE, not to a fixed multiple "
+    "  of historical mean. E.g.:\n"
+    "      slope, trend_today = fit_regression(close)\n"
+    "      if slope > 0 and price < trend_today * 0.98: BUY\n"
+    "      elif position['side']=='long' and slope < 0: SELL\n\n"
+    "❌ Always emitting the SAME action regardless of market state. "
+    "  If your strategy returns BUY (or SHORT, or HOLD) for every "
+    "  symbol on every tick, it's broken.\n\n"
+    "✅ Have at least ONE clear entry condition AND ONE clear exit "
+    "  condition. Print the actual feature values + the decision rule "
+    "  so log readers can verify signals are firing.\n\n"
+    "❌ For asset_type='crypto', generating SHORT or COVER actions. "
+    "  Alpaca rejects them with a validator skip — your bot will run "
+    "  for hours doing nothing if your only sell signal is SHORT.\n\n"
+    "✅ For crypto: use BUY (to open a long), SELL (to close), HOLD. "
+    "  Always have a non-SHORT path to take action.\n\n"
+    "Before emitting your code, mentally walk through one tick: given "
+    "today's actual BTC price (~$110k as of late 2025 / early 2026), "
+    "do your thresholds produce a real trade signal, or do they "
+    "compare numbers that can never cross? If they can never cross, "
+    "rewrite the logic."
 )
 
 
@@ -482,14 +511,59 @@ class _GenerateWorker(QThread):
         if not text.strip():
             self.done.emit(False, "Model returned an empty response.")
             return
-        # Strip accidental ```python fences just in case
-        cleaned = text.strip()
-        for fence in ("```python", "```py", "```"):
-            if cleaned.startswith(fence):
-                cleaned = cleaned[len(fence):].lstrip("\n")
-                break
-        if cleaned.endswith("```"):
-            cleaned = cleaned[:-3].rstrip()
+        # V4.6.6 — robust code extraction. Some models (especially text
+        # ones like Llama) wrap code in ```python fences AND add prose
+        # before/after ("Here's your bot:" / "Hope this helps!"). Pull
+        # out the largest fenced block if present; else strip front/back
+        # prose by finding the first import/comment/docstring and last
+        # `__main__` block.
+        import re as _re
+        text = text.strip()
+        # 1. Prefer the largest ```python ... ``` fenced block
+        fences = _re.findall(r"```(?:python|py)?\s*\n(.*?)```",
+                             text, flags=_re.DOTALL)
+        if fences:
+            cleaned = max(fences, key=len).strip()
+        else:
+            cleaned = text
+            # 2. No fences — strip leading prose until the first
+            #    triple-quoted docstring or `import`/`from` line
+            lines = cleaned.splitlines()
+            for i, line in enumerate(lines):
+                stripped = line.lstrip()
+                if (stripped.startswith('"""') or
+                    stripped.startswith("'''") or
+                    stripped.startswith("import ") or
+                    stripped.startswith("from ") or
+                    stripped.startswith("#!") or
+                    stripped.startswith("# ")):
+                    cleaned = "\n".join(lines[i:])
+                    break
+            # 3. Strip trailing prose after the last meaningful
+            #    Python construct (find last `if __name__` or last
+            #    line that looks like Python).
+            tail_lines = cleaned.splitlines()
+            for i in range(len(tail_lines) - 1, -1, -1):
+                t = tail_lines[i].rstrip()
+                if not t:
+                    continue
+                if t.startswith(" ") or t.startswith("\t") \
+                        or any(t.startswith(p) for p in (
+                            "def ", "class ", "import ", "from ",
+                            "if ", "for ", "while ", "try:", "return ",
+                            ")", "}", "]", '"""', "'''", "#")) \
+                        or "=" in t or t.endswith(":") \
+                        or t.endswith(")") or t.endswith("'") or t.endswith('"'):
+                    cleaned = "\n".join(tail_lines[:i+1])
+                    break
+        cleaned = cleaned.strip()
+        # Sanity: ensure we still have valid-ish Python (must contain
+        # at least one `def ` and an APEX-BOT-META marker if v4.6.4+).
+        if "def " not in cleaned:
+            self.done.emit(False,
+                "Model output had no `def` — likely returned prose only. "
+                "Try again or pick a different model.")
+            return
         self.done.emit(True, cleaned)
 
 
@@ -561,10 +635,10 @@ class MakeBotTab(QWidget):
         # order-submission code.
         from PyQt6.QtWidgets import QRadioButton, QButtonGroup
         kind_row = QHBoxLayout()
-        kind_lbl = QLabel("Kind:")
+        kind_lbl = QLabel("Generate:")
         kind_lbl.setStyleSheet(f"color:{C['text']};font-size:11px;")
-        self._mode_trade_radio    = QRadioButton("Trading bot")
-        self._mode_universe_radio = QRadioButton("Universe bot (writes *_universe.txt)")
+        self._mode_trade_radio    = QRadioButton("Trading bot (.py that submits orders)")
+        self._mode_universe_radio = QRadioButton("Universe generator (.py that rewrites a *_universe.txt)")
         self._mode_trade_radio.setChecked(True)
         self._mode_trade_radio.setStyleSheet(
             f"color:{C['text']};font-size:11px;")
@@ -582,10 +656,13 @@ class MakeBotTab(QWidget):
         kw = QWidget(); kw.setLayout(kind_row)
         s.add(kw)
         kind_hint = QLabel(
-            "Trading bots open positions. Universe bots only rewrite a "
-            "ticker list (`crypto_universe.txt`, `longbot_universe.txt`, "
-            "etc.) that a trading bot then consumes. Universe bots "
-            "cannot place orders.")
+            "Both options generate a Python (.py) script. The Trading "
+            "bot opens / closes positions on Alpaca. The Universe "
+            "generator is a separate Python script that picks tickers "
+            "and writes them into a *_universe.txt file (e.g. "
+            "crypto_universe.txt) which a trading bot then reads. Pick "
+            "Universe generator when you want a 'pre-filter' that runs "
+            "less often (e.g. nightly scan) and feeds a trading bot.")
         kind_hint.setStyleSheet(f"color:{C['muted']};font-size:10px;")
         kind_hint.setWordWrap(True)
         s.add(kind_hint)
@@ -1095,6 +1172,50 @@ class MakeBotTab(QWidget):
         # Slug-ify
         slug = "".join(ch if ch.isalnum() or ch in "-_" else "_"
                        for ch in name.strip().lower())
+
+        # V4.6.7 — universe generators save to a separate directory and
+        # are registered with the universe manager, NOT the bot library.
+        # Trading bots go to bots/ as before.
+        is_universe = (getattr(self, "_mode_universe_radio", None)
+                       and self._mode_universe_radio.isChecked())
+
+        if is_universe:
+            universe_dir = DATA_DIR / "universe_scripts"
+            universe_dir.mkdir(exist_ok=True)
+            dest = universe_dir / f"{slug}.py"
+            dest.write_text(code, encoding="utf-8")
+            # Register in settings under 'universe_scripts' so the
+            # UniverseTab can list it. Each entry tracks the script
+            # path + the universe file it rewrites (from META.universe).
+            try:
+                from core.bot_meta import parse_meta
+                meta = parse_meta(code) or {}
+                target_universe = (meta.get("universe", "")
+                                   or f"{slug}_universe.txt")
+                s = D.load_settings()
+                lst = s.setdefault("universe_scripts", [])
+                # de-dupe by slug
+                lst = [u for u in lst if u.get("id") != slug]
+                lst.append({
+                    "id":             slug,
+                    "label":          name,
+                    "script":         str(dest),
+                    "target":         target_universe,
+                    "asset_type":     meta.get("asset_type", ""),
+                    "description":    meta.get("description", ""),
+                })
+                s["universe_scripts"] = lst
+                import json as _j
+                with open(D.SETTINGS_FILE, "w", encoding="utf-8") as f:
+                    _j.dump(s, f, indent=2)
+            except Exception as e:
+                print(f"[make-bot] universe registry update failed: {e}")
+            self._toast(
+                f"✓ Saved {slug}.py as a UNIVERSE GENERATOR. "
+                f"Open the UNIVERSE tab to run it or pick it for a bot.")
+            return
+
+        # Trading bot — original path
         bots_dir = DATA_DIR / "bots"
         bots_dir.mkdir(exist_ok=True)
         dest = bots_dir / f"{slug}.py"
