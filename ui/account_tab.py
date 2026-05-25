@@ -14,11 +14,11 @@ from typing import Optional
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame,
-    QLineEdit, QGridLayout, QMessageBox, QComboBox,
+    QLineEdit, QGridLayout, QMessageBox,
 )
 
 from ui.styles  import COLORS
-from ui.widgets import ScrollContent, SectionHeader
+from ui.widgets import ScrollContent, SectionHeader, NoScrollComboBox
 
 C = COLORS
 
@@ -105,7 +105,7 @@ class AccountTab(QWidget):
     def _build_summary_card(self) -> QFrame:
         frame = QFrame()
         frame.setStyleSheet(
-            f"background:{C['panel']};border:1px solid {C['border']};"
+            f"background:{C['panel']};border:none;"
             f"border-radius:8px;")
         g = QGridLayout(frame)
         g.setContentsMargins(16, 14, 16, 14)
@@ -154,7 +154,7 @@ class AccountTab(QWidget):
     def _build_profile_form(self) -> QFrame:
         frame = QFrame()
         frame.setStyleSheet(
-            f"background:{C['panel']};border:1px solid {C['border']};"
+            f"background:{C['panel']};border:none;"
             f"border-radius:8px;")
         g = QGridLayout(frame)
         g.setContentsMargins(16, 14, 16, 14)
@@ -189,7 +189,7 @@ class AccountTab(QWidget):
         from ui.styles import THEMES
         frame = QFrame()
         frame.setStyleSheet(
-            f"background:{C['panel']};border:1px solid {C['border']};"
+            f"background:{C['panel']};border:none;"
             f"border-radius:8px;")
         g = QGridLayout(frame)
         g.setContentsMargins(16, 14, 16, 14)
@@ -204,7 +204,7 @@ class AccountTab(QWidget):
         g.addWidget(intro, 0, 0, 1, 2)
 
         g.addWidget(self._lbl("Theme"), 1, 0)
-        self._theme_combo = QComboBox()
+        self._theme_combo = NoScrollComboBox()
         for name in THEMES:
             self._theme_combo.addItem(name)
         # Pre-select current
@@ -258,7 +258,7 @@ class AccountTab(QWidget):
             sw.setFixedSize(22, 22)
             sw.setStyleSheet(
                 f"background:{palette.get(key, '#000')};"
-                f"border:1px solid rgba(255,255,255,0.1);border-radius:4px;")
+                f"border:none;border-radius:4px;")
             sw.setToolTip(f"{key}: {palette.get(key, '?')}")
             self._theme_preview.addWidget(sw)
         self._theme_preview.addStretch()
@@ -293,7 +293,7 @@ class AccountTab(QWidget):
     def _build_password_form(self) -> QFrame:
         frame = QFrame()
         frame.setStyleSheet(
-            f"background:{C['panel']};border:1px solid {C['border']};"
+            f"background:{C['panel']};border:none;"
             f"border-radius:8px;")
         g = QGridLayout(frame)
         g.setContentsMargins(16, 14, 16, 14)
@@ -334,7 +334,7 @@ class AccountTab(QWidget):
     def _build_email_form(self) -> QFrame:
         frame = QFrame()
         frame.setStyleSheet(
-            f"background:{C['panel']};border:1px solid {C['border']};"
+            f"background:{C['panel']};border:none;"
             f"border-radius:8px;")
         g = QGridLayout(frame)
         g.setContentsMargins(16, 14, 16, 14)
@@ -373,7 +373,7 @@ class AccountTab(QWidget):
     def _input_css(self) -> str:
         return (
             f"background:{C['panel2']};color:{C['text']};"
-            f"border:1px solid {C['border']};border-radius:5px;"
+            f"border:none;border-radius:5px;"
             f"padding:6px 10px;font-family:'JetBrains Mono';font-size:11px;"
         )
 

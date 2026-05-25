@@ -148,7 +148,7 @@ class MetricCard(QFrame):
         self.setStyleSheet(
             f"QFrame#card {{"
             f"  background:{C['panel']};"
-            f"  border:1px solid {C['border']};"
+            f"  border:none;"
             f"  border-radius:8px;"
             f"  border-top:2px solid {color};"
             f"}}"
@@ -165,7 +165,7 @@ class MetricCard(QFrame):
         self.setStyleSheet(
             f"QFrame#card {{"
             f"  background:{C['panel']};"
-            f"  border:1px solid {C['border']};"
+            f"  border:none;"
             f"  border-radius:8px;"
             f"  border-top:2px solid {c};"
             f"}}"
@@ -201,13 +201,9 @@ class SectionHeader(QWidget):
             row.addWidget(controls)
         outer.addLayout(row)
 
-        rule = QFrame()
-        rule.setFrameShape(QFrame.Shape.HLine)
-        rule.setFixedHeight(1)
-        rule.setStyleSheet(
-            f"background:{C['border']};border:none;max-height:1px;"
-        )
-        outer.addWidget(rule)
+        # V4.6.14 — removed the horizontal rule under the section
+        # header. Site-wide minimalism pass: separation comes from
+        # background tint + letter-spacing on the label, no rule.
 
 
 # ─────────────────────────────────────────
@@ -299,7 +295,7 @@ class BotProcessWidget(QWidget):
         self.log.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
         self.log.setStyleSheet(
             f"background:{C['panel2']};color:{C['text']};"
-            f"border:1px solid {C['border']};border-radius:5px;"
+            f"border:none;border-radius:5px;"
             f"font-size:10px;font-family:'JetBrains Mono';padding:6px;"
             f"text-align:left;"
         )
@@ -511,8 +507,20 @@ class BotProcessWidget(QWidget):
             # Installed build: sys.executable is APEX.exe, not python, and
             # the bot .py files live inside the exe. Launch the dedicated
             # --run-bot entry point with data living in DATA_DIR.
+            # V4.6.15 — when side=UNIVERSE and the user picked a custom
+            # script via the Universe tab dropdown, pass that script
+            # path as a 4th arg so _run_bot can exec it instead of
+            # the built-in universe_manager.
             self.process.setWorkingDirectory(str(DATA_DIR))
-            self.process.start(sys.executable, ["--run-bot", self.side])
+            args = ["--run-bot", self.side]
+            if str(self.side).upper() == "UNIVERSE":
+                try:
+                    custom_path = str(self.script_path)
+                    if custom_path and "universe_manager" not in custom_path.lower():
+                        args.append(custom_path)
+                except Exception:
+                    pass
+            self.process.start(sys.executable, args)
         else:
             self.process.start(sys.executable, ["-u", str(run_path)])
         if self.process.waitForStarted(3000):
@@ -990,7 +998,7 @@ class ClosedTradesFeed(QWidget):
 
         frame = QFrame()
         frame.setStyleSheet(
-            f"background:{C['panel']};border:1px solid {C['border']};"
+            f"background:{C['panel']};border:none;"
             f"border-radius:6px;")
         row = QHBoxLayout(frame)
         row.setContentsMargins(12, 7, 12, 7)

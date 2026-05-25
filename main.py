@@ -409,7 +409,7 @@ class MoreBotsTab(QWidget):
         # ─────────────────────────────────────────────────────
         lock_wrap = QFrame()
         lock_wrap.setStyleSheet(
-            f"background:{C['panel2']};border:1px solid {C['border']};"
+            f"background:{C['panel2']};border:none;"
             f"border-radius:8px;")
         lv = QVBoxLayout(lock_wrap)
         lv.setContentsMargins(16, 12, 16, 12)
@@ -457,7 +457,7 @@ class MoreBotsTab(QWidget):
         # ─────────────────────────────────────────────────────
         market_wrap = QFrame()
         market_wrap.setStyleSheet(
-            f"background:{C['panel']};border:1px solid {C['border']};"
+            f"background:{C['panel']};border:none;"
             f"border-radius:12px;border-top:3px solid {C['purple']};")
         mv = QVBoxLayout(market_wrap)
         mv.setContentsMargins(24, 20, 24, 20)
@@ -483,7 +483,7 @@ class MoreBotsTab(QWidget):
             f"QPushButton {{"
             f"  background:rgba(138,147,201,0.12);"
             f"  color:{C['purple']};"
-            f"  border:1px solid {C['purple']};"
+            f"  border:none;"
             f"  border-radius:8px;"
             f"  font-family:'JetBrains Mono';font-size:11px;"
             f"  letter-spacing:3px;font-weight:700;"
@@ -702,7 +702,7 @@ class MoreBotsTab(QWidget):
 
         card = QFrame()
         card.setStyleSheet(
-            f"background:{C['panel2']};border:1px solid {color}30;"
+            f"background:{C['panel2']};border:none;"
             f"border-radius:10px;border-top:2px solid {color};"
         )
         # V4.6.9 — wider card so all three buttons (Silence + Remove +
@@ -781,7 +781,7 @@ class MoreBotsTab(QWidget):
             del_btn.setStyleSheet(
                 f"QPushButton#dangerBtn{{"
                 f"background:{C['red']}20;color:{C['red']};"
-                f"border:1px solid {C['red']}80;border-radius:4px;"
+                f"border:none;border-radius:4px;"
                 f"padding:4px 8px;font-size:10px;font-weight:600;}}"
                 f"QPushButton#dangerBtn:hover{{background:{C['red']}50;}}")
             del_btn.clicked.connect(lambda _, s=side: self._delete_bot(s))
@@ -1672,7 +1672,7 @@ class ApexWindow(QMainWindow):
         self.mkt_label.setStyleSheet(
             f"font-size:10px;font-weight:600;letter-spacing:2px;"
             f"color:{C['muted']};padding:3px 12px;"
-            f"border:1px solid {C['border']};border-radius:12px;"
+            f"border:none;border-radius:12px;"
         )
         layout.addWidget(self.mkt_label)
 
@@ -1754,11 +1754,11 @@ class ApexWindow(QMainWindow):
             f"QPushButton#creditsChip{{"
             f"color:{C['yellow']};font-size:10px;font-weight:600;"
             f"letter-spacing:1px;padding:6px 12px;margin-left:6px;"
-            f"border:1px solid {C['border']};border-radius:5px;"
+            f"border:none;border-radius:5px;"
             f"background:rgba(214,201,94,0.06);cursor:pointer;}}"
             f"QPushButton#creditsChip:hover{{"
             f"background:rgba(214,201,94,0.14);"
-            f"border:1px solid {C['yellow']};}}"
+            f"border:none;}}"
         )
         self.credits_chip.setToolTip("Click to buy more credits")
         self.credits_chip.clicked.connect(self._open_credit_shop)
@@ -1799,7 +1799,7 @@ class ApexWindow(QMainWindow):
                 f"QPushButton#alpacaModeBtn{{"
                 f"color:{C['red']};font-size:10px;font-weight:700;"
                 f"letter-spacing:1.5px;padding:6px 12px;margin-left:6px;"
-                f"border:1px solid {C['red']};border-radius:12px;"
+                f"border:none;border-radius:12px;"
                 f"background:rgba(194,142,151,0.08);}}"
                 f"QPushButton#alpacaModeBtn:hover{{"
                 f"background:rgba(194,142,151,0.16);}}")
@@ -1809,7 +1809,7 @@ class ApexWindow(QMainWindow):
                 f"QPushButton#alpacaModeBtn{{"
                 f"color:{C['muted']};font-size:10px;font-weight:600;"
                 f"letter-spacing:1.5px;padding:6px 12px;margin-left:6px;"
-                f"border:1px solid {C['border']};border-radius:12px;"
+                f"border:none;border-radius:12px;"
                 f"background:rgba(106,120,148,0.06);}}"
                 f"QPushButton#alpacaModeBtn:hover{{"
                 f"background:rgba(106,120,148,0.14);}}")
@@ -2662,7 +2662,7 @@ class ApexWindow(QMainWindow):
         body_box.setPlainText(body.get("text", "(T&C text missing.)"))
         body_box.setStyleSheet(
             f"background:{COLORS['panel2']};color:{COLORS['text']};"
-            f"border:1px solid {COLORS['border']};border-radius:6px;"
+            f"border:none;border-radius:6px;"
             f"padding:10px;font-family:'JetBrains Mono';font-size:11px;")
         lv.addWidget(body_box, 1)
         btns = QDialogButtonBox()
@@ -3051,7 +3051,7 @@ class ApexWindow(QMainWindow):
                 self.mkt_label.setStyleSheet(
                     f"font-size:10px;font-weight:600;letter-spacing:2px;"
                     f"color:{C['green']};padding:3px 12px;"
-                    f"border:1px solid {C['green']};border-radius:12px;"
+                    f"border:none;border-radius:12px;"
                     f"background:rgba(122,181,162,0.08);"
                 )
             else:
@@ -3061,7 +3061,7 @@ class ApexWindow(QMainWindow):
                 self.mkt_label.setStyleSheet(
                     f"font-size:10px;font-weight:600;letter-spacing:2px;"
                     f"color:{C['red']};padding:3px 12px;"
-                    f"border:1px solid rgba(194,142,151,0.5);border-radius:12px;"
+                    f"border:none;border-radius:12px;"
                     f"background:rgba(194,142,151,0.06);"
                 )
                 self.mkt_label.start_sweep()
@@ -3223,7 +3223,13 @@ class ApexWindow(QMainWindow):
 # BOT ENTRY POINT (frozen build)
 # ─────────────────────────────────────────
 
-def _run_bot(side: str) -> int:
+def _run_bot(side: str, script_path: str = "") -> int:
+    """V4.6.15 — accepts an optional script_path for UNIVERSE side.
+    When the user picks a custom universe generator from the Universe
+    tab dropdown, the BotProcessWidget passes that script's path as
+    a 3rd CLI arg. We then exec the script directly instead of
+    running the built-in universe_manager (which would silently
+    overwrite the user's selection)."""
     import io
     for _fd, _name in ((1, "stdout"), (2, "stderr")):
         _s = getattr(sys, _name, None)
@@ -3244,6 +3250,29 @@ def _run_bot(side: str) -> int:
     import importlib
     side_u = side.upper()
     if side_u == "UNIVERSE":
+        # If a custom script was passed, execute IT instead of the
+        # built-in universe_manager. Use runpy so the script's
+        # __name__ == "__main__" block fires.
+        if script_path:
+            from pathlib import Path as _P
+            sp = _P(script_path)
+            if not sp.exists():
+                print(f"[universe] script not found: {sp}", flush=True)
+                return 2
+            print(f"[universe] running custom script {sp.name}",
+                  flush=True)
+            try:
+                import runpy
+                runpy.run_path(str(sp), run_name="__main__")
+                return 0
+            except SystemExit as e:
+                return int(getattr(e, "code", 0) or 0)
+            except Exception as e:
+                import traceback
+                print(f"[universe] script crashed: {e}", flush=True)
+                traceback.print_exc()
+                return 1
+        # No script_path → built-in universe_manager (legacy behavior)
         um = importlib.import_module("universe_manager")
         um.run_manager(["DAY", "LONG", "SHORT"])
         return 0
@@ -3300,7 +3329,11 @@ def _install_exception_handler():
 
 def main():
     if len(sys.argv) >= 3 and sys.argv[1] == "--run-bot":
-        sys.exit(_run_bot(sys.argv[2]))
+        # V4.6.15 — 4th arg is the optional explicit script path for
+        # UNIVERSE side (lets the user's Universe-tab dropdown
+        # selection actually win over the built-in default).
+        _sp = sys.argv[3] if len(sys.argv) >= 4 else ""
+        sys.exit(_run_bot(sys.argv[2], _sp))
 
     if not _check_single_instance():
         sys.exit(0)

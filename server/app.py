@@ -971,11 +971,28 @@ def _bot_state(user_id: int, side: str) -> dict:
 
 @app.get("/web/api/status", include_in_schema=False)
 def web_api_status(request: Request):
+    """V4.6.14 — dashboard now reports state for every bot the user
+    has, not just the three built-ins. Discovers custom bots by
+    scanning the user's private_bots/ directory on the server; sends
+    a `sides` list so the JS dashboard can render rows for the full
+    set (e.g. crypto bot shows up alongside LONG / SHORT / DAY)."""
     user = _web_user(request)
     linked = bool(creds.load_credentials(user["id"]))
-    bots = {side: _bot_state(user["id"], side)
-            for side in ("LONG", "SHORT", "DAY")}
-    return {"linked": linked, "bots": bots}
+    # Always include built-ins
+    sides = ["LONG", "SHORT", "DAY"]
+    # Discover custom bots from /opt/apex_users/user_X/private_bots/*.py
+    try:
+        from pathlib import Path as _P
+        priv_dir = bot_runner.private_bots_dir(user["id"])
+        if priv_dir.exists():
+            for p in sorted(priv_dir.glob("*.py")):
+                slug = p.stem.upper()
+                if slug not in sides:
+                    sides.append(slug)
+    except Exception as e:
+        print(f"[web_api_status] custom-bot scan failed: {e}")
+    bots = {side: _bot_state(user["id"], side) for side in sides}
+    return {"linked": linked, "sides": sides, "bots": bots}
 
 
 @app.post("/web/api/bots/{side}/start", include_in_schema=False)

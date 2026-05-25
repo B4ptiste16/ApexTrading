@@ -100,7 +100,7 @@ class BotMarketTab(QWidget):
         # ─── HERO ─────────────────────────────────────────────────
         hero = QFrame()
         hero.setStyleSheet(
-            f"background:{C['panel']};border:1px solid {C['border']};"
+            f"background:{C['panel']};border:none;"
             f"border-radius:12px;border-top:3px solid {C['purple']};")
         hv = QVBoxLayout(hero)
         hv.setContentsMargins(26, 22, 26, 22)
@@ -138,7 +138,7 @@ class BotMarketTab(QWidget):
         self._search_edit.setFixedHeight(42)
         self._search_edit.setStyleSheet(
             f"background:{C['panel2']};color:{C['text']};"
-            f"border:1px solid {C['border']};border-radius:8px;"
+            f"border:none;border-radius:8px;"
             f"padding:0 16px;font-size:13px;")
         self._search_edit.returnPressed.connect(self._refresh_current_view)
         search_row.addWidget(self._search_edit, 1)
@@ -377,7 +377,7 @@ class BotMarketTab(QWidget):
         card = QFrame()
         card.setStyleSheet(
             f"QFrame {{ background:{C['panel']}; "
-            f"border:1px solid {C['border']}; "
+            f"border:none; "
             f"border-radius:12px; "
             f"border-top:3px solid {accent}; }}"
             f"QFrame:hover {{ border-color:{C['muted']}; }}")
@@ -405,7 +405,7 @@ class BotMarketTab(QWidget):
                 badge.setStyleSheet(
                     f"color:{col};font-size:8px;letter-spacing:2px;"
                     f"font-weight:700;padding:3px 7px;"
-                    f"border:1px solid {col};border-radius:4px;")
+                    f"border:none;border-radius:4px;")
                 head.addWidget(badge)
         hw = QWidget(); hw.setLayout(head)
         v.addWidget(hw)

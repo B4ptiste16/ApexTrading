@@ -183,7 +183,7 @@ class CreditShopDialog(QDialog):
         border  = C["yellow"] if popular else C["border"]
         frame   = QFrame()
         frame.setStyleSheet(
-            f"background:{C['panel']};border:1px solid {border};"
+            f"background:{C['panel']};border:none;"
             f"border-radius:10px;"
         )
         v = QVBoxLayout(frame)

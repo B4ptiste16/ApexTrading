@@ -296,63 +296,62 @@ QPushButton:hover {{
     background: {c['panel']};
 }}
 
+/* V4.6.14 — minimalism pass: button borders removed.
+   Color identity now comes from a stronger background tint, not
+   outlines. Hover deepens the tint instead of saturating a border. */
 QPushButton#runBtn {{
-    background: rgba(122,181,162,0.10);
+    background: rgba(122,181,162,0.18);
     color: {c['green']};
-    border: 1px solid rgba(122,181,162,0.45);
+    border: none;
 }}
 
 QPushButton#runBtn:hover {{
-    background: rgba(122,181,162,0.18);
-    border-color: {c['green']};
+    background: rgba(122,181,162,0.30);
 }}
 
 QPushButton#stopBtn {{
-    background: rgba(194,142,151,0.10);
+    background: rgba(194,142,151,0.18);
     color: {c['red']};
-    border: 1px solid rgba(194,142,151,0.45);
+    border: none;
 }}
 
 QPushButton#stopBtn:hover {{
-    background: rgba(194,142,151,0.18);
-    border-color: {c['red']};
+    background: rgba(194,142,151,0.30);
 }}
 
 QPushButton#dangerBtn {{
-    background: rgba(194,142,151,0.08);
+    background: rgba(194,142,151,0.15);
     color: {c['red']};
-    border: 1px solid rgba(194,142,151,0.35);
+    border: none;
 }}
 
 QPushButton#dangerBtn:hover {{
-    background: rgba(194,142,151,0.16);
-    border-color: {c['red']};
+    background: rgba(194,142,151,0.28);
 }}
 
 QPushButton#toolBtn {{
-    background: rgba(138,147,201,0.08);
+    background: rgba(138,147,201,0.15);
     color: {c['purple']};
-    border: 1px solid rgba(138,147,201,0.35);
+    border: none;
 }}
 
 QPushButton#toolBtn:hover {{
-    background: rgba(138,147,201,0.16);
-    border-color: {c['purple']};
+    background: rgba(138,147,201,0.28);
 }}
 
 QPushButton#updateBtn {{
-    background: rgba(138,147,201,0.10);
+    background: rgba(138,147,201,0.18);
     color: {c['purple']};
-    border: 1px solid rgba(138,147,201,0.45);
+    border: none;
     font-size: 10px;
     padding: 6px 16px;
 }}
 
-/* V3.2.0 — broker-mode selector chip in the header */
+/* V3.2.0 — broker-mode selector chip in the header (v4.6.14 flat) */
 QPushButton#brokerModeBtn {{
-    background: rgba(138,147,201,0.08);
+    background: rgba(138,147,201,0.15);
     color: {c['purple']};
-    border: 1px solid {c['border']};
+    border: none;
     border-radius: 5px;
     font-family: 'JetBrains Mono';
     font-size: 10px;
@@ -362,15 +361,14 @@ QPushButton#brokerModeBtn {{
     margin-left: 6px;
 }}
 QPushButton#brokerModeBtn:hover {{
-    background: rgba(138,147,201,0.18);
-    border-color: {c['purple']};
+    background: rgba(138,147,201,0.28);
 }}
 
-/* Manual trading mode toggle */
+/* Manual trading mode toggle (v4.6.14 flat) */
 QPushButton#manualModeBtn {{
-    background: transparent;
+    background: rgba(106,120,148,0.10);
     color: {c['muted']};
-    border: 1px solid {c['border']};
+    border: none;
     border-radius: 5px;
     font-family: 'JetBrains Mono';
     font-size: 10px;
@@ -380,21 +378,19 @@ QPushButton#manualModeBtn {{
     margin-left: 6px;
 }}
 QPushButton#manualModeBtn:hover {{
-    background: rgba(200,160,112,0.12);
-    border-color: {c['orange']};
+    background: rgba(200,160,112,0.20);
     color: {c['orange']};
 }}
 QPushButton#manualModeBtn[active="true"] {{
-    background: rgba(200,160,112,0.14);
+    background: rgba(200,160,112,0.22);
     color: {c['orange']};
-    border-color: {c['orange']};
 }}
 
-/* V3.0.1 — clickable user chip in the header (opens Account menu) */
+/* V3.0.1 — clickable user chip in the header (v4.6.14 flat) */
 QPushButton#userChipBtn {{
     background: transparent;
     color: {c['muted']};
-    border: 1px solid transparent;
+    border: none;
     border-radius: 5px;
     font-family: 'JetBrains Mono';
     font-size: 10px;
@@ -406,8 +402,7 @@ QPushButton#userChipBtn {{
 
 QPushButton#userChipBtn:hover {{
     color: {c['text']};
-    border-color: {c['border']};
-    background: rgba(255,255,255,0.04);
+    background: rgba(255,255,255,0.06);
 }}
 
 QPushButton#userChipBtn:pressed {{
@@ -442,11 +437,11 @@ QMenu::separator {{
     margin: 4px 6px;
 }}
 
-/* V7.1.7: explicit Quit button in the header */
+/* V7.1.7: explicit Quit button in the header (v4.6.14 flat) */
 QPushButton#quitBtn {{
-    background: transparent;
+    background: rgba(106,120,148,0.10);
     color: {c['muted']};
-    border: 1px solid {c['border']};
+    border: none;
     border-radius: 5px;
     font-family: 'JetBrains Mono';
     font-size: 10px;
@@ -457,21 +452,19 @@ QPushButton#quitBtn {{
 
 QPushButton#quitBtn:hover {{
     color: {c['red']};
-    border-color: rgba(194,142,151,0.55);
-    background: rgba(194,142,151,0.08);
+    background: rgba(194,142,151,0.18);
 }}
 
 QPushButton#addBotBtn {{
-    background: rgba(122,181,162,0.08);
+    background: rgba(122,181,162,0.15);
     color: {c['green']};
-    border: 1px solid rgba(122,181,162,0.35);
+    border: none;
     font-size: 10px;
     padding: 6px 14px;
 }}
 
 QPushButton#addBotBtn:hover {{
-    background: rgba(122,181,162,0.16);
-    border-color: {c['green']};
+    background: rgba(122,181,162,0.28);
 }}
 
 QPushButton#silenceBtn {{
@@ -590,12 +583,12 @@ QMessageBox QLabel {{
     color: {c['text']};
 }}
 
-/* ── STATUS BAR ── */
+/* ── STATUS BAR (v4.6.14 flat) ── */
 QStatusBar {{
     background: {c['panel']};
     color: {c['muted']};
     font-size: 10px;
-    border-top: 1px solid {c['border']};
+    border-top: none;
 }}
 
 /* ── SPLITTER ── */
@@ -603,11 +596,11 @@ QSplitter::handle {{
     background: {c['border']};
 }}
 
-/* ── TOOLTIP ── */
+/* ── TOOLTIP (v4.6.14 flat) ── */
 QToolTip {{
-    background: {c['panel']};
+    background: {c['panel2']};
     color: {c['text']};
-    border: 1px solid {c['border']};
+    border: none;
     font-size: 11px;
     padding: 5px 10px;
     border-radius: 4px;
@@ -622,28 +615,27 @@ QCheckBox {{
 QCheckBox::indicator {{
     width: 14px;
     height: 14px;
-    border: 1px solid {c['border']};
+    border: none;
     border-radius: 3px;
-    background: {c['panel']};
+    background: {c['panel2']};
 }}
 
 QCheckBox::indicator:checked {{
     background: {c['green']};
-    border-color: {c['green']};
 }}
 
-/* ── SPIN BOX ── */
+/* ── SPIN BOX (v4.6.14 flat) ── */
 QDoubleSpinBox, QSpinBox {{
-    background: {c['panel']};
+    background: {c['panel2']};
     color: {c['text']};
-    border: 1px solid {c['border']};
+    border: none;
     border-radius: 4px;
     padding: 4px 8px;
     font-size: 11px;
 }}
 
 QDoubleSpinBox:focus, QSpinBox:focus {{
-    border-color: {c['muted']};
+    background: {c['panel']};
 }}
 
 QDoubleSpinBox::up-button, QDoubleSpinBox::down-button,

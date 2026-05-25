@@ -317,7 +317,7 @@ class OverviewTab(QWidget):
                           "DAY":  "◆ DAY BOT"}.get(side, side.upper())
         block = QFrame()
         block.setStyleSheet(
-            f"background:{C['panel']};border:1px solid {color}30;"
+            f"background:{C['panel']};border:none;"
             f"border-radius:10px;border-left:3px solid {color};"
         )
         layout = QVBoxLayout(block)
@@ -820,7 +820,7 @@ class ToolsTab(QWidget):
         self._alpaca_slot_edits: list[dict] = []
         form = QFrame()
         form.setStyleSheet(
-            f"background:{C['panel']};border:1px solid {C['border']};"
+            f"background:{C['panel']};border:none;"
             f"border-radius:8px;")
         fl = QGridLayout(form)
         fl.setContentsMargins(16, 14, 16, 14)
@@ -856,7 +856,7 @@ class ToolsTab(QWidget):
             key_ed.setPlaceholderText("API key")
             key_ed.setStyleSheet(
                 f"background:{C['panel2']};color:{C['text']};"
-                f"border:1px solid {C['border']};border-radius:4px;"
+                f"border:none;border-radius:4px;"
                 f"padding:5px;font-family:'JetBrains Mono';font-size:11px;")
             fl.addWidget(QLabel("Key"), i*3 + 1, 0)
             fl.addWidget(key_ed,        i*3 + 1, 1, 1, 2)
@@ -919,7 +919,7 @@ class ToolsTab(QWidget):
         cur_m = D.read_env_keys()
         manual_frame = QFrame()
         manual_frame.setStyleSheet(
-            f"background:{C['panel']};border:1px solid {C['border']};"
+            f"background:{C['panel']};border:none;"
             f"border-radius:8px;border-left:3px solid {C['orange']};")
         mfl = QGridLayout(manual_frame)
         mfl.setContentsMargins(16, 14, 16, 14)
@@ -928,7 +928,7 @@ class ToolsTab(QWidget):
 
         _key_style = (
             f"background:{C['panel2']};color:{C['text']};"
-            f"border:1px solid {C['border']};border-radius:4px;"
+            f"border:none;border-radius:4px;"
             f"padding:5px;font-family:'JetBrains Mono';font-size:11px;")
 
         self._manual_key_edit = QLineEdit(cur_m.get("ALPACA_API_KEY_MANUAL", ""))
@@ -989,7 +989,7 @@ class ToolsTab(QWidget):
         # the active-bot registry changes.
         self._auto_sched_holder = QFrame()
         self._auto_sched_holder.setStyleSheet(
-            f"background:{C['panel']};border:1px solid {C['border']};"
+            f"background:{C['panel']};border:none;"
             f"border-radius:8px;")
         self._auto_sched_layout = QHBoxLayout(self._auto_sched_holder)
         self._auto_sched_layout.setContentsMargins(14, 10, 14, 10)
@@ -1008,7 +1008,7 @@ class ToolsTab(QWidget):
 
         self._cloud_holder = QFrame()
         self._cloud_holder.setStyleSheet(
-            f"background:{C['panel']};border:1px solid {C['border']};"
+            f"background:{C['panel']};border:none;"
             f"border-radius:8px;")
         self._cloud_layout = QHBoxLayout(self._cloud_holder)
         self._cloud_layout.setContentsMargins(14, 10, 14, 10)
@@ -1051,7 +1051,7 @@ class ToolsTab(QWidget):
 
         ai_frame = QFrame()
         ai_frame.setStyleSheet(
-            f"background:{C['panel']};border:1px solid {C['border']};"
+            f"background:{C['panel']};border:none;"
             f"border-radius:8px;")
         afl = QGridLayout(ai_frame)
         afl.setContentsMargins(16, 14, 16, 14)
@@ -1064,7 +1064,7 @@ class ToolsTab(QWidget):
         self._ai_provider_combo = NoScrollComboBox()
         self._ai_provider_combo.setStyleSheet(
             f"background:{C['panel2']};color:{C['text']};"
-            f"border:1px solid {C['border']};border-radius:4px;padding:4px;")
+            f"border:none;border-radius:4px;padding:4px;")
         for key, label in PROVIDER_LABELS.items():
             self._ai_provider_combo.addItem(label, key)
             if key == saved_provider:
@@ -1080,7 +1080,7 @@ class ToolsTab(QWidget):
         self._ai_key_edit.setEchoMode(QLineEdit.EchoMode.Password)
         self._ai_key_edit.setStyleSheet(
             f"background:{C['panel2']};color:{C['text']};"
-            f"border:1px solid {C['border']};border-radius:4px;"
+            f"border:none;border-radius:4px;"
             f"padding:5px;font-family:'JetBrains Mono';font-size:11px;")
         afl.addWidget(key_lbl, 1, 0)
         afl.addWidget(self._ai_key_edit, 1, 1)
@@ -1477,7 +1477,7 @@ class ToolsTab(QWidget):
 
         cloud_frame = QFrame()
         cloud_frame.setStyleSheet(
-            f"background:{C['panel']};border:1px solid {C['border']};"
+            f"background:{C['panel']};border:none;"
             f"border-radius:8px;"
         )
         cloud_layout = QGridLayout(cloud_frame)
@@ -1523,7 +1523,7 @@ class ToolsTab(QWidget):
 
         update_frame = QFrame()
         update_frame.setStyleSheet(
-            f"background:{C['panel']};border:1px solid {C['border']};"
+            f"background:{C['panel']};border:none;"
             f"border-radius:8px;"
         )
         update_layout = QVBoxLayout(update_frame)
@@ -1582,7 +1582,7 @@ class ToolsTab(QWidget):
         s.add(SectionHeader("STAY UPDATED", C["green"]))
         stay_frame = QFrame()
         stay_frame.setStyleSheet(
-            f"background:{C['panel']};border:1px solid {C['border']};"
+            f"background:{C['panel']};border:none;"
             f"border-radius:10px;border-left:3px solid {C['green']};")
         sv = QVBoxLayout(stay_frame)
         sv.setContentsMargins(20, 16, 20, 16)

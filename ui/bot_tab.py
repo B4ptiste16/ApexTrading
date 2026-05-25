@@ -407,7 +407,7 @@ class BotTab(QWidget):
     def _build_signal_panel(self) -> QFrame:
         frame = QFrame()
         frame.setStyleSheet(
-            f"background:{C['panel']};border:1px solid {C['border']};"
+            f"background:{C['panel']};border:none;"
             f"border-radius:8px;border-top:2px solid {self.color};")
         layout = QGridLayout(frame)
         layout.setContentsMargins(14,10,14,10)
@@ -451,7 +451,7 @@ class BotTab(QWidget):
 
         frame = QFrame()
         frame.setStyleSheet(
-            f"background:{C['panel']};border:1px solid {C['border']};"
+            f"background:{C['panel']};border:none;"
             f"border-radius:8px;")
         fl = QGridLayout(frame)
         fl.setContentsMargins(14, 10, 14, 10)
@@ -470,7 +470,7 @@ class BotTab(QWidget):
         self._bot_prov_combo = NoScrollComboBox()
         self._bot_prov_combo.setStyleSheet(
             f"background:{C['panel2']};color:{C['text']};"
-            f"border:1px solid {C['border']};border-radius:4px;padding:4px;")
+            f"border:none;border-radius:4px;padding:4px;")
         saved_prov = cfg.get("provider", "anthropic")
         for key, label in PROVIDER_LABELS.items():
             self._bot_prov_combo.addItem(label, key)
@@ -486,7 +486,7 @@ class BotTab(QWidget):
         self._bot_model_combo = NoScrollComboBox()
         self._bot_model_combo.setStyleSheet(
             f"background:{C['panel2']};color:{C['text']};"
-            f"border:1px solid {C['border']};border-radius:4px;padding:4px;")
+            f"border:none;border-radius:4px;padding:4px;")
         fl.addWidget(model_lbl,              1, 2)
         fl.addWidget(self._bot_model_combo,  1, 3)
 
@@ -496,7 +496,7 @@ class BotTab(QWidget):
         self._bot_mode_combo = NoScrollComboBox()
         self._bot_mode_combo.setStyleSheet(
             f"background:{C['panel2']};color:{C['text']};"
-            f"border:1px solid {C['border']};border-radius:4px;padding:4px;")
+            f"border:none;border-radius:4px;padding:4px;")
         self._bot_mode_combo.addItem("Vision  (charts)", "vision")
         self._bot_mode_combo.addItem("Text-only  (no charts — works with Groq)", "text")
         saved_mode = cfg.get("mode", "vision")

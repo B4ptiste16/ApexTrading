@@ -211,7 +211,7 @@ class FriendsTab(QWidget):
     def _build_share_grid(self) -> QWidget:
         frame = QFrame()
         frame.setStyleSheet(
-            f"background:{C['panel']};border:1px solid {C['border']};"
+            f"background:{C['panel']};border:none;"
             f"border-radius:8px;")
         g = QGridLayout(frame)
         g.setContentsMargins(16, 12, 16, 12)
@@ -277,7 +277,7 @@ class FriendsTab(QWidget):
     def _input_css(self) -> str:
         return (
             f"background:{C['panel2']};color:{C['text']};"
-            f"border:1px solid {C['border']};border-radius:5px;"
+            f"border:none;border-radius:5px;"
             f"padding:6px 10px;font-family:'JetBrains Mono';font-size:11px;"
         )
 
@@ -360,7 +360,7 @@ class FriendsTab(QWidget):
     def _make_user_row(self, u: dict, action: str) -> QWidget:
         row = QFrame()
         row.setStyleSheet(
-            f"background:{C['panel2']};border:1px solid {C['border']};"
+            f"background:{C['panel2']};border:none;"
             f"border-radius:8px;")
         hl = QHBoxLayout(row)
         hl.setContentsMargins(14, 8, 14, 8)
@@ -445,7 +445,7 @@ class FriendsTab(QWidget):
         peer = e["peer"]
         row = QFrame()
         row.setStyleSheet(
-            f"background:{C['panel2']};border:1px solid {C['border']};"
+            f"background:{C['panel2']};border:none;"
             f"border-radius:8px;")
         # V4.0.0 — outer layout is now VERTICAL so an async friend-summary
         # line can stack underneath the header without breaking layout.
@@ -640,7 +640,7 @@ class _FriendProfileView(QWidget):
         # Header card (name + username + tier)
         self._header_card = QFrame()
         self._header_card.setStyleSheet(
-            f"background:{C['panel']};border:1px solid {C['border']};"
+            f"background:{C['panel']};border:none;"
             f"border-radius:10px;border-top:2px solid {C['purple']};")
         hv = QVBoxLayout(self._header_card)
         hv.setContentsMargins(20, 16, 20, 16)
@@ -761,7 +761,7 @@ class _FriendProfileView(QWidget):
     def _make_bot_row(self, b: dict, *, allow_install: bool) -> QWidget:
         row = QFrame()
         row.setStyleSheet(
-            f"background:{C['panel']};border:1px solid {C['border']};"
+            f"background:{C['panel']};border:none;"
             f"border-radius:8px;")
         v = QVBoxLayout(row)
         v.setContentsMargins(16, 12, 16, 12)

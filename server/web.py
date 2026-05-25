@@ -623,7 +623,10 @@ def dashboard_page(user: dict, tab: str = "overview") -> HTMLResponse:
   </div>
 
   <script>
-    const SIDES = ["LONG", "SHORT", "DAY"];
+    // V4.6.14 — dashboard sides come from the server (which discovers
+    // custom bots in the user's private_bots/ folder). Default to the
+    // built-ins until the first /web/api/status response arrives.
+    let SIDES = ["LONG", "SHORT", "DAY"];
     const fmt$ = n =>
       n == null ? "—"
         : (n >= 0 ? "+$" : "-$") +
@@ -817,6 +820,11 @@ def dashboard_page(user: dict, tab: str = "overview") -> HTMLResponse:
         const r = await fetch("/web/api/status");
         const j = await r.json();
         _lastState = j;
+        // V4.6.14 — adopt the server's sides list so custom bots
+        // (CRYPTO etc.) render alongside the built-ins.
+        if (Array.isArray(j.sides) && j.sides.length > 0) {{
+          SIDES = j.sides;
+        }}
         document.getElementById("srv").textContent = "OK";
         document.getElementById("srv").className = "v pos";
         const t = computeTotals(j);

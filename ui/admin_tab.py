@@ -19,14 +19,14 @@ from typing import Optional
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame,
-    QLineEdit, QGridLayout, QMessageBox, QComboBox, QSpinBox,
+    QLineEdit, QGridLayout, QMessageBox, QSpinBox,
     QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView,
     QInputDialog,
 )
 from PyQt6.QtGui import QColor
 
 from ui.styles  import COLORS
-from ui.widgets import ScrollContent, SectionHeader
+from ui.widgets import ScrollContent, SectionHeader, NoScrollComboBox
 
 C = COLORS
 
@@ -118,7 +118,7 @@ class AdminTab(QWidget):
             QAbstractItemView.EditTrigger.NoEditTriggers)
         self._users_table.setStyleSheet(
             f"background:{C['panel']};color:{C['text']};"
-            f"border:1px solid {C['border']};border-radius:6px;"
+            f"border:none;border-radius:6px;"
             f"gridline-color:{C['border']};font-size:11px;")
         self._users_table.setFixedHeight(280)
         s.add(self._users_table)
@@ -128,7 +128,7 @@ class AdminTab(QWidget):
         s.add(self._grant_section)
         grant_frame = QFrame()
         grant_frame.setStyleSheet(
-            f"background:{C['panel']};border:1px solid {C['border']};"
+            f"background:{C['panel']};border:none;"
             f"border-radius:8px;")
         g = QGridLayout(grant_frame)
         g.setContentsMargins(16, 14, 16, 14)
@@ -173,7 +173,7 @@ class AdminTab(QWidget):
         s.add(self._role_section)
         role_frame = QFrame()
         role_frame.setStyleSheet(
-            f"background:{C['panel']};border:1px solid {C['border']};"
+            f"background:{C['panel']};border:none;"
             f"border-radius:8px;")
         rg = QGridLayout(role_frame)
         rg.setContentsMargins(16, 14, 16, 14)
@@ -187,7 +187,7 @@ class AdminTab(QWidget):
         rg.addWidget(self._role_user_id, 0, 1)
 
         rg.addWidget(self._lbl("New role"), 1, 0)
-        self._role_combo = QComboBox()
+        self._role_combo = NoScrollComboBox()
         for r in _ROLES:
             self._role_combo.addItem(r)
         rg.addWidget(self._role_combo, 1, 1)
@@ -211,7 +211,7 @@ class AdminTab(QWidget):
         s.add(self._classify_section)
         classify_frame = QFrame()
         classify_frame.setStyleSheet(
-            f"background:{C['panel']};border:1px solid {C['border']};"
+            f"background:{C['panel']};border:none;"
             f"border-radius:8px;")
         cf = QGridLayout(classify_frame)
         cf.setContentsMargins(16, 14, 16, 14)
@@ -253,7 +253,7 @@ class AdminTab(QWidget):
         s.add(self._mod_section)
         mod_frame = QFrame()
         mod_frame.setStyleSheet(
-            f"background:{C['panel']};border:1px solid {C['border']};"
+            f"background:{C['panel']};border:none;"
             f"border-radius:8px;border-left:3px solid {C['red']};")
         mf = QGridLayout(mod_frame)
         mf.setContentsMargins(16, 14, 16, 14)
@@ -314,7 +314,7 @@ class AdminTab(QWidget):
         s.add(self._split_section)
         split_frame = QFrame()
         split_frame.setStyleSheet(
-            f"background:{C['panel']};border:1px solid {C['border']};"
+            f"background:{C['panel']};border:none;"
             f"border-radius:8px;border-left:3px solid {C['purple']};")
         sf = QGridLayout(split_frame)
         sf.setContentsMargins(16, 14, 16, 14)
@@ -381,7 +381,7 @@ class AdminTab(QWidget):
     def _input_css(self) -> str:
         return (
             f"background:{C['panel2']};color:{C['text']};"
-            f"border:1px solid {C['border']};border-radius:5px;"
+            f"border:none;border-radius:5px;"
             f"padding:6px 10px;font-family:'JetBrains Mono';font-size:11px;"
         )
 

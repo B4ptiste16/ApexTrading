@@ -34,7 +34,7 @@ class UniverseCard(QFrame):
         super().__init__(parent)
         self.side = side
         self.setStyleSheet(
-            f"QFrame{{background:{C['panel']};border:1px solid {C['border']};"
+            f"QFrame{{background:{C['panel']};border:none;"
             f"border-radius:8px;}}")
         v = QVBoxLayout(self)
         v.setContentsMargins(12, 10, 12, 10)

@@ -670,7 +670,7 @@ class MakeBotTab(QWidget):
         # ── Provider + Model + Key form ─────────────────────────────
         form = QFrame()
         form.setStyleSheet(
-            f"background:{C['panel']};border:1px solid {C['border']};"
+            f"background:{C['panel']};border:none;"
             f"border-radius:8px;")
         fg = QGridLayout(form)
         fg.setContentsMargins(16, 14, 16, 14)
@@ -752,7 +752,7 @@ class MakeBotTab(QWidget):
         self._desc = QPlainTextEdit()
         self._desc.setStyleSheet(
             f"background:{C['panel2']};color:{C['text']};"
-            f"border:1px solid {C['border']};border-radius:6px;"
+            f"border:none;border-radius:6px;"
             f"padding:10px;font-family:'JetBrains Mono';font-size:11px;")
         self._desc.setMinimumHeight(160)
         self._desc.setPlaceholderText(
@@ -780,7 +780,7 @@ class MakeBotTab(QWidget):
         self._code = QPlainTextEdit()
         self._code.setStyleSheet(
             f"background:{C['panel2']};color:{C['text']};"
-            f"border:1px solid {C['border']};border-radius:6px;"
+            f"border:none;border-radius:6px;"
             f"padding:10px;font-family:'JetBrains Mono';font-size:11px;")
         self._code.setMinimumHeight(240)
         self._code.setPlaceholderText(
@@ -820,7 +820,7 @@ class MakeBotTab(QWidget):
     def _input_css(self) -> str:
         return (
             f"background:{C['panel2']};color:{C['text']};"
-            f"border:1px solid {C['border']};border-radius:5px;"
+            f"border:none;border-radius:5px;"
             f"padding:6px 10px;font-family:'JetBrains Mono';font-size:11px;"
         )
 
