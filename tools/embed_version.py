@@ -43,5 +43,19 @@ def main():
             print(f"[embed_version] installer.iss MyAppVersion -> {version}")
     print(f"[embed_version] {OUT_TOP.name} + {OUT_CORE.name} -> {version}")
 
+    # V4.6.5 — nuke stale dist/APEX/. PyInstaller's --clean wipes its
+    # *build cache* but leaves dist/ intact, so an unchanged
+    # version.json gets bundled into every "fresh" build. Every
+    # release v4.6.1 → v4.6.4 shipped with the v4.6.0 version.json
+    # because of this. Wiping the output folder forces PyInstaller
+    # to regenerate it from current source on the next build.
+    import shutil
+    dist_apex = ROOT / "dist" / "APEX"
+    if dist_apex.exists():
+        shutil.rmtree(dist_apex, ignore_errors=True)
+        print(f"[embed_version] nuked stale dist/APEX/ — next PyInstaller "
+              f"build will regenerate it from current source")
+
+
 if __name__ == "__main__":
     main()
