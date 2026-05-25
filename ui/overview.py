@@ -1203,30 +1203,118 @@ class ToolsTab(QWidget):
             if saved_sides and not missing:
                 self.keys_msg.setText(
                     f"✓ Keys saved for: {', '.join(saved_sides)}  "
-                    f"— bots will use them on next start")
+                    f"— syncing to APEX server…")
                 self.keys_msg.setStyleSheet(f"color:{C['green']};font-size:11px;")
             elif saved_sides:
                 self.keys_msg.setText(
                     f"✓ Saved {', '.join(saved_sides)}  "
-                    f"(⚠ incomplete slots above were skipped)")
+                    f"(⚠ incomplete slots above were skipped) — syncing…")
                 self.keys_msg.setStyleSheet(f"color:{C['orange']};font-size:11px;")
             elif not new_writes:
                 self.keys_msg.setText(
                     "⚠  Nothing saved — assign a bot and fill key + secret first.")
                 self.keys_msg.setStyleSheet(f"color:{C['orange']};font-size:11px;")
+                _QT.singleShot(6000, lambda: self.keys_msg.setText(""))
+                return
             else:
                 self.keys_msg.setText(
                     f"⚠  Save may have failed — keys not found in .env  "
                     f"({D.ENV_FILE})")
                 self.keys_msg.setStyleSheet(f"color:{C['red']};font-size:11px;")
+                _QT.singleShot(6000, lambda: self.keys_msg.setText(""))
+                return
 
-            _QT.singleShot(6000, lambda: self.keys_msg.setText(""))
+            # V4.6.1 — auto-sync to APEX server so cloud bots immediately
+            # see the new keys (previously the user had to click "Sync keys
+            # to APEX server" separately, which was easy to miss and caused
+            # the "MUST ASSIGN API KEY IN TOOLS" error from cloud bot_runner).
+            self._auto_sync_after_slot_save(saved_sides)
 
         except Exception as e:
             self.keys_msg.setText(f"✗ Save failed: {e}")
             self.keys_msg.setStyleSheet(f"color:{C['red']};font-size:11px;")
             import traceback
             print(f"[save-alpaca-slots] {traceback.format_exc()}")
+
+    def _auto_sync_after_slot_save(self, saved_sides: list[str]):
+        """V4.6.1 — push the freshly-saved keys to the APEX server in a
+        background thread so cloud bots get them without a manual sync
+        click. Silent no-op if the user isn't signed in (the local save
+        already succeeded, that's the important part)."""
+        from PyQt6.QtCore import QThread, pyqtSignal, QTimer as _QT
+        try:
+            from ui.login import load_auth, load_server_url
+        except Exception:
+            self.keys_msg.setText(
+                f"✓ Saved locally for: {', '.join(saved_sides)} "
+                f"(server sync skipped — login module unavailable)")
+            self.keys_msg.setStyleSheet(f"color:{C['orange']};font-size:11px;")
+            _QT.singleShot(8000, lambda: self.keys_msg.setText(""))
+            return
+
+        stored = load_auth() or {}
+        token  = stored.get("token")
+        if not token:
+            self.keys_msg.setText(
+                f"✓ Saved locally for: {', '.join(saved_sides)}  "
+                f"(not signed in — cloud bots will get keys after you sign in & sync)")
+            self.keys_msg.setStyleSheet(f"color:{C['orange']};font-size:11px;")
+            _QT.singleShot(9000, lambda: self.keys_msg.setText(""))
+            return
+
+        all_keys = D.read_env_keys()
+        payload  = {k: v for k, v in all_keys.items() if v}
+        if not payload:
+            return  # nothing to send (shouldn't happen — we just verified saves)
+
+        server_url = load_server_url()
+
+        class _AutoSyncWorker(QThread):
+            done = pyqtSignal(bool, str, list)
+
+            def __init__(self, url, tok, body, sides):
+                super().__init__()
+                self.url, self.tok, self.body, self.sides = url, tok, body, sides
+
+            def run(self):
+                import requests
+                try:
+                    r = requests.put(
+                        f"{self.url}/credentials",
+                        headers={"Authorization": f"Bearer {self.tok}"},
+                        json=self.body, timeout=12,
+                    )
+                    if r.ok:
+                        n = len(r.json().get("fields", []))
+                        self.done.emit(True,
+                            f"{n} key(s) encrypted on server", self.sides)
+                    else:
+                        self.done.emit(False,
+                            f"server error {r.status_code}", self.sides)
+                except Exception as ex:
+                    self.done.emit(False, str(ex), self.sides)
+
+        # Keep a ref on self so the QThread isn't garbage-collected mid-flight
+        self._slot_sync_worker = _AutoSyncWorker(
+            server_url, token, payload, saved_sides)
+        self._slot_sync_worker.done.connect(self._on_auto_sync_done)
+        self._slot_sync_worker.start()
+
+    def _on_auto_sync_done(self, ok: bool, msg: str, saved_sides: list):
+        from PyQt6.QtCore import QTimer as _QT
+        sides_str = ", ".join(saved_sides) if saved_sides else "keys"
+        if ok:
+            self.keys_msg.setText(
+                f"✓ {sides_str} saved locally AND synced to APEX server "
+                f"({msg}) — cloud bots ready")
+            self.keys_msg.setStyleSheet(f"color:{C['green']};font-size:11px;")
+            _QT.singleShot(8000, lambda: self.keys_msg.setText(""))
+        else:
+            self.keys_msg.setText(
+                f"✓ {sides_str} saved locally  ⚠ server sync failed: {msg}. "
+                f"Click 'Sync keys to APEX server' to retry.")
+            self.keys_msg.setStyleSheet(f"color:{C['orange']};font-size:11px;")
+            _QT.singleShot(12000, lambda: self.keys_msg.setText(""))
 
     def _save_manual_keys(self):
         from PyQt6.QtCore import QTimer as _QT
