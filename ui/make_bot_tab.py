@@ -224,34 +224,142 @@ def _load_skeleton_guide() -> str:
     return ""
 
 
+_TRADE_TEMPLATE = '''"""
+APEX-BOT-META
+name:               {{name}}
+description:        {{one-line pitch}}
+method:             {{plain-english strategy summary}}
+ai_used:            {{provider}}
+compatible_models:  {{provider, others}}
+asset_type:         {{stocks|crypto|etfs|futures|options}}
+universe:           {{universe_file.txt}}
+requirements:       {{pip pkgs beyond APEX bundle, comma-sep, or empty}}
+"""
+
+# YOU MAY EDIT ONLY THE decide(...) FUNCTION BELOW.
+# The boilerplate above and the BotRunner call at the bottom are
+# fixed; changing them breaks the runtime contract.
+
+import os
+import pandas as pd
+import numpy as np
+from core.bot_framework import BotRunner
+
+
+def decide(symbol: str,
+           bars: pd.DataFrame,
+           position: dict,
+           account: dict) -> dict:
+    """Return ONE decision for this symbol on this tick.
+
+    Inputs (provided by the framework — do NOT fetch your own data):
+      symbol    str            e.g. "BTC-USD"  (yfinance format)
+      bars      pd.DataFrame   OHLCV, single-level columns, ascending.
+                               Columns: Open, High, Low, Close, Volume
+      position  dict           {"qty": float, "side": "long"|"short"|"flat",
+                                "avg_entry": float}
+      account   dict           {"cash": float, "equity": float,
+                                "buying_power": float}
+
+    Output schema — return EXACTLY one of these shapes:
+      {"action": "BUY",   "qty": int|float, "reason": str}  # open/add long
+      {"action": "SELL",  "qty": int|float, "reason": str}  # close long
+      {"action": "SHORT", "qty": int|float, "reason": str}  # open/add short
+      {"action": "COVER", "qty": int|float, "reason": str}  # close short
+      {"action": "HOLD",                    "reason": str}
+
+    Risk notes:
+      • account["buying_power"] caps how big BUY/SHORT can be.
+      • Don't open SHORT when position["side"] == "long"; SELL first.
+      • Crypto bots: SHORT means SELL — Alpaca does not allow shorting
+        crypto, so for asset_type=crypto, only emit BUY / SELL / HOLD.
+      • Quantity is in WHOLE units for stocks (e.g. 10 shares) and
+        FRACTIONAL allowed for crypto (e.g. 0.05 BTC).
+    """
+    # ── STRATEGY: customise THIS BLOCK ONLY ──────────────────────
+    close = bars["Close"].squeeze()           # clean Series
+    sma_short = close.rolling(20).mean().iloc[-1]
+    sma_long  = close.rolling(50).mean().iloc[-1]
+    price     = float(close.iloc[-1])
+
+    if pd.isna(sma_short) or pd.isna(sma_long):
+        return {"action": "HOLD", "reason": "not enough history"}
+
+    if position["side"] == "flat" and sma_short > sma_long:
+        # Size to ~5% of buying power, at least 1 unit
+        qty = max(1, int(account["buying_power"] * 0.05 / price))
+        return {"action": "BUY",
+                "qty":    qty,
+                "reason": f"sma20 ({sma_short:.2f}) > sma50 ({sma_long:.2f})"}
+    if position["side"] == "long" and sma_short < sma_long:
+        return {"action": "SELL",
+                "qty":    position["qty"],
+                "reason": "trend reversal, exit long"}
+    return {"action": "HOLD",
+            "reason": f"sma20={sma_short:.2f} sma50={sma_long:.2f} flat-or-trending"}
+    # ── END STRATEGY BLOCK ───────────────────────────────────────
+
+
+if __name__ == "__main__":
+    BotRunner(
+        asset_type="stocks",
+        default_symbols=["AAPL", "NVDA", "MSFT"],
+        universe_path=os.environ.get("APEX_BOT_UNIVERSE",
+                                     "longbot_universe.txt"),
+        tick_seconds=300,
+        bar_period="6mo",
+        bar_interval="1d",
+        name="custom-bot",
+    ).run(decide)
+'''
+
+
 _SYSTEM_PROMPT_TRADE = (
-    "You are a senior algorithmic-trading engineer writing a single "
-    "Python file that runs inside the APEX Trading Platform as a "
-    "TRADING bot. The user describes the strategy and you produce "
-    "ONLY the .py file contents — no markdown, no explanations, no "
-    "triple-backtick fences. The file MUST follow the APEX bot "
-    "contract described below. If the user's description is "
-    "ambiguous, make reasonable defaults and add a comment near the "
-    "top explaining your choices.\n\n"
-    "═══ APEX BOT CONTRACT ═══\n\n"
+    "You are a senior algorithmic-trading engineer customising a "
+    "Python trading bot for the APEX Trading Platform. The user "
+    "describes the strategy and you produce ONLY the .py file "
+    "contents — no markdown, no explanations, no triple-backtick "
+    "fences.\n\n"
+    "**Critical: you MUST start from the template below and modify ONLY "
+    "two things**:\n"
+    "  1. The {{placeholders}} inside the APEX-BOT-META docstring (name, "
+    "description, method, ai_used, compatible_models, asset_type, "
+    "universe, requirements). Replace EVERY {{placeholder}} with a real value.\n"
+    "  2. The body of the `decide(...)` function between the\n"
+    "     `# ── STRATEGY: customise THIS BLOCK ONLY ──` and\n"
+    "     `# ── END STRATEGY BLOCK ──` markers.\n"
+    "  3. The `BotRunner(...)` kwargs at the bottom (asset_type, "
+    "default_symbols, universe_path, tick_seconds, bar_period, "
+    "bar_interval, name) to match the strategy.\n\n"
+    "**Do NOT** add `if __name__ == '__main__'` logic anywhere else. "
+    "**Do NOT** import alpaca, yfinance, or any market-data library — "
+    "the framework hands you clean `bars` and a `position` dict. "
+    "**Do NOT** define a `main()` function — `BotRunner.run(decide)` "
+    "is the entry point.\n\n"
+    "═══ REFERENCE TEMPLATE (start from this) ═══\n\n"
+    "{template}\n\n"
+    "═══ APEX BOT CONTRACT (background) ═══\n\n"
     "{guide}\n\n"
-    "═══ OUTPUT RULES ═══\n\n"
-    "• Output ONLY raw Python source. No prose before or after.\n"
-    "• The FIRST docstring of the file MUST be the APEX-BOT-META\n"
-    "  block. Include every field shown in section 1a of the contract:\n"
-    "  name, description, method, ai_used, compatible_models,\n"
-    "  asset_type, universe, requirements. NEVER omit this block.\n"
-    "• ai_used MUST be the literal provider that is generating this\n"
-    "  bot (e.g. 'groq', 'anthropic', 'openai', 'gemini').\n"
-    "• compatible_models is a comma-separated list of providers this\n"
-    "  bot can also run under (default to ai_used if unsure).\n"
-    "• requirements is a comma-separated list of pip packages this\n"
-    "  bot needs that are NOT in APEX's bundled set. If you `import\n"
-    "  sklearn`, you MUST list 'scikit-learn' here. If your bot only\n"
-    "  uses bundled packages, leave the field empty after the colon.\n"
-    "• Use `print(..., flush=True)` for all logs.\n"
-    "• Read keys from os.environ — never hardcode.\n"
-    "• Define a top-level main() function that contains the bot loop."
+    "═══ DECISION OUTPUT SCHEMA ═══\n\n"
+    "`decide` MUST return exactly one of:\n"
+    '  {{"action": "BUY",   "qty": <number>, "reason": "<text>"}}\n'
+    '  {{"action": "SELL",  "qty": <number>, "reason": "<text>"}}\n'
+    '  {{"action": "SHORT", "qty": <number>, "reason": "<text>"}}\n'
+    '  {{"action": "COVER", "qty": <number>, "reason": "<text>"}}\n'
+    '  {{"action": "HOLD",                  "reason": "<text>"}}\n'
+    "Anything else (None, raw numbers, lists) is rejected by the runner.\n\n"
+    "═══ FILL-IN RULES ═══\n\n"
+    "• ai_used MUST be the literal provider that is generating this "
+    "bot (e.g. 'groq', 'anthropic', 'openai', 'gemini').\n"
+    "• If your strategy needs an extra pip package (e.g. scikit-learn, "
+    "ccxt, ta), declare it in requirements: AND import it inside "
+    "decide() — never at module level (so a missing dep doesn't kill "
+    "the bot before the preflight installer can fix it).\n"
+    "• asset_type='crypto' bots must NEVER emit SHORT or COVER — "
+    "Alpaca disallows shorting crypto. Use BUY / SELL only.\n"
+    "• Size qty defensively: `int(account['buying_power'] * pct / price)` "
+    "with a `max(1, ...)` floor for stocks.\n"
+    "• Never hardcode credentials. The framework handles env vars."
 )
 
 
@@ -289,13 +397,11 @@ def _make_system_prompt(mode: str = "trade") -> str:
     mode: "trade" for a trading bot, "universe" for a universe-file
           generator. See ui controls."""
     guide = _load_skeleton_guide() or (
-        "(Bot skeleton guide unavailable. Required contract: a single "
-        "main() function at module level, reads ALPACA_API_KEY / "
-        "ALPACA_SECRET_KEY / ANTHROPIC_API_KEY from os.environ, uses "
-        "print(..., flush=True) for logs.)")
-    tmpl = (_SYSTEM_PROMPT_UNIVERSE if mode == "universe"
-            else _SYSTEM_PROMPT_TRADE)
-    return tmpl.format(guide=guide)
+        "(Bot skeleton guide unavailable.)")
+    if mode == "universe":
+        return _SYSTEM_PROMPT_UNIVERSE.format(guide=guide)
+    return _SYSTEM_PROMPT_TRADE.format(
+        guide=guide, template=_TRADE_TEMPLATE)
 
 
 # ── Worker thread for the API call ───────────────────────────────────

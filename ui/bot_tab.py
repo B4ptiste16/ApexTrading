@@ -168,6 +168,12 @@ class BotTab(QWidget):
         self.bot_ctrl = BotProcessWidget(self.side, self.script)
         s.add(self.bot_ctrl)
 
+        # V4.6.5 — per-bot universe picker. Lists every *_universe.txt
+        # discovered by core.data, filtered to those whose asset_type
+        # is compatible with this bot's asset_type (read from its
+        # APEX-BOT-META block, falling back to "stocks" for built-ins).
+        self._build_universe_picker(s)
+
         # Adjustable AI confidence threshold (live, no restart)
         conf_row = QHBoxLayout()
         conf_lbl = QLabel("Min AI confidence to trade:")
@@ -551,6 +557,139 @@ class BotTab(QWidget):
         D.set_bot_min_conf(self.side, val)
         self.conf_saved.setText("saved ✓")
         QTimer.singleShot(2000, lambda: self.conf_saved.setText(""))
+
+    # ── V4.6.5 — per-bot universe picker ─────────────────────────
+
+    def _build_universe_picker(self, scroll):
+        """Dropdown that lists every *_universe.txt compatible with
+        this bot's asset_type. Saves selection per-bot in settings
+        (keys 'bot_universe_<SIDE>') and exposes it to the bot
+        subprocess via APEX_BOT_UNIVERSE env var (see widgets.py)."""
+        from PyQt6.QtWidgets import QHBoxLayout as _H, QLabel as _L, QWidget as _W
+        try:
+            from ui.widgets import NoScrollComboBox as _Combo
+        except Exception:
+            from PyQt6.QtWidgets import QComboBox as _Combo  # type: ignore
+
+        my_type = self._bot_asset_type()
+        compat  = self._compatible_universes(my_type)
+        cur_sel = D.load_settings().get(
+            f"bot_universe_{self.side.upper()}", "")
+
+        row = _H()
+        lbl = _L("Universe:")
+        lbl.setStyleSheet(f"color:{C['muted']};font-size:11px;")
+        self._universe_combo = _Combo()
+        # Always offer a "(default)" entry so the bot uses whatever
+        # path its source code or META declares.
+        self._universe_combo.addItem("(use bot's default)", "")
+        selected_idx = 0
+        for i, (path, label, ok) in enumerate(compat, start=1):
+            self._universe_combo.addItem(label, str(path))
+            if str(path) == cur_sel:
+                selected_idx = i
+            if not ok:
+                # Mark incompatible options as disabled-looking by
+                # appending a note (Qt's setItemData with role can
+                # do better, but this is simplest).
+                pass
+        self._universe_combo.setCurrentIndex(selected_idx)
+        self._universe_combo.currentIndexChanged.connect(
+            self._on_universe_changed)
+        self._universe_saved = _L("")
+        self._universe_saved.setStyleSheet(
+            f"color:{C['green']};font-size:10px;")
+
+        hint = _L(f"asset_type={my_type or 'unknown'}  ·  "
+                  f"filters to compatible universes")
+        hint.setStyleSheet(f"color:{C['muted']};font-size:10px;")
+
+        row.addWidget(lbl)
+        row.addWidget(self._universe_combo)
+        row.addWidget(self._universe_saved)
+        row.addWidget(hint)
+        row.addStretch()
+        w = _W(); w.setLayout(row)
+        scroll.add(w)
+
+    def _bot_asset_type(self) -> str:
+        """Read this bot's asset_type. Built-ins default to stocks;
+        custom bots read it from their META block via script path."""
+        # Built-in mapping
+        builtin = {"LONG": "stocks", "SHORT": "stocks", "DAY": "stocks"}
+        if self.side.upper() in builtin:
+            return builtin[self.side.upper()]
+        # Custom bot — parse META block
+        if not self.script:
+            return ""
+        try:
+            from core.bot_meta import parse_meta
+            src = open(self.script, "r", encoding="utf-8").read()
+            return (parse_meta(src) or {}).get("asset_type", "")
+        except Exception:
+            return ""
+
+    def _compatible_universes(self, my_type: str) -> list:
+        """Return list of (path, label, ok) tuples. `ok` flags
+        compatibility — incompatible universes are still listed so
+        the user can see they exist, but pre-filtered out unless
+        my_type is unknown."""
+        out = []
+        try:
+            files = D.discover_universe_files()
+        except Exception:
+            return out
+        for side, path in files.items():
+            u_type = self._universe_asset_type(path)
+            ok = (not my_type) or (not u_type) or (u_type == my_type)
+            label = f"{side} ({u_type or 'unspecified'})"
+            if not ok:
+                label += "  · incompatible"
+            out.append((path, label, ok))
+        # Show compatible first, then alphabetical
+        out.sort(key=lambda t: (not t[2], t[1]))
+        # Drop incompatible entries entirely if we know our type
+        if my_type:
+            out = [t for t in out if t[2]]
+        return out
+
+    @staticmethod
+    def _universe_asset_type(path) -> str:
+        """A universe .txt may declare its asset_type via a leading
+        comment line like:    # asset_type: crypto
+        Returns "" if unknown."""
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    if not line.startswith("#"):
+                        # We hit the first ticker — no header found
+                        return ""
+                    low = line.lstrip("#").strip().lower()
+                    if low.startswith("asset_type"):
+                        _, _, v = low.partition(":")
+                        return v.strip()
+        except Exception:
+            pass
+        return ""
+
+    def _on_universe_changed(self, idx: int):
+        path = self._universe_combo.currentData() or ""
+        try:
+            s = D.load_settings()
+            s[f"bot_universe_{self.side.upper()}"] = path
+            import json as _j
+            with open(D.SETTINGS_FILE, "w", encoding="utf-8") as f:
+                _j.dump(s, f, indent=2)
+            self._universe_saved.setText("saved ✓ (next bot start)")
+            QTimer.singleShot(3000,
+                              lambda: self._universe_saved.setText(""))
+        except Exception as e:
+            self._universe_saved.setText(f"save failed: {e}")
+            self._universe_saved.setStyleSheet(
+                f"color:{C['red']};font-size:10px;")
 
     def _on_minscore_changed(self, val: float):
         D.set_bot_min_score("LONG", val)

@@ -155,7 +155,9 @@ STATE_FILE    = "shortv2_state.json"
 LOG_FILE      = "shortv2_trade_log.jsonl"
 ANALYSIS_FILE = "shortv2_analysis.txt"
 CHART_DIR     = "shortv2_charts"
-UNIVERSE_FILE = "shortbot_universe.txt"  # managed by universe_manager.py
+UNIVERSE_FILE = os.environ.get(
+    "APEX_BOT_UNIVERSE", "shortbot_universe.txt")  # managed by universe_manager.py
+# V4.6.5 — APEX_BOT_UNIVERSE env var lets the bot tab override the path.
 
 
 # =========================================================

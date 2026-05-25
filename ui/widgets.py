@@ -422,6 +422,18 @@ class BotProcessWidget(QWidget):
         # Pass DATA_DIR explicitly so bot scripts' load_dotenv() always
         # finds the right .env regardless of working directory.
         env.insert("APEX_DATA_DIR", str(DATA_DIR))
+        # V4.6.5 — per-bot universe override. Bot tab writes this
+        # setting when the user picks a universe; BotRunner and the
+        # built-in bots both honor APEX_BOT_UNIVERSE if set, else
+        # fall back to their hardcoded default universe filename.
+        try:
+            import core.data as _D
+            _u = _D.load_settings().get(
+                f"bot_universe_{self.side.upper()}", "")
+            if _u:
+                env.insert("APEX_BOT_UNIVERSE", str(_u))
+        except Exception:
+            pass
         self.process.setProcessEnvironment(env)
 
         if frozen:

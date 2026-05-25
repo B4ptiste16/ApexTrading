@@ -95,7 +95,9 @@ load_dotenv()
 # -- Universe file -----------------------------------------
 # Edit daybot_universe.txt to add/remove tickers at any time.
 # One ticker per line. Lines starting with # are ignored.
-UNIVERSE_FILE = "daybot_universe.txt"
+UNIVERSE_FILE = os.environ.get(
+    "APEX_BOT_UNIVERSE", "daybot_universe.txt")
+# V4.6.5 — APEX_BOT_UNIVERSE env var lets the bot tab override the path.
 
 DEFAULT_UNIVERSE = """# APEX DAY BOT  -  Universe
 # Edit freely. One ticker per line. # = comment.

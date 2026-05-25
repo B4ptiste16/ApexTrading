@@ -214,7 +214,11 @@ STATE_FILE    = "longv2_state.json"
 LOG_FILE      = "longv2_trade_log.jsonl"
 ANALYSIS_FILE = "longv2_analysis.txt"
 CHART_DIR     = "longv2_charts"
-UNIVERSE_FILE = "longbot_universe.txt"   # managed by universe_manager.py
+UNIVERSE_FILE = os.environ.get(
+    "APEX_BOT_UNIVERSE", "longbot_universe.txt")   # managed by universe_manager.py
+# V4.6.5 — bot tab can override which universe this bot reads via
+# the APEX_BOT_UNIVERSE env var so users can repoint LONG to a custom
+# universe (e.g. an ETF basket) without editing the source file.
 
 
 # =========================================================
