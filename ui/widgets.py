@@ -467,20 +467,41 @@ class BotProcessWidget(QWidget):
         # Pass DATA_DIR explicitly so bot scripts' load_dotenv() always
         # finds the right .env regardless of working directory.
         env.insert("APEX_DATA_DIR", str(DATA_DIR))
-        # V4.6.5 — per-bot universe override. Bot tab writes this
-        # setting when the user picks a universe; BotRunner and the
-        # built-in bots both honor APEX_BOT_UNIVERSE if set, else
-        # fall back to their hardcoded default universe filename.
+        # V4.6.5 — per-bot universe override.
+        # V4.6.13 — resolve the chosen UNIVERSE BOT (script_id) to its
+        # target .txt file at launch time. The bot reads that file as
+        # its universe. Falls back to the legacy 'bot_universe_<SIDE>'
+        # key (direct file path) for back-compat with older settings.
         try:
             import core.data as _D
-            _u = _D.load_settings().get(
-                f"bot_universe_{self.side.upper()}", "")
+            _s = _D.load_settings()
+            _u = ""
+            script_id = _s.get(
+                f"bot_universe_script_{self.side.upper()}", "")
+            if script_id:
+                # 'built-in' = use this bot's default universe file
+                if script_id == "built-in":
+                    _u = {
+                        "LONG":  "longbot_universe.txt",
+                        "SHORT": "shortbot_universe.txt",
+                        "DAY":   "daybot_universe.txt",
+                    }.get(self.side.upper(), "")
+                else:
+                    # Look up the universe bot's target from its
+                    # registry entry
+                    for entry in _s.get("universe_scripts", []) or []:
+                        if str(entry.get("id", "")) == script_id:
+                            _u = entry.get("target",
+                                           f"{script_id}_universe.txt")
+                            break
+            # Legacy fallback: direct file path stored under the old key
+            if not _u:
+                _u = _s.get(
+                    f"bot_universe_{self.side.upper()}", "")
             if _u:
                 env.insert("APEX_BOT_UNIVERSE", str(_u))
             # V4.6.8 — Alpaca paper/live mode propagation.
-            # BotRunner + built-in bots read APEX_ALPACA_MODE and
-            # construct TradingClient(paper=…) accordingly.
-            _amode = _D.load_settings().get("alpaca_mode", "paper")
+            _amode = _s.get("alpaca_mode", "paper")
             env.insert("APEX_ALPACA_MODE", str(_amode))
         except Exception:
             pass

@@ -561,10 +561,17 @@ class BotTab(QWidget):
     # ── V4.6.5 — per-bot universe picker ─────────────────────────
 
     def _build_universe_picker(self, scroll):
-        """Dropdown that lists every *_universe.txt compatible with
-        this bot's asset_type. Saves selection per-bot in settings
-        (keys 'bot_universe_<SIDE>') and exposes it to the bot
-        subprocess via APEX_BOT_UNIVERSE env var (see widgets.py)."""
+        """V4.6.13 — dropdown that lists every UNIVERSE BOT (script)
+        the user has registered, filtered by asset_type compatibility.
+        When the user picks a universe bot, this trading bot reads
+        from whatever .txt file that script writes (the script's
+        META.universe field). Decoupled from the Universe tab's RUN
+        dropdown — that one picks which script to EXECUTE, this one
+        picks which script's OUTPUT this trading bot consumes.
+
+        Stored as 'bot_universe_script_<SIDE>' in settings (id of the
+        chosen universe bot, or '' for default). The resolved target
+        file path is exported to the bot subprocess via APEX_BOT_UNIVERSE."""
         from PyQt6.QtWidgets import QHBoxLayout as _H, QLabel as _L, QWidget as _W
         try:
             from ui.widgets import NoScrollComboBox as _Combo
@@ -572,27 +579,24 @@ class BotTab(QWidget):
             from PyQt6.QtWidgets import QComboBox as _Combo  # type: ignore
 
         my_type = self._bot_asset_type()
-        compat  = self._compatible_universes(my_type)
+        # Each entry = (script_id, label, target_file_path, ok_compat)
+        compat  = self._compatible_universe_scripts(my_type)
         cur_sel = D.load_settings().get(
-            f"bot_universe_{self.side.upper()}", "")
+            f"bot_universe_script_{self.side.upper()}", "")
 
         row = _H()
-        lbl = _L("Universe:")
+        lbl = _L("Universe bot:")
         lbl.setStyleSheet(f"color:{C['muted']};font-size:11px;")
         self._universe_combo = _Combo()
-        # Always offer a "(default)" entry so the bot uses whatever
-        # path its source code or META declares.
-        self._universe_combo.addItem("(use bot's default)", "")
+        # Always offer a "(default)" entry — bot uses its hardcoded
+        # universe file (longbot_universe.txt, daybot_universe.txt, …).
+        self._universe_combo.addItem(
+            "(use this bot's own default universe)", "")
         selected_idx = 0
-        for i, (path, label, ok) in enumerate(compat, start=1):
-            self._universe_combo.addItem(label, str(path))
-            if str(path) == cur_sel:
+        for i, (script_id, label, target, ok) in enumerate(compat, start=1):
+            self._universe_combo.addItem(label, script_id)
+            if script_id == cur_sel:
                 selected_idx = i
-            if not ok:
-                # Mark incompatible options as disabled-looking by
-                # appending a note (Qt's setItemData with role can
-                # do better, but this is simplest).
-                pass
         self._universe_combo.setCurrentIndex(selected_idx)
         self._universe_combo.currentIndexChanged.connect(
             self._on_universe_changed)
@@ -601,16 +605,19 @@ class BotTab(QWidget):
             f"color:{C['green']};font-size:10px;")
 
         hint = _L(f"asset_type={my_type or 'unknown'}  ·  "
-                  f"filters to compatible universes")
+                  f"this bot reads from whichever universe bot you "
+                  f"assign here · run/update the universe in the "
+                  f"Universe tab")
         hint.setStyleSheet(f"color:{C['muted']};font-size:10px;")
+        hint.setWordWrap(True)
 
         row.addWidget(lbl)
         row.addWidget(self._universe_combo)
         row.addWidget(self._universe_saved)
-        row.addWidget(hint)
         row.addStretch()
         w = _W(); w.setLayout(row)
         scroll.add(w)
+        scroll.add(hint)
 
     def _bot_asset_type(self) -> str:
         """Read this bot's asset_type. Built-ins default to stocks;
@@ -629,29 +636,67 @@ class BotTab(QWidget):
         except Exception:
             return ""
 
-    def _compatible_universes(self, my_type: str) -> list:
-        """Return list of (path, label, ok) tuples. `ok` flags
-        compatibility — incompatible universes are still listed so
-        the user can see they exist, but pre-filtered out unless
-        my_type is unknown."""
+    def _compatible_universe_scripts(self, my_type: str) -> list:
+        """V4.6.13 — return list of (script_id, label, target_file, ok).
+        script_id  : settings key — '' for default, 'built-in' for
+                     universe_manager.py, slug for custom universe bots
+        label      : what shows in the dropdown
+        target_file: the .txt file this script writes to (the bot will
+                     read from this path)
+        ok         : True if asset_type compatible with this trading bot
+        Incompatible entries are filtered out when my_type is known."""
         out = []
+        # Built-in universe_manager rewrites THREE files (LONG/SHORT/DAY).
+        # The trading bot would use its own default file if it picks the
+        # built-in option, so we represent it as a single 'use built-in
+        # universe_manager scan' choice with the bot's default target.
+        builtin_target = {
+            "LONG":  "longbot_universe.txt",
+            "SHORT": "shortbot_universe.txt",
+            "DAY":   "daybot_universe.txt",
+        }.get(self.side.upper(), "")
+        out.append((
+            "built-in",
+            f"Built-in universe_manager  →  {builtin_target or '(no default for this bot)'}",
+            builtin_target,
+            True,  # built-in works for any built-in side
+        ))
+        # Custom universe bots registered via Make Bot
         try:
-            files = D.discover_universe_files()
+            s = D.load_settings()
+            scripts = s.get("universe_scripts", []) or []
         except Exception:
-            return out
-        for side, path in files.items():
-            u_type = self._universe_asset_type(path)
+            scripts = []
+        for entry in scripts:
+            if not isinstance(entry, dict):
+                continue
+            slug   = entry.get("id", "")
+            if not slug:
+                continue
+            label_name = entry.get("label", slug)
+            target = entry.get("target", "") or f"{slug}_universe.txt"
+            u_type = (entry.get("asset_type", "") or "").lower()
             ok = (not my_type) or (not u_type) or (u_type == my_type)
-            label = f"{side} ({u_type or 'unspecified'})"
+            label = f"{label_name}  →  rewrites {target}"
+            if u_type:
+                label += f"  (asset_type={u_type})"
             if not ok:
                 label += "  · incompatible"
-            out.append((path, label, ok))
-        # Show compatible first, then alphabetical
-        out.sort(key=lambda t: (not t[2], t[1]))
-        # Drop incompatible entries entirely if we know our type
+            out.append((slug, label, target, ok))
+        # Compatible first, then alphabetical; drop incompatible
+        # entirely if we know our asset_type.
+        out.sort(key=lambda t: (not t[3], t[1]))
         if my_type:
-            out = [t for t in out if t[2]]
+            out = [t for t in out if t[3]]
         return out
+
+    def _compatible_universes(self, my_type: str) -> list:
+        """v4.6.13 — kept for back-compat with any caller still using
+        the file-list shape. Delegates to the new script-based picker
+        and re-flattens its target files."""
+        return [(t[2], t[1], t[3])
+                for t in self._compatible_universe_scripts(my_type)
+                if t[2]]
 
     @staticmethod
     def _universe_asset_type(path) -> str:
@@ -676,15 +721,22 @@ class BotTab(QWidget):
         return ""
 
     def _on_universe_changed(self, idx: int):
-        path = self._universe_combo.currentData() or ""
+        """V4.6.13 — stores the chosen universe BOT id (not file path).
+        widgets.py BotProcessWidget.start_bot() resolves the id to the
+        actual target file at launch time, so even if the user later
+        changes the universe bot's META.universe field, the trading
+        bot tracks it automatically."""
+        script_id = self._universe_combo.currentData() or ""
         try:
             s = D.load_settings()
-            s[f"bot_universe_{self.side.upper()}"] = path
+            s[f"bot_universe_script_{self.side.upper()}"] = script_id
             import json as _j
             with open(D.SETTINGS_FILE, "w", encoding="utf-8") as f:
                 _j.dump(s, f, indent=2)
-            self._universe_saved.setText("saved ✓ (next bot start)")
-            QTimer.singleShot(3000,
+            label = self._universe_combo.currentText()
+            self._universe_saved.setText(
+                f"saved ✓ (next start: {label[:30]}…)")
+            QTimer.singleShot(4000,
                               lambda: self._universe_saved.setText(""))
         except Exception as e:
             self._universe_saved.setText(f"save failed: {e}")
