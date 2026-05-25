@@ -705,7 +705,10 @@ class MoreBotsTab(QWidget):
             f"background:{C['panel2']};border:1px solid {color}30;"
             f"border-radius:10px;border-top:2px solid {color};"
         )
-        card.setFixedWidth(220)
+        # V4.6.9 — wider card so all three buttons (Silence + Remove +
+        # Delete) fit without clipping. Previously 220px forced "Remove"
+        # to render as "emov" on custom bots.
+        card.setFixedWidth(260)
         vl = QVBoxLayout(card)
         vl.setContentsMargins(14, 12, 14, 12)
         vl.setSpacing(6)
@@ -767,13 +770,20 @@ class MoreBotsTab(QWidget):
         # file from disk + every settings entry referencing this bot
         # + the registry entry + the tab. Shown in all modes (active /
         # silenced / available) so the user can always reach it.
+        # V4.6.9 — switched from emoji-only "🗑" (which was clipping
+        # and unclear) to "Delete" text on a slightly wider button.
         if is_custom:
-            del_btn = QPushButton("🗑")
+            del_btn = QPushButton("Delete")
             del_btn.setObjectName("dangerBtn")
             del_btn.setToolTip(f"Delete {side} permanently — removes the .py "
                               f"file from your bot library and clears the "
                               f"registry entry. Cannot be undone.")
-            del_btn.setFixedWidth(28)
+            del_btn.setStyleSheet(
+                f"QPushButton#dangerBtn{{"
+                f"background:{C['red']}20;color:{C['red']};"
+                f"border:1px solid {C['red']}80;border-radius:4px;"
+                f"padding:4px 8px;font-size:10px;font-weight:600;}}"
+                f"QPushButton#dangerBtn:hover{{background:{C['red']}50;}}")
             del_btn.clicked.connect(lambda _, s=side: self._delete_bot(s))
             btn_row.addWidget(del_btn)
 
@@ -809,21 +819,30 @@ class MoreBotsTab(QWidget):
         QTimer.singleShot(0, self.refresh)
 
     def _delete_bot(self, side: str):
-        """V4.6.8 — hard delete a custom bot. Removes:
-          1. The .py / .apex file on disk
-          2. The bot_registry custom entry
-          3. The active/silenced membership
-          4. The per-bot universe override setting
-          5. The bot tab (if currently shown)
-          6. The transition_state entry (so cleanup doesn't re-trigger)
-        Asks for confirmation first."""
+        """V4.6.9 — hard delete a custom bot. Order matters here:
+          1. Confirm with the user
+          2. Wipe disk + registry + settings + transition state
+             ALL BEFORE emitting any signal, so the ApexWindow's
+             _on_bot_removed handler (which re-loads + re-writes the
+             registry) sees the cleaned state and can't put the bot
+             back. Previous v4.6.8 ordering raced with that handler.
+          3. Stop the bot tab via emit (queued; handler reads fresh registry)
+          4. Refresh UI
+
+        Verbose logging at every step so if anything fails we can
+        actually diagnose from the console / apex_crash.log."""
         from PyQt6.QtWidgets import QMessageBox as _QMB
+        from pathlib import Path as _P
+        import json as _j
+
         # Look up the bot's display label + script path
         reg = _load_registry()
         entry = next((c for c in reg.get("custom", [])
                       if str(c.get("id", "")).upper() == side.upper()), None)
         label  = entry.get("label", side) if entry else side
         script = entry.get("script", "")   if entry else ""
+        print(f"[delete-bot] === BEGIN delete '{side}' "
+              f"(label='{label}', script='{script}') ===", flush=True)
 
         confirm = _QMB.question(
             self.window(),
@@ -840,16 +859,11 @@ class MoreBotsTab(QWidget):
             _QMB.StandardButton.No,
         )
         if confirm != _QMB.StandardButton.Yes:
+            print(f"[delete-bot] user cancelled", flush=True)
             return
 
-        # 1. Stop the bot tab (and stop the running bot if active)
-        try:
-            self.bot_removed.emit(side)
-        except Exception:
-            pass
-
-        # 2. Delete the .py / .apex file (and any sibling alt-extension)
-        from pathlib import Path as _P
+        # ── Step 1: delete the .py / .apex file ─────────────────
+        deleted_files = []
         if script:
             for path in [_P(script),
                          _P(script).with_suffix(".py"),
@@ -857,54 +871,106 @@ class MoreBotsTab(QWidget):
                 try:
                     if path.exists():
                         path.unlink()
+                        deleted_files.append(str(path))
                 except Exception as e:
-                    print(f"[delete-bot] could not remove {path}: {e}")
+                    print(f"[delete-bot] FAILED to remove {path}: {e}",
+                          flush=True)
+        # Also scan DATA_DIR/bots/ and DATA_DIR/universe_scripts/ for
+        # a file matching the slug in case the registry script path
+        # was wrong / stale.
+        try:
+            from core.paths import DATA_DIR
+            for base in (DATA_DIR / "bots",
+                         DATA_DIR / "universe_scripts"):
+                if not base.exists():
+                    continue
+                for cand in base.glob(f"{side}.*"):
+                    try:
+                        cand.unlink()
+                        deleted_files.append(str(cand))
+                    except Exception as e:
+                        print(f"[delete-bot] FAILED to remove {cand}: {e}",
+                              flush=True)
+                # Case-insensitive fallback
+                for cand in base.iterdir():
+                    if cand.is_file() and cand.stem.lower() == side.lower():
+                        try:
+                            cand.unlink()
+                            deleted_files.append(str(cand))
+                        except Exception as e:
+                            print(f"[delete-bot] FAILED rm {cand}: {e}",
+                                  flush=True)
+        except Exception as e:
+            print(f"[delete-bot] dir scan failed: {e}", flush=True)
+        print(f"[delete-bot] removed {len(deleted_files)} file(s): "
+              f"{deleted_files}", flush=True)
 
-        # 3. Strip from registry
+        # ── Step 2: strip from registry FIRST (before signal) ────
+        before_custom = len(reg.get("custom", []))
         reg["active"]   = [b for b in reg.get("active",   []) if b != side]
         reg["silenced"] = [b for b in reg.get("silenced", []) if b != side]
         reg["custom"]   = [c for c in reg.get("custom",   [])
                            if str(c.get("id", "")).upper() != side.upper()]
         _save_registry(reg)
+        print(f"[delete-bot] registry: custom went from "
+              f"{before_custom} -> {len(reg['custom'])}", flush=True)
 
-        # 4. Clean per-bot settings + transition state
+        # ── Step 3: clean settings (per-bot universe / conf / etc.)
         try:
             s = D.load_settings()
-            s.pop(f"bot_universe_{side.upper()}", None)
-            s.pop(f"bot_min_conf_{side.upper()}", None)
-            s.pop(f"bot_min_score_{side.upper()}", None)
-            # universe_scripts list (if this was a universe generator
-            # that ended up in the bot library by mistake)
+            wiped_keys = []
+            for k in (f"bot_universe_{side.upper()}",
+                      f"bot_min_conf_{side.upper()}",
+                      f"bot_min_score_{side.upper()}",
+                      f"bot_min_positions_{side.upper()}",
+                      f"bot_max_brackets_{side.upper()}"):
+                if k in s:
+                    s.pop(k, None)
+                    wiped_keys.append(k)
             us = s.get("universe_scripts", [])
             if isinstance(us, list):
+                before = len(us)
                 s["universe_scripts"] = [
                     u for u in us
                     if str(u.get("id", "")).lower() != side.lower()
                 ]
-            import json as _j
+                if before != len(s["universe_scripts"]):
+                    wiped_keys.append("universe_scripts entry")
             with open(D.SETTINGS_FILE, "w", encoding="utf-8") as f:
                 _j.dump(s, f, indent=2)
+            print(f"[delete-bot] settings wiped: {wiped_keys}", flush=True)
         except Exception as e:
-            print(f"[delete-bot] settings cleanup failed: {e}")
+            print(f"[delete-bot] settings cleanup failed: {e}", flush=True)
 
-        # 5. Clear transition state file (so cleanup doesn't fire
-        # for a bot that no longer exists if a same-slug bot is
-        # re-created later)
+        # ── Step 4: transition state ─────────────────────────────
         try:
             from core.paths import DATA_DIR
             ts_path = DATA_DIR / "apex_transition_state.json"
             if ts_path.exists():
-                import json as _j
                 ts = _j.loads(ts_path.read_text(encoding="utf-8"))
-                ts.pop(side.upper(), None)
-                ts_path.write_text(_j.dumps(ts, indent=2), encoding="utf-8")
-        except Exception:
-            pass
+                if side.upper() in ts:
+                    ts.pop(side.upper(), None)
+                    ts_path.write_text(_j.dumps(ts, indent=2),
+                                       encoding="utf-8")
+                    print(f"[delete-bot] transition state cleared",
+                          flush=True)
+        except Exception as e:
+            print(f"[delete-bot] transition state cleanup failed: {e}",
+                  flush=True)
 
-        # 6. Refresh tabs
+        # ── Step 5: NOW signal the window to tear down the tab.
+        # By the time _on_bot_removed -> _do_remove_bot runs, the
+        # registry is already clean, so _do_remove_bot's reload-modify-
+        # save is a no-op and can't undo our work.
+        try:
+            self.bot_removed.emit(side)
+            print(f"[delete-bot] bot_removed signal emitted", flush=True)
+        except Exception as e:
+            print(f"[delete-bot] signal emit failed: {e}", flush=True)
+
+        # ── Step 6: hard-refresh this tab so the card disappears now
         QTimer.singleShot(0, self.refresh)
-        print(f"[delete-bot] {label} ({side}) permanently removed.",
-              flush=True)
+        print(f"[delete-bot] === END delete '{side}' OK ===", flush=True)
 
     def _silence(self, side: str):
         reg = _load_registry()
