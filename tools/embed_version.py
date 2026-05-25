@@ -49,12 +49,27 @@ def main():
     # release v4.6.1 → v4.6.4 shipped with the v4.6.0 version.json
     # because of this. Wiping the output folder forces PyInstaller
     # to regenerate it from current source on the next build.
+    #
+    # V4.6.11 — also nuke build/APEX. If a previous PyInstaller run
+    # was killed mid-build, build/APEX/APEX.exe stays locked by the
+    # OS file cache for a while; PyInstaller's --clean then silently
+    # falls back to STALE cached .pyc files for individual modules.
+    # This is the root cause of the v4.6.10 "_populate_script_combo
+    # not found" crash — the user got fresh version.json but old
+    # universe.py inside the PYZ. Nuking build/ too prevents that.
     import shutil
-    dist_apex = ROOT / "dist" / "APEX"
-    if dist_apex.exists():
-        shutil.rmtree(dist_apex, ignore_errors=True)
-        print(f"[embed_version] nuked stale dist/APEX/ — next PyInstaller "
-              f"build will regenerate it from current source")
+    for sub in ("dist/APEX", "build/APEX"):
+        p = ROOT / sub
+        if p.exists():
+            shutil.rmtree(p, ignore_errors=True)
+            # If rmtree couldn't kill it (file lock), at least
+            # detect that and warn loudly.
+            if p.exists():
+                print(f"[embed_version] WARNING: could not delete {p} — "
+                      f"PyInstaller may reuse stale bytecode. Close any "
+                      f"running APEX.exe and re-run.")
+            else:
+                print(f"[embed_version] nuked stale {sub}/")
 
 
 if __name__ == "__main__":

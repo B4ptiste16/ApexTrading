@@ -101,15 +101,19 @@ class UniverseTab(QWidget):
         pick_row = QHBoxLayout()
         pick_lbl = QLabel("Run which universe script:")
         pick_lbl.setStyleSheet(f"color:{C['muted']};font-size:11px;")
+        # V4.6.11 — create _desc_lbl BEFORE populating the combo so
+        # the chain _populate_script_combo -> _on_script_changed ->
+        # self._desc_lbl.setText(...) doesn't AttributeError on first
+        # paint.
+        self._desc_lbl = QLabel("")
+        self._desc_lbl.setStyleSheet(
+            f"color:{C['muted']};font-size:10px;")
+        self._desc_lbl.setWordWrap(True)
         self._script_combo = NoScrollComboBox()
         self._script_combo.setMinimumWidth(280)
         self._populate_script_combo()
         self._script_combo.currentIndexChanged.connect(
             self._on_script_changed)
-        self._desc_lbl = QLabel("")
-        self._desc_lbl.setStyleSheet(
-            f"color:{C['muted']};font-size:10px;")
-        self._desc_lbl.setWordWrap(True)
         # Refresh button to rescan the universe_scripts/ folder
         refresh_btn = QPushButton("↻")
         refresh_btn.setToolTip("Rescan universe scripts")
@@ -236,9 +240,15 @@ class UniverseTab(QWidget):
                 _j.dump(s, f, indent=2)
         except Exception:
             pass
-        # Update the description label
-        self._desc_lbl.setText(
-            f"▸ {data.get('description', '')}")
+        # Update the description label (defensive: may not exist
+        # yet on first call from inside _build before the label is
+        # added to the layout — _build's order is fixed but a future
+        # refactor could reintroduce the gap).
+        try:
+            self._desc_lbl.setText(
+                f"▸ {data.get('description', '')}")
+        except (AttributeError, RuntimeError):
+            pass
 
     def refresh(self):
         # Refresh both the script combo (new universe bots may have
