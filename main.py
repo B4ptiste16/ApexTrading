@@ -736,6 +736,11 @@ class MoreBotsTab(QWidget):
         btn_row = QHBoxLayout()
         btn_row.setSpacing(6)
 
+        # V4.6.8 — figure out if this is a custom (deletable) bot.
+        # Built-ins (LONG/SHORT/DAY) can be silenced/removed but never
+        # deleted from disk. Custom bots get an extra DELETE button.
+        is_custom = side not in BUILTIN_BOTS
+
         if mode == "active":
             sil_btn = QPushButton("Silence")
             sil_btn.setObjectName("silenceBtn")
@@ -757,6 +762,20 @@ class MoreBotsTab(QWidget):
             add_btn.setObjectName("addBotBtn")
             add_btn.clicked.connect(lambda _, s=side: self._add(s))
             btn_row.addWidget(add_btn)
+
+        # V4.6.8 — DELETE button for custom bots only. Wipes the .py
+        # file from disk + every settings entry referencing this bot
+        # + the registry entry + the tab. Shown in all modes (active /
+        # silenced / available) so the user can always reach it.
+        if is_custom:
+            del_btn = QPushButton("🗑")
+            del_btn.setObjectName("dangerBtn")
+            del_btn.setToolTip(f"Delete {side} permanently — removes the .py "
+                              f"file from your bot library and clears the "
+                              f"registry entry. Cannot be undone.")
+            del_btn.setFixedWidth(28)
+            del_btn.clicked.connect(lambda _, s=side: self._delete_bot(s))
+            btn_row.addWidget(del_btn)
 
         btn_row.addStretch()
         bw = QWidget()
@@ -788,6 +807,104 @@ class MoreBotsTab(QWidget):
         self.bot_removed.emit(side)
         # Defer refresh so the clicked button is not destroyed mid-click-event
         QTimer.singleShot(0, self.refresh)
+
+    def _delete_bot(self, side: str):
+        """V4.6.8 — hard delete a custom bot. Removes:
+          1. The .py / .apex file on disk
+          2. The bot_registry custom entry
+          3. The active/silenced membership
+          4. The per-bot universe override setting
+          5. The bot tab (if currently shown)
+          6. The transition_state entry (so cleanup doesn't re-trigger)
+        Asks for confirmation first."""
+        from PyQt6.QtWidgets import QMessageBox as _QMB
+        # Look up the bot's display label + script path
+        reg = _load_registry()
+        entry = next((c for c in reg.get("custom", [])
+                      if str(c.get("id", "")).upper() == side.upper()), None)
+        label  = entry.get("label", side) if entry else side
+        script = entry.get("script", "")   if entry else ""
+
+        confirm = _QMB.question(
+            self.window(),
+            f"Delete {label}?",
+            f"This will permanently delete <b>{label}</b> from your "
+            f"library.<br><br>"
+            f"<b>What gets removed:</b><br>"
+            f"• The .py file at <code>{script or '(unknown path)'}</code><br>"
+            f"• The entry in your bot registry<br>"
+            f"• Per-bot universe / confidence settings<br>"
+            f"• The tab in this window (if shown)<br><br>"
+            f"<b>This cannot be undone.</b> Continue?",
+            _QMB.StandardButton.Yes | _QMB.StandardButton.No,
+            _QMB.StandardButton.No,
+        )
+        if confirm != _QMB.StandardButton.Yes:
+            return
+
+        # 1. Stop the bot tab (and stop the running bot if active)
+        try:
+            self.bot_removed.emit(side)
+        except Exception:
+            pass
+
+        # 2. Delete the .py / .apex file (and any sibling alt-extension)
+        from pathlib import Path as _P
+        if script:
+            for path in [_P(script),
+                         _P(script).with_suffix(".py"),
+                         _P(script).with_suffix(".apex")]:
+                try:
+                    if path.exists():
+                        path.unlink()
+                except Exception as e:
+                    print(f"[delete-bot] could not remove {path}: {e}")
+
+        # 3. Strip from registry
+        reg["active"]   = [b for b in reg.get("active",   []) if b != side]
+        reg["silenced"] = [b for b in reg.get("silenced", []) if b != side]
+        reg["custom"]   = [c for c in reg.get("custom",   [])
+                           if str(c.get("id", "")).upper() != side.upper()]
+        _save_registry(reg)
+
+        # 4. Clean per-bot settings + transition state
+        try:
+            s = D.load_settings()
+            s.pop(f"bot_universe_{side.upper()}", None)
+            s.pop(f"bot_min_conf_{side.upper()}", None)
+            s.pop(f"bot_min_score_{side.upper()}", None)
+            # universe_scripts list (if this was a universe generator
+            # that ended up in the bot library by mistake)
+            us = s.get("universe_scripts", [])
+            if isinstance(us, list):
+                s["universe_scripts"] = [
+                    u for u in us
+                    if str(u.get("id", "")).lower() != side.lower()
+                ]
+            import json as _j
+            with open(D.SETTINGS_FILE, "w", encoding="utf-8") as f:
+                _j.dump(s, f, indent=2)
+        except Exception as e:
+            print(f"[delete-bot] settings cleanup failed: {e}")
+
+        # 5. Clear transition state file (so cleanup doesn't fire
+        # for a bot that no longer exists if a same-slug bot is
+        # re-created later)
+        try:
+            from core.paths import DATA_DIR
+            ts_path = DATA_DIR / "apex_transition_state.json"
+            if ts_path.exists():
+                import json as _j
+                ts = _j.loads(ts_path.read_text(encoding="utf-8"))
+                ts.pop(side.upper(), None)
+                ts_path.write_text(_j.dumps(ts, indent=2), encoding="utf-8")
+        except Exception:
+            pass
+
+        # 6. Refresh tabs
+        QTimer.singleShot(0, self.refresh)
+        print(f"[delete-bot] {label} ({side}) permanently removed.",
+              flush=True)
 
     def _silence(self, side: str):
         reg = _load_registry()
@@ -1543,6 +1660,27 @@ class ApexWindow(QMainWindow):
         self._broker_mode_btn.clicked.connect(self._show_broker_menu)
         layout.addWidget(self._broker_mode_btn)
 
+        # V4.6.8 — Paper/Live Alpaca toggle. Pill-style button that
+        # flips between paper trading (Alpaca paper API) and live
+        # trading (Alpaca live API). The selected mode is exported to
+        # every bot subprocess via APEX_ALPACA_MODE; the bot framework
+        # + the built-in scripts honor it.
+        # Live mode auto-silences any bot whose META declares
+        # `alpaca_mode: paper` (paper-only); paper mode auto-silences
+        # any bot whose META declares `alpaca_mode: live` (live-only).
+        # Default: both modes acceptable — bot runs in either.
+        self._alpaca_mode_btn = QPushButton(self._alpaca_mode_label())
+        self._alpaca_mode_btn.setObjectName("alpacaModeBtn")
+        self._alpaca_mode_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self._alpaca_mode_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._alpaca_mode_btn.setToolTip(
+            "Click to toggle between Alpaca PAPER trading and LIVE "
+            "trading.\n\nPaper: simulated, no real money.\nLive: "
+            "real orders on real money. Use carefully.")
+        self._alpaca_mode_btn.clicked.connect(self._toggle_alpaca_mode)
+        self._restyle_alpaca_mode_btn()
+        layout.addWidget(self._alpaca_mode_btn)
+
         # V3 wave 5 — credit balance chip (clickable → Credit Shop)
         self.credits_chip = QPushButton("— credits")
         self.credits_chip.setObjectName("creditsChip")
@@ -1573,6 +1711,95 @@ class ApexWindow(QMainWindow):
             layout.addWidget(self.user_chip_btn)
 
         return header
+
+    # ── V4.6.8 — Alpaca paper/live mode toggle ──────────────
+
+    def _current_alpaca_mode(self) -> str:
+        """'paper' (default) or 'live'."""
+        try:
+            return D.load_settings().get("alpaca_mode", "paper")
+        except Exception:
+            return "paper"
+
+    def _alpaca_mode_label(self) -> str:
+        return ("◉ LIVE" if self._current_alpaca_mode() == "live"
+                else "○ paper")
+
+    def _restyle_alpaca_mode_btn(self):
+        mode = self._current_alpaca_mode()
+        if mode == "live":
+            # Red-tinted urgency for live trading
+            self._alpaca_mode_btn.setStyleSheet(
+                f"QPushButton#alpacaModeBtn{{"
+                f"color:{C['red']};font-size:10px;font-weight:700;"
+                f"letter-spacing:1.5px;padding:6px 12px;margin-left:6px;"
+                f"border:1px solid {C['red']};border-radius:12px;"
+                f"background:rgba(194,142,151,0.08);}}"
+                f"QPushButton#alpacaModeBtn:hover{{"
+                f"background:rgba(194,142,151,0.16);}}")
+        else:
+            # Muted/calm for paper
+            self._alpaca_mode_btn.setStyleSheet(
+                f"QPushButton#alpacaModeBtn{{"
+                f"color:{C['muted']};font-size:10px;font-weight:600;"
+                f"letter-spacing:1.5px;padding:6px 12px;margin-left:6px;"
+                f"border:1px solid {C['border']};border-radius:12px;"
+                f"background:rgba(106,120,148,0.06);}}"
+                f"QPushButton#alpacaModeBtn:hover{{"
+                f"background:rgba(106,120,148,0.14);}}")
+        self._alpaca_mode_btn.setText(self._alpaca_mode_label())
+
+    def _toggle_alpaca_mode(self):
+        """Flip paper↔live with a confirm dialog when switching TO live
+        (real money, deserves a checkbox click)."""
+        from PyQt6.QtWidgets import QMessageBox
+        cur = self._current_alpaca_mode()
+        target = "live" if cur == "paper" else "paper"
+
+        if target == "live":
+            # Hard confirm for live trading
+            box = QMessageBox(self)
+            box.setIcon(QMessageBox.Icon.Warning)
+            box.setWindowTitle("Switch to LIVE trading?")
+            box.setText(
+                "<b>LIVE mode places real orders with real money.</b><br><br>"
+                "All running bots will be migrated to the live Alpaca API on "
+                "their next cycle. Make sure your live API keys are configured "
+                "in Tools → ALPACA · API KEYS before switching.<br><br>"
+                "Continue?")
+            box.setStandardButtons(
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+            box.setDefaultButton(QMessageBox.StandardButton.No)
+            if box.exec() != QMessageBox.StandardButton.Yes:
+                return
+
+        # Persist
+        try:
+            s = D.load_settings()
+            s["alpaca_mode"] = target
+            import json as _j
+            with open(D.SETTINGS_FILE, "w", encoding="utf-8") as f:
+                _j.dump(s, f, indent=2)
+        except Exception as e:
+            QMessageBox.warning(self, "Save failed", str(e))
+            return
+
+        self._restyle_alpaca_mode_btn()
+        # Refresh tabs so bots compatible-with-new-mode become active /
+        # incompatible ones get hidden under SILENCED, same UX as the
+        # broker switch.
+        try:
+            self._rebuild_broker_bot_tabs()
+        except Exception:
+            pass
+        # Tell the user the switch landed and that running bots will
+        # pick it up on their next cycle (start_bot reads the env var).
+        from PyQt6.QtWidgets import QMessageBox as _Q
+        _Q.information(
+            self, "Alpaca mode switched",
+            f"Now in {target.upper()} mode. "
+            f"{'Bots already running will pick up the new mode on their next cycle. ' if target == 'paper' else 'Live trading active — bots will trade real money on next start.'}"
+            "You can switch back at any time.")
 
     # ── V4.1.0 — manual trading mode toggle ─────────────────
 

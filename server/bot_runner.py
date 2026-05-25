@@ -171,6 +171,17 @@ def _build_env(user_id: int, side: str) -> dict[str, str]:
     env["APEX_BOT_SIDE"]    = side.upper()
     env["PYTHONIOENCODING"] = "utf-8"
     env["PYTHONPATH"]       = str(BOTS_DIR)
+    # V4.6.8 — propagate the desktop's Alpaca paper/live toggle. The
+    # value is stored alongside other creds in the encrypted blob the
+    # client uploaded (key 'APEX_ALPACA_MODE'); fall back to 'paper'.
+    # bot_framework + built-ins read this and construct TradingClient
+    # with paper=False when mode='live'.
+    try:
+        _blob = creds.load_credentials(user_id) or {}
+        env["APEX_ALPACA_MODE"] = str(
+            _blob.get("APEX_ALPACA_MODE", "paper")).lower()
+    except Exception:
+        env["APEX_ALPACA_MODE"] = "paper"
 
     # Inject the user's broker credentials. Each individual bot reads
     # ALPACA_API_KEY / ALPACA_SECRET_KEY — for the per-side keys we

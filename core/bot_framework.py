@@ -64,11 +64,18 @@ def _yf():
 
 
 def _alpaca_clients(asset_type: str):
-    """Return (trading_client, ALPACA_KEY, ALPACA_SECRET)."""
+    """Return (trading_client, ALPACA_KEY, ALPACA_SECRET).
+    V4.6.8 — honors APEX_ALPACA_MODE env var. 'live' creates a
+    real-money TradingClient (paper=False); anything else falls back
+    to paper trading. The desktop's header toggle writes this var."""
     from alpaca.trading.client import TradingClient
     key = os.environ["ALPACA_API_KEY"]
     sec = os.environ["ALPACA_SECRET_KEY"]
-    return TradingClient(key, sec, paper=True), key, sec
+    mode = (os.environ.get("APEX_ALPACA_MODE") or "paper").lower()
+    is_paper = (mode != "live")
+    print(f"[framework] Alpaca client mode: "
+          f"{'PAPER' if is_paper else 'LIVE'}", flush=True)
+    return TradingClient(key, sec, paper=is_paper), key, sec
 
 
 # ── Symbol translation ──────────────────────────────────────────

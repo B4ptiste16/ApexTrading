@@ -74,18 +74,27 @@ def compare_against_marketplace(
     candidate_src: str,
     marketplace_dir: Path,
     skip_slug: str | None = None,
+    skip_slugs: list[str] | None = None,
 ) -> list[dict]:
     """Returns up to top-5 matches with score > 0.30, sorted descending.
     Caller decides what to do based on the scores (block / warn / pass).
 
-    skip_slug: when re-publishing an updated version of an own bot,
-    pass the slug to exclude it from the comparison."""
+    skip_slug:  legacy single-slug exclusion (re-publishing one bot).
+    skip_slugs: V4.6.8 — list-form so the caller can exclude EVERY bot
+                this user already published, allowing them to upload
+                an improved version of their own work without hitting
+                the >=85% same-author block."""
     cand_fp = _fingerprint(candidate_src)
     if not cand_fp:
         return []
+    skip = set()
+    if skip_slug:
+        skip.add(skip_slug)
+    if skip_slugs:
+        skip.update(skip_slugs)
     matches = []
     for p in sorted(Path(marketplace_dir).glob("*.py")):
-        if skip_slug and p.stem == skip_slug:
+        if p.stem in skip:
             continue
         try:
             other = p.read_text(encoding="utf-8", errors="replace")

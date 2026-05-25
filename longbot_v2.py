@@ -240,10 +240,13 @@ os.makedirs(CHART_DIR, exist_ok=True)
 _AI_PROVIDER, _AI_MODEL, _AI_KEY, _AI_MODE = load_ai_config()
 print(f"[ai] provider={_AI_PROVIDER}  model={_AI_MODEL}  mode={_AI_MODE}")
 
+# V4.6.8 — honor APEX_ALPACA_MODE so the header Paper/Live toggle
+# steers this bot too. Defaults to paper for safety.
+_ALPACA_IS_PAPER = (os.environ.get("APEX_ALPACA_MODE", "paper").lower() != "live")
 trading_client   = TradingClient(
     os.getenv("ALPACA_API_KEY_LONG", os.getenv("ALPACA_API_KEY")),
     os.getenv("ALPACA_SECRET_KEY_LONG", os.getenv("ALPACA_SECRET_KEY")),
-    paper=True
+    paper=_ALPACA_IS_PAPER
 )
 
 

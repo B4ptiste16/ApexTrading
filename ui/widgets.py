@@ -499,6 +499,11 @@ class BotProcessWidget(QWidget):
                 f"bot_universe_{self.side.upper()}", "")
             if _u:
                 env.insert("APEX_BOT_UNIVERSE", str(_u))
+            # V4.6.8 — Alpaca paper/live mode propagation.
+            # BotRunner + built-in bots read APEX_ALPACA_MODE and
+            # construct TradingClient(paper=…) accordingly.
+            _amode = _D.load_settings().get("alpaca_mode", "paper")
+            env.insert("APEX_ALPACA_MODE", str(_amode))
         except Exception:
             pass
         self.process.setProcessEnvironment(env)

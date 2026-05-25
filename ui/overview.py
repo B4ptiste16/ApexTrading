@@ -1264,6 +1264,14 @@ class ToolsTab(QWidget):
 
         all_keys = D.read_env_keys()
         payload  = {k: v for k, v in all_keys.items() if v}
+        # V4.6.8 — include the Alpaca paper/live mode so the cloud
+        # bot_runner can construct TradingClient with the right paper
+        # flag. Default 'paper' for safety.
+        try:
+            payload["APEX_ALPACA_MODE"] = D.load_settings().get(
+                "alpaca_mode", "paper")
+        except Exception:
+            payload["APEX_ALPACA_MODE"] = "paper"
         if not payload:
             return  # nothing to send (shouldn't happen — we just verified saves)
 
@@ -1884,6 +1892,12 @@ class ToolsTab(QWidget):
         # bot slots like ALPACA_API_KEY_CRYPTO that _key_edits never had).
         all_keys = D.read_env_keys()
         payload = {k: v for k, v in all_keys.items() if v}
+        # V4.6.8 — include paper/live toggle alongside the keys
+        try:
+            payload["APEX_ALPACA_MODE"] = D.load_settings().get(
+                "alpaca_mode", "paper")
+        except Exception:
+            payload["APEX_ALPACA_MODE"] = "paper"
         if not payload:
             self._sync_msg.setText("No keys saved yet — save your keys first.")
             self._sync_msg.setStyleSheet(f"color:{C['muted']};font-size:10px;")

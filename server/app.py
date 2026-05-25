@@ -506,9 +506,23 @@ async def upload_public_bot(
             f"stay live.")
     blob = await file.read()
     # V3.3.0 — similarity gate (block ≥85 %, warn ≥60 %).
+    # V4.6.8 — exclude the user's OWN previously-published bots from
+    # the gate. Users are allowed to upload improved versions of
+    # their own work; the gate is meant to stop them from copying
+    # OTHER people's bots, not their own. Marketplace versioning
+    # (proper diff against META.version + green-badge UX for buyers)
+    # is the v4.6.9 step; this v4.6.8 fix unblocks the immediate
+    # 'I can't republish my own crypto bot' user pain point.
     src_text = blob.decode("utf-8", errors="replace")
+    own_slugs = []
+    try:
+        own_bots = marketplace.list_bots_for_owner(user["id"])
+        own_slugs = [b.get("slug") for b in own_bots if b.get("slug")]
+    except Exception:
+        pass
     matches = similarity.compare_against_marketplace(
-        src_text, marketplace.MARKETPLACE_DIR)
+        src_text, marketplace.MARKETPLACE_DIR,
+        skip_slugs=own_slugs)
     if matches and matches[0]["score"] >= 0.85:
         raise HTTPException(
             409,

@@ -177,10 +177,11 @@ os.makedirs(CHART_DIR, exist_ok=True)
 _AI_PROVIDER, _AI_MODEL, _AI_KEY, _AI_MODE = load_ai_config()
 print(f"[ai] provider={_AI_PROVIDER}  model={_AI_MODEL}  mode={_AI_MODE}")
 
+_ALPACA_IS_PAPER = (os.environ.get("APEX_ALPACA_MODE", "paper").lower() != "live")
 trading_client   = TradingClient(
     os.getenv("ALPACA_API_KEY_SHORT"),
     os.getenv("ALPACA_SECRET_KEY_SHORT"),
-    paper=True
+    paper=_ALPACA_IS_PAPER
 )
 
 
