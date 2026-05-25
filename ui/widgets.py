@@ -321,23 +321,43 @@ class BotProcessWidget(QWidget):
         ts   = datetime.now().strftime("%H:%M:%S")
         c    = color or C["text"]
         html = f'<span style="color:{C["muted"]}">[{ts}]</span> <span style="color:{c}">{msg}</span>'
-        self.log.append(html)
-        self.log.moveCursor(QTextCursor.MoveOperation.End)
+        # V4.6.7 — guard against the QTextEdit being destroyed before
+        # an async cloud callback fires (same class of crash as
+        # _set_running). Bail silently if the underlying widget is gone.
+        try:
+            self.log.append(html)
+            self.log.moveCursor(QTextCursor.MoveOperation.End)
+        except RuntimeError:
+            return
 
     def _set_running(self, running: bool):
-        self.run_btn.setEnabled(not running)
-        self.stop_btn.setEnabled(running)
-        self.restart_btn.setEnabled(running)
+        # V4.6.7 — guard every child-widget access against
+        # "wrapped C/C++ object has been deleted" crashes. A
+        # cloud-mode callback can fire after the user has navigated
+        # away and the BotProcessWidget was destroyed; touching a
+        # deleted button raises RuntimeError. We just bail silently.
+        try:
+            self.run_btn.setEnabled(not running)
+            self.stop_btn.setEnabled(running)
+            self.restart_btn.setEnabled(running)
+        except RuntimeError:
+            return
         cloud = self._is_cloud_mode()
         dot_color = (C["purple"] if running and cloud
                      else C["green"] if running
                      else C["muted"])
-        self.status_dot.setStyleSheet(f"color:{dot_color};font-size:14px;")
+        try:
+            self.status_dot.setStyleSheet(f"color:{dot_color};font-size:14px;")
+        except RuntimeError:
+            return
         if running:
             label = "RUNNING ☁ ORACLE" if cloud else "RUNNING"
         else:
             label = "STOPPED  (cloud)" if cloud else "STOPPED"
-        self.status_lbl.setText(label)
+        try:
+            self.status_lbl.setText(label)
+        except RuntimeError:
+            return
         self.status_lbl.setStyleSheet(
             f"font-size:10px;color:{dot_color};letter-spacing:2px;font-weight:600;"
         )

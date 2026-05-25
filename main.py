@@ -559,16 +559,50 @@ class MoreBotsTab(QWidget):
         ]
         all_known = compatible_builtins + [c["id"] for c in custom]
         available = [b for b in all_known if b not in active]
+        # V4.6.7 — wrap every placeholder-label access in a guard that
+        # transparently re-creates the QLabel if _rebuild_grid wiped
+        # it. Previously a sequence of (silence bot → refresh → silence
+        # again → refresh) would crash on the second setVisible because
+        # the first refresh's _rebuild_grid had already destroyed the
+        # underlying C++ QLabel.
         if available:
-            self._none_lbl.setVisible(False)
+            self._safe_placeholder_visible("_none_lbl", False)
             self._rebuild_grid(self._avail_layout, available, mode="available")
         else:
-            self._none_lbl.setVisible(True)
+            self._safe_placeholder_visible("_none_lbl", True)
             self._clear_grid(self._avail_layout, keep_row0=True)
 
         # Silenced label visibility
         sil_list = [s for s in active if s in silenced]
-        self._none_sil.setVisible(len(sil_list) == 0)
+        self._safe_placeholder_visible("_none_sil", len(sil_list) == 0)
+
+    # V4.6.7 — placeholder label safety helpers
+    _PLACEHOLDER_META = {
+        "_none_lbl": ("All built-in bots are already active.", "avail"),
+        "_none_sil": ("No silenced bots.",                     "silenced"),
+    }
+
+    def _safe_placeholder_visible(self, attr: str, visible: bool):
+        """Set visibility on _none_lbl / _none_sil, transparently
+        rebuilding the QLabel if a previous _rebuild_grid() destroyed
+        the underlying C++ object."""
+        lbl = getattr(self, attr, None)
+        if lbl is not None:
+            try:
+                lbl.setVisible(visible)
+                return
+            except RuntimeError:
+                pass  # widget deleted, fall through to recreate
+        # Recreate the placeholder
+        text, target = self._PLACEHOLDER_META.get(attr, (attr, "avail"))
+        layout = (self._avail_layout if target == "avail"
+                  else self._silenced_layout)
+        new_lbl = QLabel(text)
+        new_lbl.setStyleSheet(
+            f"color:{C['muted']};font-size:11px;padding:4px 0;")
+        new_lbl.setVisible(visible)
+        layout.addWidget(new_lbl, 0, 0)
+        setattr(self, attr, new_lbl)
 
     def _open_bot_market(self):
         """V3.1.3 — tell ApexWindow to reveal + focus the BOT MARKET tab."""
