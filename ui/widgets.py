@@ -287,10 +287,21 @@ class BotProcessWidget(QWidget):
         self.log.setReadOnly(True)
         self.log.setFixedHeight(160)
         self.log.setPlaceholderText("Bot output will appear here...")
+        # V4.6.5 — pin alignment to left + disable line wrapping so a
+        # long ASCII header (e.g. daybot's `=` * 65 banner) does NOT
+        # make the rest of the lines visually center themselves. Also
+        # set the document default alignment so HTML insertions inherit it.
+        from PyQt6.QtCore import Qt as _Qt
+        from PyQt6.QtGui  import QTextOption
+        self.log.setAlignment(_Qt.AlignmentFlag.AlignLeft)
+        self.log.document().setDefaultTextOption(
+            QTextOption(_Qt.AlignmentFlag.AlignLeft))
+        self.log.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
         self.log.setStyleSheet(
             f"background:{C['panel2']};color:{C['text']};"
             f"border:1px solid {C['border']};border-radius:5px;"
             f"font-size:10px;font-family:'JetBrains Mono';padding:6px;"
+            f"text-align:left;"
         )
         layout.addWidget(self.log)
 

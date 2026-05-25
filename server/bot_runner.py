@@ -286,8 +286,24 @@ def start_bot(user_id: int, side: str) -> dict:
         # private_bots/ is not on sys.path globally.
         cmd = [str(VENV_PYTHON), "-u", str(custom_path)]
 
-    log_fh = open(log_path, "a", buffering=1, encoding="utf-8")
-    log_fh.write(f"\n=== bot start {time.strftime('%Y-%m-%d %H:%M:%S')} "
+    # V4.6.5 — truncate the log on each bot start. Previously we
+    # appended, so every restart left every prior crash in the log
+    # forever and the user saw the same old tracebacks scroll past on
+    # every new tail. Truncating means the log shows ONLY the current
+    # bot run; prior history lives in *.bak (one rotation kept).
+    try:
+        if log_path.exists() and log_path.stat().st_size > 0:
+            bak = log_path.with_suffix(log_path.suffix + ".bak")
+            try:
+                if bak.exists():
+                    bak.unlink()
+                log_path.rename(bak)
+            except Exception:
+                pass
+    except Exception:
+        pass
+    log_fh = open(log_path, "w", buffering=1, encoding="utf-8")
+    log_fh.write(f"=== bot start {time.strftime('%Y-%m-%d %H:%M:%S')} "
                  f"user={user_id} side={side} ===\n")
     log_fh.flush()
 
