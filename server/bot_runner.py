@@ -188,8 +188,21 @@ def _build_env(user_id: int, side: str) -> dict[str, str]:
         ss = blob.get(f"ALPACA_SECRET_KEY_{label}")
         if kk: env[f"ALPACA_API_KEY_{label}"]    = kk
         if ss: env[f"ALPACA_SECRET_KEY_{label}"] = ss
-    if blob.get("ANTHROPIC_API_KEY"):
-        env["ANTHROPIC_API_KEY"] = blob["ANTHROPIC_API_KEY"]
+    # Pass all AI provider API keys that exist in the blob
+    for ai_key in ("ANTHROPIC_API_KEY", "GOOGLE_AI_API_KEY",
+                   "XAI_API_KEY", "GROQ_API_KEY"):
+        if blob.get(ai_key):
+            env[ai_key] = blob[ai_key]
+
+    # Per-bot AI config: AI_PROVIDER_<SIDE>, AI_MODEL_<SIDE>, AI_MODE_<SIDE>
+    # take precedence over the global AI_PROVIDER / AI_MODEL / AI_MODE.
+    prov  = blob.get(f"AI_PROVIDER_{s}") or blob.get("AI_PROVIDER", "anthropic")
+    model = blob.get(f"AI_MODEL_{s}")    or blob.get("AI_MODEL", "")
+    mode  = blob.get(f"AI_MODE_{s}")     or blob.get("AI_MODE", "vision")
+    env["AI_PROVIDER"] = prov
+    if model:
+        env["AI_MODEL"] = model
+    env["AI_MODE"] = mode
     return env
 
 
@@ -277,6 +290,40 @@ def start_bot(user_id: int, side: str) -> dict:
     log_fh.write(f"\n=== bot start {time.strftime('%Y-%m-%d %H:%M:%S')} "
                  f"user={user_id} side={side} ===\n")
     log_fh.flush()
+
+    # V4.6.4 — preflight pip install for custom bots. Parses the
+    # APEX-BOT-META block + scans imports, installs anything that's
+    # not already in the venv, then proceeds with spawn. A failure
+    # here doesn't abort the launch (the bot would just crash with
+    # ModuleNotFoundError as before) — we log the reason and continue
+    # so behavior never regresses vs. pre-v4.6.4.
+    if custom_path is not None:
+        try:
+            # Import lazily so a broken bot_meta import doesn't kill
+            # the entire server. core.bot_meta lives in the desktop
+            # tree but is deployed alongside server code by the build.
+            from . import bot_meta as _BM  # type: ignore
+        except Exception:
+            try:
+                import core.bot_meta as _BM  # type: ignore
+            except Exception as _e:
+                _BM = None
+                log_fh.write(f"[preflight] bot_meta import failed: {_e}\n")
+        if _BM is not None:
+            try:
+                ok, msg = _BM.install_missing(
+                    custom_path, VENV_PYTHON,
+                    marker_dir=custom_path.parent,
+                    log_path=log_path)
+                log_fh.write(f"[preflight] {msg}\n")
+                if not ok:
+                    log_fh.write(
+                        f"[preflight] WARNING: pip install failed — bot "
+                        f"may crash on import. Spawning anyway so the "
+                        f"user sees the underlying error.\n")
+            except Exception as _e:
+                log_fh.write(f"[preflight] unexpected error: {_e}\n")
+        log_fh.flush()
     try:
         proc = subprocess.Popen(
             cmd,

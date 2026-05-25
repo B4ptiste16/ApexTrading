@@ -224,35 +224,78 @@ def _load_skeleton_guide() -> str:
     return ""
 
 
-_SYSTEM_PROMPT = (
+_SYSTEM_PROMPT_TRADE = (
     "You are a senior algorithmic-trading engineer writing a single "
-    "Python file that runs inside the APEX Trading Platform. The user "
-    "describes the trading strategy and you produce ONLY the .py file "
-    "contents — no markdown, no explanations, no triple-backtick "
-    "fences. The file MUST follow the APEX bot contract described "
-    "below. If the user's description is ambiguous, make reasonable "
-    "defaults and add a comment near the top explaining your choices.\n\n"
+    "Python file that runs inside the APEX Trading Platform as a "
+    "TRADING bot. The user describes the strategy and you produce "
+    "ONLY the .py file contents — no markdown, no explanations, no "
+    "triple-backtick fences. The file MUST follow the APEX bot "
+    "contract described below. If the user's description is "
+    "ambiguous, make reasonable defaults and add a comment near the "
+    "top explaining your choices.\n\n"
     "═══ APEX BOT CONTRACT ═══\n\n"
     "{guide}\n\n"
     "═══ OUTPUT RULES ═══\n\n"
     "• Output ONLY raw Python source. No prose before or after.\n"
-    "• The first non-blank line is a triple-quoted module docstring "
-    "  summarising what the bot does.\n"
+    "• The FIRST docstring of the file MUST be the APEX-BOT-META\n"
+    "  block. Include every field shown in section 1a of the contract:\n"
+    "  name, description, method, ai_used, compatible_models,\n"
+    "  asset_type, universe, requirements. NEVER omit this block.\n"
+    "• ai_used MUST be the literal provider that is generating this\n"
+    "  bot (e.g. 'groq', 'anthropic', 'openai', 'gemini').\n"
+    "• compatible_models is a comma-separated list of providers this\n"
+    "  bot can also run under (default to ai_used if unsure).\n"
+    "• requirements is a comma-separated list of pip packages this\n"
+    "  bot needs that are NOT in APEX's bundled set. If you `import\n"
+    "  sklearn`, you MUST list 'scikit-learn' here. If your bot only\n"
+    "  uses bundled packages, leave the field empty after the colon.\n"
     "• Use `print(..., flush=True)` for all logs.\n"
     "• Read keys from os.environ — never hardcode.\n"
-    "• Define a top-level main() function that contains the bot loop.\n"
-    "• Single file, <1MB, no extra pip dependencies beyond the "
-    "  packages already listed in the contract."
+    "• Define a top-level main() function that contains the bot loop."
 )
 
 
-def _make_system_prompt() -> str:
+_SYSTEM_PROMPT_UNIVERSE = (
+    "You are a senior algorithmic-trading engineer writing a single "
+    "Python file that runs inside the APEX Trading Platform as a "
+    "UNIVERSE generator (NOT a trading bot). The user describes how "
+    "they want their universe of tickers filtered/scored, and your "
+    "file's job is to OVERWRITE a single *_universe.txt file with the "
+    "selected tickers, one per line, with optional `# note` annotations.\n\n"
+    "═══ APEX BOT CONTRACT ═══\n\n"
+    "{guide}\n\n"
+    "═══ UNIVERSE-BOT RULES ═══\n\n"
+    "• Output ONLY raw Python source. No prose before or after.\n"
+    "• FIRST docstring is the APEX-BOT-META block. Required fields:\n"
+    "  name, description, method, ai_used, compatible_models,\n"
+    "  asset_type, universe, requirements. The `universe:` field is\n"
+    "  the filename this script REWRITES (e.g. crypto_universe.txt).\n"
+    "• Do NOT submit orders. Do NOT import alpaca.trading.client.\n"
+    "  Universe bots only READ market data and WRITE the .txt file.\n"
+    "• The .txt file lives under APEX_DATA_DIR (read from os.environ)\n"
+    "  with the filename from META.universe. One ticker per line,\n"
+    "  inline `# note` comments allowed.\n"
+    "• Run once and exit cleanly (return from main()) — APEX schedules\n"
+    "  the next run; the bot is not a daemon loop.\n"
+    "• requirements: list pip deps (e.g. ccxt for crypto, yfinance is\n"
+    "  bundled). If you `import sklearn`, list 'scikit-learn'.\n"
+    "• Use print(..., flush=True) for status logs."
+)
+
+
+def _make_system_prompt(mode: str = "trade") -> str:
+    """Return the system prompt for the requested mode.
+
+    mode: "trade" for a trading bot, "universe" for a universe-file
+          generator. See ui controls."""
     guide = _load_skeleton_guide() or (
         "(Bot skeleton guide unavailable. Required contract: a single "
         "main() function at module level, reads ALPACA_API_KEY / "
         "ALPACA_SECRET_KEY / ANTHROPIC_API_KEY from os.environ, uses "
         "print(..., flush=True) for logs.)")
-    return _SYSTEM_PROMPT.format(guide=guide)
+    tmpl = (_SYSTEM_PROMPT_UNIVERSE if mode == "universe"
+            else _SYSTEM_PROMPT_TRADE)
+    return tmpl.format(guide=guide)
 
 
 # ── Worker thread for the API call ───────────────────────────────────
@@ -262,12 +305,13 @@ class _GenerateWorker(QThread):
     progress = pyqtSignal(str)          # status line for the UI
 
     def __init__(self, *, provider: str, model: str, key: str,
-                 prompt: str):
+                 prompt: str, mode: str = "trade"):
         super().__init__()
         self.provider = provider
         self.model    = model
         self.key      = key
         self.prompt   = prompt
+        self.mode     = mode   # "trade" or "universe" (v4.6.4)
 
     def run(self):
         cfg = PROVIDERS.get(self.provider)
@@ -275,8 +319,13 @@ class _GenerateWorker(QThread):
             self.done.emit(False, f"Unknown provider: {self.provider}")
             return
         self.progress.emit(f"Calling {self.provider}…")
+        # V4.6.4 — the system prompt now varies by mode so the AI knows
+        # whether to generate a trading bot or a universe-file rewriter,
+        # and either way it MUST emit an APEX-BOT-META block with
+        # ai_used = the actual provider used to generate this bot.
         headers, body = cfg["build"](
-            self.prompt, _make_system_prompt(), self.key, self.model)
+            self.prompt, _make_system_prompt(self.mode),
+            self.key, self.model)
         url = cfg["url"]
         # Free-via-APEX: the build hook stuffs the real endpoint into a
         # custom header (server URL is user-configurable, not constant).
@@ -387,6 +436,42 @@ class MakeBotTab(QWidget):
         s.add(mw)
         self._existing_lbl.setVisible(False)
         self._existing_combo.setVisible(False)
+
+        # ── V4.6.4 — Bot kind switch: Trade bot vs Universe bot ───
+        # Two radio-style buttons in a row. Picks which system prompt
+        # the AI gets, what fields it MUST declare in APEX-BOT-META,
+        # and (for universe bots) prevents the AI from generating
+        # order-submission code.
+        from PyQt6.QtWidgets import QRadioButton, QButtonGroup
+        kind_row = QHBoxLayout()
+        kind_lbl = QLabel("Kind:")
+        kind_lbl.setStyleSheet(f"color:{C['text']};font-size:11px;")
+        self._mode_trade_radio    = QRadioButton("Trading bot")
+        self._mode_universe_radio = QRadioButton("Universe bot (writes *_universe.txt)")
+        self._mode_trade_radio.setChecked(True)
+        self._mode_trade_radio.setStyleSheet(
+            f"color:{C['text']};font-size:11px;")
+        self._mode_universe_radio.setStyleSheet(
+            f"color:{C['text']};font-size:11px;")
+        self._kind_group = QButtonGroup(self)
+        self._kind_group.addButton(self._mode_trade_radio)
+        self._kind_group.addButton(self._mode_universe_radio)
+        kind_row.addWidget(kind_lbl)
+        kind_row.addSpacing(8)
+        kind_row.addWidget(self._mode_trade_radio)
+        kind_row.addSpacing(14)
+        kind_row.addWidget(self._mode_universe_radio)
+        kind_row.addStretch()
+        kw = QWidget(); kw.setLayout(kind_row)
+        s.add(kw)
+        kind_hint = QLabel(
+            "Trading bots open positions. Universe bots only rewrite a "
+            "ticker list (`crypto_universe.txt`, `longbot_universe.txt`, "
+            "etc.) that a trading bot then consumes. Universe bots "
+            "cannot place orders.")
+        kind_hint.setStyleSheet(f"color:{C['muted']};font-size:10px;")
+        kind_hint.setWordWrap(True)
+        s.add(kind_hint)
 
         # ── Provider + Model + Key form ─────────────────────────────
         form = QFrame()
@@ -775,8 +860,15 @@ class MakeBotTab(QWidget):
         self._status.setText("Calling the model — this can take 20-40 s.")
         self._status.setStyleSheet(f"color:{C['muted']};font-size:11px;")
 
+        # V4.6.4 — pass current mode (trade vs universe) so the worker
+        # picks the right system prompt and the META block ends up with
+        # the correct ai_used value.
+        mode = "universe" if getattr(self, "_mode_universe_radio",
+                                     None) and \
+                            self._mode_universe_radio.isChecked() \
+                         else "trade"
         self._worker = _GenerateWorker(
-            provider=prov, model=model, key=key, prompt=prompt)
+            provider=prov, model=model, key=key, prompt=prompt, mode=mode)
         self._worker.progress.connect(
             lambda msg: self._status.setText(msg))
         self._worker.done.connect(self._on_generated)

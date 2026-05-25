@@ -17,7 +17,9 @@ publish it to the public bot library.
 ## 1. The contract — what APEX expects
 
 A bot is a single Python file (`.py`, max 1 MB) that **exposes a
-`main()` function** with no arguments. APEX launches it like this:
+`main()` function** with no arguments, AND starts with an
+**`APEX-BOT-META` block** declaring metadata (description, AI used,
+dependencies, etc.) — see below. APEX launches it like this:
 
 ```
 python -m your_bot_module
@@ -28,11 +30,47 @@ APEX data folder** (`%LocalAppData%\APEX Trading Platform` on
 Windows, `~/.apex` on Linux). Your bot can read `.env` from this
 folder for API keys.
 
+### 1a. The mandatory APEX-BOT-META block (v4.6.4+)
+
+Every bot **must** declare its metadata in a docstring at the top
+of the file, starting with the literal line `APEX-BOT-META`. The
+desktop app, the marketplace, and the Oracle server all parse this
+block. It serves three purposes:
+
+1. **Publishing info** — name / description / method show on cards.
+2. **Compatibility** — `asset_type` and `compatible_models` tell
+   APEX what universes and AI providers can pair with this bot.
+3. **Dependencies** — `requirements` lists the pip packages the
+   server should install before first start. Without this list,
+   the server falls back to scanning your `import` statements and
+   may guess wrong.
+
+Schema (all fields are optional but **strongly recommended**):
+
+| Key                 | Example                          | Meaning                                          |
+|---------------------|----------------------------------|--------------------------------------------------|
+| `name`              | `CRYPTO momentum bot`            | Human-readable label                             |
+| `description`       | `Trades top BTC/ETH pairs on …`  | One-line pitch                                   |
+| `method`            | `Linear regression + Groq vote`  | How the bot decides, in plain English            |
+| `ai_used`           | `groq`                           | Provider used to GENERATE this bot               |
+| `compatible_models` | `groq, anthropic`                | Providers that can RUN it                        |
+| `asset_type`        | `crypto`                         | One of: stocks, crypto, etfs, futures, options   |
+| `universe`          | `crypto_universe.txt`            | Universe file this bot expects                   |
+| `requirements`      | `scikit-learn, ccxt`             | pip packages beyond APEX's bundled set           |
+
 ### Minimal skeleton
 
 ```python
 """
-My example bot — buys SPY every market open, sells at close.
+APEX-BOT-META
+name:               My SPY bot
+description:        Buys SPY at open, sells at close
+method:             Single-position day-bracket on SPY
+ai_used:            anthropic
+compatible_models:  anthropic, openai
+asset_type:         stocks
+universe:           longbot_universe.txt
+requirements:
 """
 
 import os
@@ -84,9 +122,26 @@ need to ship them — they're already in the installer.)
 | `requests`        | HTTP                                      |
 | `python-dotenv`   | Read `.env`                               |
 
-Any other dependency you need must be in the standard library or
-shipped inside your `.py` file as inline code — APEX won't
-`pip install` extra packages on the user's machine.
+### Need extra packages? (v4.6.4+)
+
+Any **cloud-run** bot can declare extra dependencies in its
+`APEX-BOT-META → requirements:` line. The Oracle server preflights
+`pip install` into the shared venv on the bot's first start and
+caches a marker so subsequent starts skip the install:
+
+```
+requirements: scikit-learn, ccxt, ta-lib
+```
+
+If you forget to declare a requirement, the server's import scanner
+will try to detect it from your `import` statements (covers common
+packages like `sklearn` → `scikit-learn`, `cv2` → `opencv-python-headless`).
+Declaring is more reliable.
+
+**Local-run** custom bots use the frozen PyInstaller Python on the
+user's machine — that interpreter can't pip-install new packages.
+Limit local bots to the packages in the table above. If you need
+something outside that list, the bot must run on the cloud.
 
 ---
 
@@ -173,11 +228,43 @@ marketplace; downloads stop immediately.
 ## 7. Quick checklist before drag-and-drop
 
 - [ ] Single `.py` file, under 1 MB
+- [ ] **`APEX-BOT-META` docstring** at the top with name, description, method, ai_used, compatible_models, asset_type, universe, requirements
 - [ ] `main()` function at module level, no args
 - [ ] Reads API keys from `os.environ`, never hardcoded
 - [ ] Uses `print(..., flush=True)` so logs appear live
 - [ ] Returns from `main()` to exit cleanly
-- [ ] No imports outside the packages listed in section 2
+- [ ] Cloud bot: extra deps declared in `requirements:` — Local bot: only bundled packages
 - [ ] Writes only inside `APEX_DATA_DIR`
 
 If all boxes are ticked, drop it on APEX and you're done.
+
+---
+
+## 8. Building a UNIVERSE bot instead of a trading bot (v4.6.4+)
+
+The Make Bot tab has a switch: **Trade Bot** (default) or **Universe Bot**.
+
+A universe bot doesn't open trades — it produces a fresh `*_universe.txt`
+file that a trading bot then consumes. Examples: nightly scanner that
+picks the top 30 momentum stocks, weekly screen for high-beta crypto,
+sentiment-driven shortlist.
+
+A universe bot's META block declares:
+
+```
+APEX-BOT-META
+name:         Crypto top-20 scanner
+description:  Rewrites crypto_universe.txt nightly with the top-20 movers
+method:       24h-volume rank + price-action filter
+asset_type:   crypto
+universe:     crypto_universe.txt   ← the file this bot REWRITES
+ai_used:      groq
+compatible_models: groq, anthropic
+requirements: ccxt
+```
+
+The `asset_type` field is what APEX uses to enforce compatibility:
+when you pair a trading bot with a universe in the bot tab, the
+dropdown only lists universes whose `asset_type` matches the trading
+bot's. A `crypto` bot will never accidentally consume a `stocks`
+universe.
