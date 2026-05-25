@@ -420,33 +420,11 @@ class BotProcessWidget(QWidget):
                 f"and try again.")
             return
 
-    def _is_non_trading_script(self) -> bool:
-        """Universe-manager + universe-generator custom bots don't need
-        Alpaca credentials — they only read market data and rewrite a
-        *_universe.txt. Return True if this BotProcessWidget is wrapping
-        one of those scripts."""
-        # Built-in: the Universe Manager tab uses side='UNIVERSE'
-        if str(self.side).upper() in ("UNIVERSE", "UNIVERSE_MANAGER"):
-            return True
-        # Custom bot — peek at its META block for asset_type='universe'
-        try:
-            from pathlib import Path as _P
-            from core.bot_meta import parse_meta
-            if self.script and _P(str(self.script)).exists():
-                src = open(str(self.script), "r", encoding="utf-8").read()
-                meta = parse_meta(src) or {}
-                if meta.get("asset_type", "").lower() == "universe":
-                    return True
-                # Also detect "this script rewrites a universe file"
-                # heuristic: META.name contains 'universe' AND no
-                # alpaca.trading import.
-                name_low = (meta.get("name") or "").lower()
-                if "universe" in name_low and \
-                        "alpaca.trading" not in src:
-                    return True
-        except Exception:
-            pass
-        return False
+        # V4.6.11 — CRITICAL FIX: the launch logic below used to live
+        # at module level after _is_non_trading_script's body and was
+        # therefore DEAD CODE since v4.6.6. That broke RUN BOT for the
+        # Universe tab and any local (non-cloud) bot. Now it's back
+        # inside start_bot where it belongs.
         # V7.1.13: route to the cloud path when this bot is in
         # cloud_bots. Local QProcess code only runs for laptop bots.
         if self._is_cloud_mode():
@@ -524,6 +502,35 @@ class BotProcessWidget(QWidget):
                       "This is normal — wait for its header.", C["muted"])
         else:
             self._log("Failed to start process", C["red"])
+
+    def _is_non_trading_script(self) -> bool:
+        """Universe-manager + universe-generator custom bots don't need
+        Alpaca credentials — they only read market data and rewrite a
+        *_universe.txt. Return True if this BotProcessWidget is wrapping
+        one of those scripts. Used by start_bot's precheck to skip the
+        'MUST ASSIGN API KEY' warning for non-trading scripts."""
+        # Built-in: the Universe Manager tab uses side='UNIVERSE'
+        if str(self.side).upper() in ("UNIVERSE", "UNIVERSE_MANAGER"):
+            return True
+        # Custom bot — peek at its META block for asset_type='universe'
+        try:
+            from pathlib import Path as _P
+            from core.bot_meta import parse_meta
+            script_path = getattr(self, "script_path", None) \
+                          or getattr(self, "script", None)
+            if script_path and _P(str(script_path)).exists():
+                src = open(str(script_path), "r",
+                           encoding="utf-8").read()
+                meta = parse_meta(src) or {}
+                if meta.get("asset_type", "").lower() == "universe":
+                    return True
+                name_low = (meta.get("name") or "").lower()
+                if "universe" in name_low and \
+                        "alpaca.trading" not in src:
+                    return True
+        except Exception:
+            pass
+        return False
 
     def stop_bot(self):
         # V7.1.13: cloud bots get a /bots/{side}/stop call instead of
