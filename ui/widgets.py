@@ -380,7 +380,15 @@ class BotProcessWidget(QWidget):
         # instead of letting the bot die opaquely on its first Alpaca
         # call. Applies BEFORE the cloud-mode branch so the warning is
         # the same regardless of where the bot will run.
-        if not self._has_alpaca_key_for_side():
+        #
+        # V4.6.6 — skip the Alpaca-key precheck for non-trading scripts
+        # (UNIVERSE manager + asset_type='universe' custom bots). These
+        # scripts only read market data + rewrite a *_universe.txt
+        # file — they NEVER submit orders, so Alpaca credentials are
+        # genuinely not needed. Previously hitting RUN on the Universe
+        # Manager surfaced a misleading "MUST ASSIGN API KEY" dialog.
+        if not self._is_non_trading_script() \
+                and not self._has_alpaca_key_for_side():
             from PyQt6.QtWidgets import QMessageBox as _QMB
             _QMB.warning(
                 self.window(),
@@ -391,6 +399,34 @@ class BotProcessWidget(QWidget):
                 f"dropdown to <b>{self.side}</b>, click <b>Save slots</b>, "
                 f"and try again.")
             return
+
+    def _is_non_trading_script(self) -> bool:
+        """Universe-manager + universe-generator custom bots don't need
+        Alpaca credentials — they only read market data and rewrite a
+        *_universe.txt. Return True if this BotProcessWidget is wrapping
+        one of those scripts."""
+        # Built-in: the Universe Manager tab uses side='UNIVERSE'
+        if str(self.side).upper() in ("UNIVERSE", "UNIVERSE_MANAGER"):
+            return True
+        # Custom bot — peek at its META block for asset_type='universe'
+        try:
+            from pathlib import Path as _P
+            from core.bot_meta import parse_meta
+            if self.script and _P(str(self.script)).exists():
+                src = open(str(self.script), "r", encoding="utf-8").read()
+                meta = parse_meta(src) or {}
+                if meta.get("asset_type", "").lower() == "universe":
+                    return True
+                # Also detect "this script rewrites a universe file"
+                # heuristic: META.name contains 'universe' AND no
+                # alpaca.trading import.
+                name_low = (meta.get("name") or "").lower()
+                if "universe" in name_low and \
+                        "alpaca.trading" not in src:
+                    return True
+        except Exception:
+            pass
+        return False
         # V7.1.13: route to the cloud path when this bot is in
         # cloud_bots. Local QProcess code only runs for laptop bots.
         if self._is_cloud_mode():

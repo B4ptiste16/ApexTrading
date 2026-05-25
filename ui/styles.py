@@ -15,15 +15,20 @@ THEMES: dict = {
         "green":  "#3eb8a4", "red":    "#c28e97", "orange": "#c8a070",
         "yellow": "#cdc578", "purple": "#8a93c9",
         "bg":     "#161a26", "bg2":    "#1d2336",
-        "panel":  "#1a1f2d", "panel2": "#222837", "border": "#2a3447",
-        "text":   "#d8dde8", "muted":  "#6a7894",
+        # V4.6.6 — sobered-up palette. Border was #2a3447 (high contrast,
+        # showed up as visible outlines on every card); softened to
+        # blend into panel so containers separate by subtle background
+        # tint instead of hard outlines. Muted text bumped from
+        # #6a7894 to #9aa6c4 for readability over the dark blue bg.
+        "panel":  "#1a1f2d", "panel2": "#222837", "border": "#222837",
+        "text":   "#e3e8f2", "muted":  "#9aa6c4",
     },
     "Midnight Blue": {
         "green":  "#67a8d6", "red":    "#d68f9c", "orange": "#d6a36a",
         "yellow": "#d8d27a", "purple": "#9ba5e0",
         "bg":     "#0f1320", "bg2":    "#161d34",
-        "panel":  "#141a2c", "panel2": "#1c2440", "border": "#2a3960",
-        "text":   "#dfe5f0", "muted":  "#6f7da0",
+        "panel":  "#141a2c", "panel2": "#1c2440", "border": "#1c2440",
+        "text":   "#e5eaf3", "muted":  "#9ba6c2",
     },
     "Forest": {
         "green":  "#a3c98a", "red":    "#c9928a", "orange": "#d2a973",

@@ -1631,7 +1631,19 @@ def main():
                 time.sleep(s)
 
             else:
-                nxt = clock.next_open.astimezone().strftime("%a %b %d %H:%M")
+                # V4.6.6 — display next_open in Eastern Time (NYSE).
+                # Bots run on Oracle (UTC), so `.astimezone()` with no
+                # arg returned UTC, which the user saw as 13:30 when
+                # NYSE actually opens at 9:30 ET (= 15:30 CEST for FR
+                # users). ET is unambiguous regardless of server tz.
+                try:
+                    from zoneinfo import ZoneInfo as _ZI
+                    _ET = _ZI("America/New_York")
+                    nxt = clock.next_open.astimezone(_ET).strftime(
+                        "%a %b %d %H:%M ET")
+                except Exception:
+                    nxt = clock.next_open.astimezone().strftime(
+                        "%a %b %d %H:%M")
                 print(f"\r[{datetime.now().strftime('%H:%M:%S')}] "
                       f"CLOSED  -  next open: {nxt}  ", end="")
                 time.sleep(60)
