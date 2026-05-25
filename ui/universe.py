@@ -9,14 +9,18 @@ bottom-left, and so on. With LONG + a custom CRYPTO bot you see stocks
 on the left, crypto on the right — no scrolling between them.
 """
 
+from pathlib import Path
+
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QFrame,
+    QPushButton,
 )
 from PyQt6.QtCore import Qt
 
 from ui.styles  import COLORS
 from ui.widgets import (
     SectionHeader, BotProcessWidget, ScrollContent, DataTable,
+    NoScrollComboBox,
 )
 import core.data as D
 
@@ -89,7 +93,40 @@ class UniverseTab(QWidget):
         info.setWordWrap(True)
         s.add(info)
 
+        # V4.6.9 — Universe-script picker. The built-in universe_manager.py
+        # is always available; every custom universe generator that the
+        # user has created via Make Bot (kind=Universe) shows up too.
+        # Selecting a different one swaps the script the BotProcessWidget
+        # below runs.
+        pick_row = QHBoxLayout()
+        pick_lbl = QLabel("Run which universe script:")
+        pick_lbl.setStyleSheet(f"color:{C['muted']};font-size:11px;")
+        self._script_combo = NoScrollComboBox()
+        self._script_combo.setMinimumWidth(280)
+        self._populate_script_combo()
+        self._script_combo.currentIndexChanged.connect(
+            self._on_script_changed)
+        self._desc_lbl = QLabel("")
+        self._desc_lbl.setStyleSheet(
+            f"color:{C['muted']};font-size:10px;")
+        self._desc_lbl.setWordWrap(True)
+        # Refresh button to rescan the universe_scripts/ folder
+        refresh_btn = QPushButton("↻")
+        refresh_btn.setToolTip("Rescan universe scripts")
+        refresh_btn.setFixedWidth(28)
+        refresh_btn.clicked.connect(self._populate_script_combo)
+        pick_row.addWidget(pick_lbl)
+        pick_row.addWidget(self._script_combo)
+        pick_row.addWidget(refresh_btn)
+        pick_row.addStretch()
+        pw = QWidget()
+        pw.setLayout(pick_row)
+        s.add(pw)
+        s.add(self._desc_lbl)
+
         s.add(SectionHeader("RUN", C["purple"]))
+        # The runner script can be swapped at runtime. Default to the
+        # built-in universe_manager.py path.
         self.runner = BotProcessWidget("UNIVERSE", D.UNIVERSE_SCRIPT)
         s.add(self.runner)
 
@@ -117,7 +154,99 @@ class UniverseTab(QWidget):
 
         self.refresh()
 
+    # ── V4.6.9 universe-script picker ───────────────────────────
+
+    def _populate_script_combo(self):
+        """Build / rebuild the dropdown contents. Always include the
+        built-in universe_manager.py at the top, then list every
+        registered custom universe generator from settings."""
+        self._script_combo.blockSignals(True)
+        self._script_combo.clear()
+        # Built-in
+        self._script_combo.addItem(
+            "Built-in: universe_manager.py  (default)",
+            {"path": str(D.UNIVERSE_SCRIPT),
+             "label": "Built-in universe_manager",
+             "description": "Default APEX universe scanner — picks "
+                            "movers across LONG / SHORT / DAY pools."})
+        # Custom universe scripts the user has generated via Make Bot
+        try:
+            s = D.load_settings()
+            scripts = s.get("universe_scripts", []) or []
+        except Exception:
+            scripts = []
+        for entry in scripts:
+            if not isinstance(entry, dict):
+                continue
+            path = entry.get("script", "")
+            if not path or not Path(path).exists():
+                continue
+            label  = entry.get("label", entry.get("id", "(unnamed)"))
+            target = entry.get("target", "")
+            desc   = entry.get("description", "")
+            ui_label = f"{label}  →  rewrites {target}" if target else label
+            self._script_combo.addItem(ui_label, {
+                "path":        path,
+                "label":       label,
+                "description": desc or "(no description in META)",
+            })
+        # Restore last-selected script if it still exists
+        try:
+            last = D.load_settings().get("universe_script_selection", "")
+            if last:
+                for i in range(self._script_combo.count()):
+                    if (self._script_combo.itemData(i) or {}).get(
+                            "path") == last:
+                        self._script_combo.setCurrentIndex(i)
+                        break
+        except Exception:
+            pass
+        self._script_combo.blockSignals(False)
+        self._on_script_changed()  # update runner + desc to match selection
+
+    def _on_script_changed(self):
+        data = self._script_combo.currentData() or {}
+        path = data.get("path", str(D.UNIVERSE_SCRIPT))
+        # Swap the runner's script pointer in-place. BotProcessWidget
+        # stores it as `script_path`; also update the visible script
+        # filename label inside the runner so the user can confirm at
+        # a glance which script will execute on next RUN click.
+        try:
+            self.runner.script_path = Path(path)
+        except Exception as e:
+            print(f"[universe-tab] could not swap runner script_path: {e}")
+        # Update the in-widget script filename label (if present)
+        try:
+            for child in self.runner.findChildren(QLabel):
+                txt = child.text()
+                # The label is set to the .name of the script (e.g.
+                # "universe_manager.py"). Replace any label whose text
+                # looks like a .py filename.
+                if txt.endswith(".py"):
+                    child.setText(Path(path).name)
+                    break
+        except Exception:
+            pass
+        # Persist selection so it sticks across app restarts
+        try:
+            s = D.load_settings()
+            s["universe_script_selection"] = str(path)
+            import json as _j
+            with open(D.SETTINGS_FILE, "w", encoding="utf-8") as f:
+                _j.dump(s, f, indent=2)
+        except Exception:
+            pass
+        # Update the description label
+        self._desc_lbl.setText(
+            f"▸ {data.get('description', '')}")
+
     def refresh(self):
+        # Refresh both the script combo (new universe bots may have
+        # been created since last paint) and the breakdown grid.
+        try:
+            self._populate_script_combo()
+        except Exception as e:
+            print(f"[universe-tab] script combo refresh failed: {e}")
         bd = D.read_universe_breakdown()
         sides = bd.get("sides", []) or ["LONG", "SHORT", "DAY"]
 
