@@ -28,6 +28,21 @@ C = COLORS
 
 
 # ─────────────────────────────────────────
+# NO-SCROLL COMBO BOX
+# ─────────────────────────────────────────
+
+class NoScrollComboBox(QComboBox):
+    """QComboBox that ignores scroll-wheel events.
+
+    Prevents accidentally changing a setting while the user is simply
+    scrolling the page past a dropdown — the event is passed up to the
+    scroll area instead.
+    """
+    def wheelEvent(self, event):
+        event.ignore()   # let the parent scroll area handle it
+
+
+# ─────────────────────────────────────────
 # CHART VIEW (embeds Plotly HTML)
 # ─────────────────────────────────────────
 
@@ -404,6 +419,9 @@ class BotProcessWidget(QWidget):
         env = QProcessEnvironment.systemEnvironment()
         env.insert("PYTHONIOENCODING", "utf-8")
         env.insert("PYTHONUNBUFFERED", "1")
+        # Pass DATA_DIR explicitly so bot scripts' load_dotenv() always
+        # finds the right .env regardless of working directory.
+        env.insert("APEX_DATA_DIR", str(DATA_DIR))
         self.process.setProcessEnvironment(env)
 
         if frozen:

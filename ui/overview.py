@@ -547,7 +547,10 @@ class ToolsTab(QWidget):
         else:
             self._build_coming_soon_section(s, mode)
 
-        # ── ANTHROPIC + AUTOMATION are common to all modes ─
+        # ── AUTOMATION (always visible, all broker modes) ───
+        self._build_automation_section(s)
+
+        # ── AI PROVIDER KEYS (common to all modes) ──────────
         self._build_ai_key_section(s)
 
     def _build_coming_soon_section(self, s, mode: str):
@@ -967,6 +970,63 @@ class ToolsTab(QWidget):
         mfl.addWidget(m_bwrap, 2, 0, 1, 2)
         s.add(manual_frame)
 
+    def _build_automation_section(self, s):
+        """AUTOMATION — auto-start bots at US market open.
+        Lives in its own method so it always appears regardless of
+        which broker section is above it, and can't be skipped by an
+        exception in the AI key section."""
+        s.add(SectionHeader("AUTOMATION", C["green"]))
+
+        auto_intro = QLabel(
+            "Tick each bot you want APEX to auto-start at the US "
+            "market open (and auto-stop at the close). Bots not "
+            "ticked stay manual — press ▶ on their tab.")
+        auto_intro.setStyleSheet(f"color:{C['muted']};font-size:11px;")
+        auto_intro.setWordWrap(True)
+        s.add(auto_intro)
+
+        # Container rebuilt by _rebuild_auto_schedule_row whenever
+        # the active-bot registry changes.
+        self._auto_sched_holder = QFrame()
+        self._auto_sched_holder.setStyleSheet(
+            f"background:{C['panel']};border:1px solid {C['border']};"
+            f"border-radius:8px;")
+        self._auto_sched_layout = QHBoxLayout(self._auto_sched_holder)
+        self._auto_sched_layout.setContentsMargins(14, 10, 14, 10)
+        self._auto_sched_layout.setSpacing(18)
+        s.add(self._auto_sched_holder)
+        self._auto_sched_checks: dict[str, QCheckBox] = {}
+        self._rebuild_auto_schedule_row()
+
+        # Cloud-run row — immediately below so the two concepts live together
+        cloud_intro = QLabel(
+            "Run on Oracle 24/7  (laptop optional — APEX-server "
+            "manages the process, with cloud-side market-clock scheduling):")
+        cloud_intro.setStyleSheet(f"color:{C['muted']};font-size:11px;")
+        cloud_intro.setWordWrap(True)
+        s.add(cloud_intro)
+
+        self._cloud_holder = QFrame()
+        self._cloud_holder.setStyleSheet(
+            f"background:{C['panel']};border:1px solid {C['border']};"
+            f"border-radius:8px;")
+        self._cloud_layout = QHBoxLayout(self._cloud_holder)
+        self._cloud_layout.setContentsMargins(14, 10, 14, 10)
+        self._cloud_layout.setSpacing(18)
+        s.add(self._cloud_holder)
+        self._cloud_checks: dict[str, QCheckBox] = {}
+        self._rebuild_cloud_row()
+
+        auto_note = QLabel(
+            "Local bots run on this computer and stop if you quit "
+            "APEX. Cloud bots run on the Oracle server — they keep "
+            "trading with your laptop closed. The cloud's own "
+            "scheduler starts/stops them based on the US market "
+            "clock when their auto-schedule box (above) is also ticked.")
+        auto_note.setStyleSheet(f"color:{C['muted']};font-size:10px;")
+        auto_note.setWordWrap(True)
+        s.add(auto_note)
+
     def _build_ai_key_section(self, s):
         """AI provider API key entry.
         Only stores API keys here — provider/model/mode are chosen
@@ -1069,61 +1129,104 @@ class ToolsTab(QWidget):
         _on_provider_changed(0)
 
     def _save_alpaca_slots(self):
-        """V4.0.3 — translate slot dropdown assignments into ALPACA_*
-        env vars. Three steps: (1) collect new mappings, (2) delete every
-        possible side's keys from .env so stale assignments don't leak,
-        (3) write the new ones. write_env_keys ignores empty values so
-        we can't use it for the 'clear' step — that's what delete_env_keys
-        is for."""
+        """Translate slot dropdown assignments into ALPACA_* env vars.
+        Steps: (1) collect new mappings, (2) wipe all existing Alpaca
+        keys, (3) write the new ones, (4) persist slot order.
+        Full error handling so failures surface to the user instead of
+        silently succeeding with an empty .env."""
         from PyQt6.QtCore import QTimer as _QT
-        new_writes: dict[str, str] = {}
-        seen_sides: set[str] = set()
-        for slot in self._alpaca_slot_edits:
-            side = slot["assign"].currentData()
-            if side == "__none__":
-                continue
-            if side in seen_sides:
+        try:
+            new_writes: dict[str, str] = {}
+            seen_sides: set[str] = set()
+            missing: list[str] = []
+
+            for slot in self._alpaca_slot_edits:
+                side = slot["assign"].currentData()
+                if not side or side == "__none__":
+                    continue
+                if side in seen_sides:
+                    self.keys_msg.setText(
+                        f"⚠  Multiple slots assigned to {side} — "
+                        f"only the first kept.")
+                    self.keys_msg.setStyleSheet(
+                        f"color:{C['orange']};font-size:11px;")
+                    continue
+                seen_sides.add(side)
+                key_val    = slot["key"].text().strip()
+                secret_val = slot["secret"].text().strip()
+                if not key_val or not secret_val:
+                    missing.append(side)
+                    continue
+                new_writes[f"ALPACA_API_KEY_{side}"]    = key_val
+                new_writes[f"ALPACA_SECRET_KEY_{side}"] = secret_val
+
+            if missing:
                 self.keys_msg.setText(
-                    f"⚠  Multiple slots assigned to {side}. "
-                    f"Only the first kept.")
+                    f"⚠  Slot(s) for {', '.join(missing)} have an empty "
+                    f"key or secret — fill both fields before saving.")
                 self.keys_msg.setStyleSheet(
                     f"color:{C['orange']};font-size:11px;")
-                continue
-            seen_sides.add(side)
-            new_writes[f"ALPACA_API_KEY_{side}"]    = slot["key"].text()
-            new_writes[f"ALPACA_SECRET_KEY_{side}"] = slot["secret"].text()
+                # Still continue to save any complete slots
 
-        # 1. Wipe ALL existing Alpaca slot entries for any side we know
-        # about (built-ins + every custom bot in the registry). This
-        # guarantees a slot that was just re-pointed to 'Unassigned'
-        # doesn't leave a stale key behind.
-        candidate_sides = ["LONG", "SHORT", "DAY"]
-        try:
-            reg = D.load_bot_registry()
-            candidate_sides += [str(c.get("id", "")).upper()
-                                 for c in reg.get("custom", [])]
-        except Exception:
-            pass
-        to_delete = []
-        for side in candidate_sides:
-            for prefix in ("ALPACA_API_KEY_", "ALPACA_SECRET_KEY_"):
-                to_delete.append(f"{prefix}{side}")
-        D.delete_env_keys(to_delete)
+            # 1. Wipe ALL existing Alpaca slot entries for any known side
+            # so a slot re-pointed to 'Unassigned' doesn't leave a stale key.
+            candidate_sides = ["LONG", "SHORT", "DAY"]
+            try:
+                reg = D.load_bot_registry()
+                candidate_sides += [str(c.get("id", "")).upper()
+                                     for c in reg.get("custom", [])]
+            except Exception:
+                pass
+            to_delete = [f"{p}{s}"
+                         for s in candidate_sides
+                         for p in ("ALPACA_API_KEY_", "ALPACA_SECRET_KEY_")]
+            D.delete_env_keys(to_delete)
 
-        # 2. Write the new assignments
-        D.write_env_keys(new_writes)
+            # 2. Write the new assignments (skips empty — already filtered above)
+            if new_writes:
+                D.write_env_keys(new_writes)
 
-        # 3. Persist slot order so custom-bot assignments survive restarts
-        import json as _json
-        _order = [slot["assign"].currentData() for slot in self._alpaca_slot_edits]
-        _s = D.load_settings()
-        _s["alpaca_slot_order"] = _order
-        with open(D.SETTINGS_FILE, "w", encoding="utf-8") as _f:
-            _json.dump(_s, _f, indent=2)
+            # 3. Persist slot order so assignments survive restarts
+            import json as _json
+            _order = [slot["assign"].currentData() for slot in self._alpaca_slot_edits]
+            _s = D.load_settings()
+            _s["alpaca_slot_order"] = _order
+            with open(D.SETTINGS_FILE, "w", encoding="utf-8") as _f:
+                _json.dump(_s, _f, indent=2)
 
-        self.keys_msg.setText("✓ Slots saved — bots use new keys on next start")
-        self.keys_msg.setStyleSheet(f"color:{C['green']};font-size:11px;")
-        _QT.singleShot(4000, lambda: self.keys_msg.setText(""))
+            # 4. Verify write succeeded by reading back
+            saved = D.read_env_keys()
+            saved_sides = [s for s in candidate_sides
+                           if saved.get(f"ALPACA_API_KEY_{s}", "").strip()
+                           and saved.get(f"ALPACA_SECRET_KEY_{s}", "").strip()]
+
+            if saved_sides and not missing:
+                self.keys_msg.setText(
+                    f"✓ Keys saved for: {', '.join(saved_sides)}  "
+                    f"— bots will use them on next start")
+                self.keys_msg.setStyleSheet(f"color:{C['green']};font-size:11px;")
+            elif saved_sides:
+                self.keys_msg.setText(
+                    f"✓ Saved {', '.join(saved_sides)}  "
+                    f"(⚠ incomplete slots above were skipped)")
+                self.keys_msg.setStyleSheet(f"color:{C['orange']};font-size:11px;")
+            elif not new_writes:
+                self.keys_msg.setText(
+                    "⚠  Nothing saved — assign a bot and fill key + secret first.")
+                self.keys_msg.setStyleSheet(f"color:{C['orange']};font-size:11px;")
+            else:
+                self.keys_msg.setText(
+                    f"⚠  Save may have failed — keys not found in .env  "
+                    f"({D.ENV_FILE})")
+                self.keys_msg.setStyleSheet(f"color:{C['red']};font-size:11px;")
+
+            _QT.singleShot(6000, lambda: self.keys_msg.setText(""))
+
+        except Exception as e:
+            self.keys_msg.setText(f"✗ Save failed: {e}")
+            self.keys_msg.setStyleSheet(f"color:{C['red']};font-size:11px;")
+            import traceback
+            print(f"[save-alpaca-slots] {traceback.format_exc()}")
 
     def _save_manual_keys(self):
         from PyQt6.QtCore import QTimer as _QT
@@ -1148,62 +1251,6 @@ class ToolsTab(QWidget):
             f"✓ {prov_label} key saved — sync to Oracle to use it on cloud bots")
         self._ai_save_msg.setStyleSheet(f"color:{C['green']};font-size:11px;")
         _QT.singleShot(5000, lambda: self._ai_save_msg.setText(""))
-
-        # ── AUTOMATION  (V7.1.10) ────────────────────────
-        s.add(SectionHeader("AUTOMATION", C["green"]))
-        auto_intro = QLabel(
-            "Tick each bot you want APEX to auto-start at the US "
-            "market open (and auto-stop at the close). Bots not "
-            "ticked stay manual — press ▶ on their tab.")
-        auto_intro.setStyleSheet(f"color:{C['muted']};font-size:11px;")
-        auto_intro.setWordWrap(True)
-        s.add(auto_intro)
-
-        # Container the row gets rebuilt into when bots are
-        # added / removed / silenced. Refresh() also calls
-        # _rebuild_auto_schedule_row so the visible bots stay in sync.
-        self._auto_sched_holder = QFrame()
-        self._auto_sched_holder.setStyleSheet(
-            f"background:{C['panel']};border:1px solid {C['border']};"
-            f"border-radius:8px;")
-        self._auto_sched_layout = QHBoxLayout(self._auto_sched_holder)
-        self._auto_sched_layout.setContentsMargins(14, 10, 14, 10)
-        self._auto_sched_layout.setSpacing(18)
-        s.add(self._auto_sched_holder)
-        self._auto_sched_checks: dict[str, QCheckBox] = {}
-        self._rebuild_auto_schedule_row()
-
-        # V7.1.13: cloud-execution toggle row, immediately under the
-        # auto-schedule row so the two related concepts live together.
-        cloud_intro = QLabel(
-            "Run on Oracle 24/7  (laptop optional — APEX-server "
-            "manages the process, with cloud-side market-clock scheduling):"
-        )
-        cloud_intro.setStyleSheet(f"color:{C['muted']};font-size:11px;")
-        cloud_intro.setWordWrap(True)
-        s.add(cloud_intro)
-
-        self._cloud_holder = QFrame()
-        self._cloud_holder.setStyleSheet(
-            f"background:{C['panel']};border:1px solid {C['border']};"
-            f"border-radius:8px;")
-        self._cloud_layout = QHBoxLayout(self._cloud_holder)
-        self._cloud_layout.setContentsMargins(14, 10, 14, 10)
-        self._cloud_layout.setSpacing(18)
-        s.add(self._cloud_holder)
-        self._cloud_checks: dict[str, QCheckBox] = {}
-        self._rebuild_cloud_row()
-
-        auto_note = QLabel(
-            "Local bots run on this computer and stop if you quit "
-            "APEX. Cloud bots run on the Oracle server — they keep "
-            "trading with your laptop closed. The cloud's own "
-            "scheduler starts/stops them based on the US market "
-            "clock when their auto-schedule box (above) is also ticked."
-        )
-        auto_note.setStyleSheet(f"color:{C['muted']};font-size:10px;")
-        auto_note.setWordWrap(True)
-        s.add(auto_note)
 
         # ── UPDATES  (V7.1.3) ────────────────────────────
         # The old "allow updates during the trading day" toggle is gone:

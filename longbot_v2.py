@@ -221,7 +221,16 @@ UNIVERSE_FILE = "longbot_universe.txt"   # managed by universe_manager.py
 # SETUP
 # =========================================================
 
-load_dotenv()
+# Load .env from the APEX data directory so keys saved via the Tools
+# tab are always found, regardless of the process working directory.
+_apex_data_dir = os.environ.get("APEX_DATA_DIR") or str(
+    __import__("pathlib").Path(
+        os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA") or
+        str(__import__("pathlib").Path.home())
+    ) / "APEX Trading Platform"
+)
+load_dotenv(__import__("pathlib").Path(_apex_data_dir) / ".env")
+load_dotenv()  # fallback: also search CWD / parent dirs
 os.makedirs(CHART_DIR, exist_ok=True)
 
 _AI_PROVIDER, _AI_MODEL, _AI_KEY, _AI_MODE = load_ai_config()

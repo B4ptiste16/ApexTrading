@@ -78,6 +78,13 @@ from alpaca.trading.enums import (
 )
 
 warnings.filterwarnings("ignore")
+_apex_data_dir = os.environ.get("APEX_DATA_DIR") or str(
+    __import__("pathlib").Path(
+        os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA") or
+        str(__import__("pathlib").Path.home())
+    ) / "APEX Trading Platform"
+)
+load_dotenv(__import__("pathlib").Path(_apex_data_dir) / ".env")
 load_dotenv()
 
 
