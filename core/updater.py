@@ -316,20 +316,41 @@ def launch_downloaded_installer(local_path: str) -> None:
     # Plain `/F /IM APEX.exe` kills every APEX.exe by image name (GUI
     # + all --run-bot subprocesses) without touching cmd / taskkill /
     # this batch script.
+    # V4.6.3 — fully silent install. The previous flags (/SP- /NORESTART)
+    # only suppressed the welcome page; the Inno wizard still popped up
+    # and waited for the user to click Install. Users dismissed the
+    # "Download complete" toast in APEX and never realized the wizard
+    # was waiting behind another window, so v4.6.1 / v4.6.2 auto-updates
+    # never actually replaced any files. Result: app kept reporting the
+    # baked-in 4.5.2 version and the updater kept prompting forever.
+    #
+    # /VERYSILENT          → no UI at all (no wizard, no progress bar)
+    # /SUPPRESSMSGBOXES    → no Yes/No/Retry dialogs either
+    # /CLOSEAPPLICATIONS   → if any APEX file is locked, ask Restart Mgr
+    #                        to close it (belt + suspenders to taskkill)
+    # /RESTARTAPPLICATIONS → relaunch APEX after install completes
+    # /LOG=...             → write install log so we can diagnose failures
     bat.write_text(
         "@echo off\r\n"
         "set LOG=%TEMP%\\apex_update.log\r\n"
+        "set ILOG=%TEMP%\\apex_install.log\r\n"
         "echo. >> \"%LOG%\"\r\n"
         "echo === APEX Update %DATE% %TIME% === >> \"%LOG%\"\r\n"
         "echo Step 1: kill APEX.exe instances >> \"%LOG%\"\r\n"
         "taskkill /F /IM APEX.exe >> \"%LOG%\" 2>&1\r\n"
         "echo Step 2: settle (2s) >> \"%LOG%\"\r\n"
         "timeout /t 2 /nobreak >nul\r\n"
-        "echo Step 3: launch installer >> \"%LOG%\"\r\n"
+        "echo Step 3: launch installer (silent) >> \"%LOG%\"\r\n"
         f"echo Installer: \"{local_path}\" >> \"%LOG%\"\r\n"
-        f"\"{local_path}\" /SP- /NORESTART\r\n"
+        f"\"{local_path}\" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART "
+        f"/CLOSEAPPLICATIONS /RESTARTAPPLICATIONS \"/LOG=%ILOG%\"\r\n"
         "echo Step 4: installer exit code: %ERRORLEVEL% >> \"%LOG%\"\r\n"
-        "echo Step 5: done >> \"%LOG%\"\r\n"
+        # Always relaunch APEX, even if /RESTARTAPPLICATIONS didn't fire
+        # (Restart Manager only relaunches apps it was tracking, and we
+        # taskkilled before install).
+        "echo Step 5: relaunch APEX >> \"%LOG%\"\r\n"
+        "start \"\" \"%LOCALAPPDATA%\\APEX Trading Platform\\APEX.exe\"\r\n"
+        "echo Step 6: done >> \"%LOG%\"\r\n"
         "del \"%~f0\" >nul 2>&1\r\n",
         encoding="cp1252",
     )

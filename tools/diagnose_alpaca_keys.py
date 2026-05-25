@@ -100,6 +100,132 @@ def test_pair(side: str, key: str, secret: str) -> tuple:
     return ("bad", f"HTTP {r.status_code} — {r.text[:120]}")
 
 
+def fetch_server_creds() -> dict | None:
+    """V4.6.3 — pull whatever the APEX server thinks our credentials
+    are. This catches sync silently writing to the wrong user_id or
+    the server returning stale data. Returns the decoded blob, or
+    None if anything fails. Prints the failure reason inline."""
+    apex_dir = find_env().parent
+    auth_path = apex_dir / "apex_auth.json"
+    srv_path  = apex_dir / "apex_server.json"
+    try:
+        import json as _j
+        auth = _j.loads(auth_path.read_text(encoding="utf-8"))
+        token = auth.get("token")
+    except Exception as e:
+        print(f"  [server] cannot read {auth_path.name}: {e}")
+        return None
+    if not token:
+        print(f"  [server] no auth token stored — sign in first")
+        return None
+    server_url = "https://apex-api.openblock.club"
+    try:
+        srv = _j.loads(srv_path.read_text(encoding="utf-8"))
+        server_url = srv.get("url", server_url).rstrip("/")
+    except Exception:
+        pass
+    try:
+        r = requests.get(
+            f"{server_url}/credentials",
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=12,
+        )
+    except Exception as e:
+        print(f"  [server] network error: {e}")
+        return None
+    if r.status_code == 401:
+        print(f"  [server] HTTP 401 — auth token expired, sign in again")
+        return None
+    if r.status_code != 200:
+        print(f"  [server] HTTP {r.status_code} — {r.text[:200]}")
+        return None
+    try:
+        return r.json() or {}
+    except Exception as e:
+        print(f"  [server] JSON parse failed: {e}")
+        return None
+
+
+def force_sync_to_server(env: dict) -> tuple[bool, str]:
+    """V4.6.3 — push the current local .env to the APEX server using
+    the stored auth token. Bypasses the GUI so a stuck Sync button
+    or expired-session error can be debugged from the CLI."""
+    apex_dir = find_env().parent
+    auth_path = apex_dir / "apex_auth.json"
+    srv_path  = apex_dir / "apex_server.json"
+    try:
+        import json as _j
+        auth = _j.loads(auth_path.read_text(encoding="utf-8"))
+        token = auth.get("token")
+    except Exception as e:
+        return (False, f"cannot read {auth_path.name}: {e}")
+    if not token:
+        return (False, "no auth token — sign in via APEX first")
+    server_url = "https://apex-api.openblock.club"
+    try:
+        srv = _j.loads(srv_path.read_text(encoding="utf-8"))
+        server_url = srv.get("url", server_url).rstrip("/")
+    except Exception:
+        pass
+    payload = {k: v for k, v in env.items() if v}
+    try:
+        r = requests.put(
+            f"{server_url}/credentials",
+            headers={"Authorization": f"Bearer {token}"},
+            json=payload, timeout=15,
+        )
+    except Exception as e:
+        return (False, f"network error: {e}")
+    if r.status_code == 401:
+        return (False, "HTTP 401 — auth token expired, sign in again "
+                       "via APEX (close + reopen, then log in)")
+    if not r.ok:
+        return (False, f"HTTP {r.status_code} — {r.text[:200]}")
+    try:
+        n = len(r.json().get("fields", []))
+    except Exception:
+        n = "?"
+    return (True, f"server now has {n} keys for this user "
+                  f"(was {len(payload)} sent)")
+
+
+def diff_local_vs_server(env: dict, server_blob: dict) -> None:
+    """Print a per-side comparison: does the server have the SAME key
+    as the local .env, a DIFFERENT key, or no key at all? This is the
+    smoking gun for cloud bot 401s — if the prefixes don't match, the
+    sync silently failed and we need to push again."""
+    print()
+    print("─" * 78)
+    print(" LOCAL .env  vs  APEX server credentials")
+    print("─" * 78)
+    sides = sorted(
+        {k[len("ALPACA_API_KEY_"):] for k in env if k.startswith("ALPACA_API_KEY_")} |
+        {k[len("ALPACA_API_KEY_"):] for k in server_blob if k.startswith("ALPACA_API_KEY_")}
+    )
+    width = max((len(s) for s in sides), default=6)
+    print(f"  {'SLOT':<{width}}  LOCAL                   SERVER                  STATE")
+    for side in sides:
+        l_key = env.get(f"ALPACA_API_KEY_{side}", "")
+        s_key = server_blob.get(f"ALPACA_API_KEY_{side}", "")
+        l_sec = env.get(f"ALPACA_SECRET_KEY_{side}", "")
+        s_sec = server_blob.get(f"ALPACA_SECRET_KEY_{side}", "")
+        l_prefix = (l_key[:8] + "…") if l_key else "—"
+        s_prefix = (s_key[:8] + "…") if s_key else "—"
+        if not l_key and not s_key:
+            state = "both empty"
+        elif l_key and not s_key:
+            state = "MISSING ON SERVER — sync hasn't run"
+        elif s_key and not l_key:
+            state = "ONLY ON SERVER — local was wiped"
+        elif l_key == s_key and l_sec == s_sec:
+            state = "OK match"
+        elif l_key == s_key:
+            state = "key match, SECRET differs"
+        else:
+            state = "KEY DIFFERS — server has stale value, RE-SYNC"
+        print(f"  {side:<{width}}  {l_prefix:<22}  {s_prefix:<22}  {state}")
+
+
 def main():
     env_path = find_env()
     print(f"reading: {env_path}\n")
@@ -142,9 +268,46 @@ def main():
         print("  6. Re-run this script to confirm green")
     else:
         print("All configured slots authenticate cleanly against Alpaca paper.")
-        print("If a cloud bot still fails, the encrypted blob on the APEX")
-        print("server may be stale — open Tools → ACCOUNT LINKING and click")
-        print("'Sync keys to APEX server' to force a fresh upload.")
+        print("Checking what the APEX server has stored for this user…")
+
+    # V4.6.3 — server-side check: pull what the APEX server has stored
+    # and diff against the local .env. This is the smoking gun for any
+    # cloud bot 401 — if the server's key prefix differs from local,
+    # the sync wrote stale data and needs a fresh push.
+    print()
+    print("─" * 78)
+    print(" APEX SERVER STATE")
+    print("─" * 78)
+    server_blob = fetch_server_creds()
+    if server_blob is None:
+        print("(could not reach server — skipping server diff)")
+    else:
+        print(f"  server has {len(server_blob)} keys stored for this user")
+        diff_local_vs_server(env, server_blob)
+        # Final actionable verdict
+        sync_needed = []
+        for side in sides:
+            l_key = env.get(f"ALPACA_API_KEY_{side}", "")
+            s_key = server_blob.get(f"ALPACA_API_KEY_{side}", "")
+            if l_key and l_key != s_key:
+                sync_needed.append(side)
+        if sync_needed:
+            print()
+            print(f"  Server keys are stale for: {', '.join(sync_needed)}")
+            print(f"  Pushing fresh local .env to server now…")
+            ok, detail = force_sync_to_server(env)
+            if ok:
+                print(f"  ✓ {detail}")
+                # Re-fetch and re-diff
+                server2 = fetch_server_creds()
+                if server2 is not None:
+                    print()
+                    print("Re-checking after push:")
+                    diff_local_vs_server(env, server2)
+            else:
+                print(f"  ✗ Push failed: {detail}")
+                print(f"  Open APEX → Tools → ACCOUNT LINKING → "
+                      f"'Sync keys to APEX server' and watch for errors.")
 
 
 if __name__ == "__main__":
