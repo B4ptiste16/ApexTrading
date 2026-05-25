@@ -359,7 +359,18 @@ _SYSTEM_PROMPT_TRADE = (
     "Alpaca disallows shorting crypto. Use BUY / SELL only.\n"
     "• Size qty defensively: `int(account['buying_power'] * pct / price)` "
     "with a `max(1, ...)` floor for stocks.\n"
-    "• Never hardcode credentials. The framework handles env vars."
+    "• Never hardcode credentials. The framework handles env vars.\n"
+    "• **Text-only AI is fully supported.** If the user picks Llama "
+    "(Groq), GPT-4o-mini, Haiku without vision, or any other text "
+    "model, build features as NUMBERS (SMA, RSI, MACD, returns, "
+    "volume ratios) and ask the LLM for a JSON decision. NEVER ask "
+    "a text-only model to look at a chart image — there is no image. "
+    "Available env vars for HTTP calls: GROQ_API_KEY, ANTHROPIC_API_KEY, "
+    "OPENAI_API_KEY, GOOGLE_AI_API_KEY. Use `requests.post(...)` and "
+    "request `response_format={'type':'json_object'}` when the provider "
+    "supports it (Groq + OpenAI do).\n"
+    "• AI-driven bots: ALWAYS wrap the LLM call in try/except and fall "
+    "back to HOLD on any error. A flaky API call must never crash the bot."
 )
 
 

@@ -145,6 +145,67 @@ something outside that list, the bot must run on the cloud.
 
 ---
 
+## 2a. Text-only AI providers (Llama via Groq, GPT-4o-mini, Haiku without vision, etc.)
+
+**Custom bots in the v4.6.5+ framework work fine with text-only AI
+models.** The framework hands your `decide()` function a clean pandas
+DataFrame of OHLCV bars — no chart images involved — so you can build
+any feature set (SMAs, RSI, MACD, regression slopes, regime flags…) as
+numbers and ask the LLM for a structured opinion.
+
+Recommended pattern:
+
+```python
+import os, json, requests
+
+def _llama_opinion(symbol, features: dict) -> dict:
+    """Ask Llama-3.3-70B on Groq for a JSON decision. Returns a dict
+    with keys: action, conf, reason. Never raises — failures degrade
+    to HOLD so the framework keeps trading."""
+    prompt = (f"{symbol} features: {json.dumps(features)}.\n"
+              f"Reply with JSON ONLY:\n"
+              f'{{"action":"BUY|SELL|HOLD","conf":0..1,"reason":"…"}}')
+    try:
+        r = requests.post(
+            "https://api.groq.com/openai/v1/chat/completions",
+            headers={"Authorization": f"Bearer {os.environ['GROQ_API_KEY']}"},
+            json={"model": "llama-3.3-70b-versatile",
+                  "messages": [{"role": "user", "content": prompt}],
+                  "response_format": {"type": "json_object"}},
+            timeout=20)
+        return json.loads(r.json()["choices"][0]["message"]["content"])
+    except Exception:
+        return {"action": "HOLD", "conf": 0, "reason": "AI call failed"}
+
+
+def decide(symbol, bars, position, account):
+    close = bars["Close"].squeeze()
+    feats = {
+        "price":  float(close.iloc[-1]),
+        "sma20":  float(close.rolling(20).mean().iloc[-1]),
+        "sma50":  float(close.rolling(50).mean().iloc[-1]),
+        "ret_5d": float(close.pct_change(5).iloc[-1] * 100),
+    }
+    opinion = _llama_opinion(symbol, feats)
+    if opinion["conf"] < 0.6 or opinion["action"] == "HOLD":
+        return {"action": "HOLD", "reason": opinion["reason"]}
+    qty = max(1, int(account["buying_power"] * 0.05 / feats["price"]))
+    return {"action": opinion["action"], "qty": qty,
+            "reason": f"Llama (conf {opinion['conf']:.2f}): {opinion['reason']}"}
+```
+
+This pattern works identically with any other text LLM — swap the URL
+and model name. APEX exposes the user's saved API keys as env vars
+(`GROQ_API_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`,
+`GOOGLE_AI_API_KEY`), so no hardcoded credentials.
+
+**When to use vision** (Claude/GPT-4o vision, Gemini): only when your
+strategy genuinely needs to "look at" a chart pattern that's hard to
+encode numerically. For SMA / RSI / MACD-driven strategies, text is
+faster, cheaper, and just as accurate.
+
+---
+
 ## 3. Environment variables APEX sets
 
 Before launching your bot, APEX exports these to the subprocess
