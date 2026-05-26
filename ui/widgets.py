@@ -511,9 +511,12 @@ class BotProcessWidget(QWidget):
             # script via the Universe tab dropdown, pass that script
             # path as a 4th arg so _run_bot can exec it instead of
             # the built-in universe_manager.
+            # V4.6.25 — also pass script_path for ANY custom (non-built-in)
+            # bot side so _run_bot knows exactly which file to exec.
             self.process.setWorkingDirectory(str(DATA_DIR))
             args = ["--run-bot", self.side]
-            if str(self.side).upper() == "UNIVERSE":
+            builtin = str(self.side).upper() in ("LONG", "SHORT", "DAY")
+            if not builtin:
                 try:
                     custom_path = str(self.script_path)
                     if custom_path and "universe_manager" not in custom_path.lower():
