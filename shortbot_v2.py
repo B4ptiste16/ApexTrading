@@ -1564,7 +1564,7 @@ def _short_ai_caller(prompt: str):
 def main():
     print("=" * 65)
     print("APEX SHORT BOT v2   -  Vision + Technical Analysis")
-    print(f"Model:    {CLAUDE_MODEL}")
+    print(f"Model:    {_AI_MODEL}")
     print(f"Universe: {UNIVERSE_FILE} -> top {TOP_N_FOR_CLAUDE} to Claude")
     print(f"Stops:    ATRx{ATR_STOP_MULTIPLIER} trailing | {TIME_STOP_DAYS}d time stop")
     print(f"Regime:   BULL={BULL_REGIME_MAX_POS} pos max | BEAR={BEAR_REGIME_MAX_POS} pos max")
@@ -1577,6 +1577,14 @@ def main():
         _T.record_account_or_flag_transition("SHORT", _acct.id)
     except Exception as _e:
         print(f"[transition] SHORT init failed: {_e}", flush=True)
+
+    # V4.6.26 — Initial deterministic cleanup: liquidate non-equity
+    # positions a previous bot may have left behind.
+    try:
+        from core.bot_framework import liquidate_off_strategy_positions
+        liquidate_off_strategy_positions(trading_client, "stocks")
+    except Exception as _e:
+        print(f"[startup-cleanup] SHORT failed: {_e}", flush=True)
 
     while True:
         try:

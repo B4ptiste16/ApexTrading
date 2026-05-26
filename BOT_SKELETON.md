@@ -284,6 +284,23 @@ if __name__ == "__main__":
 - Print feature values + the decision rule so the user can verify
   signals are firing.
 
+### 5f. Initial portfolio cleanup (v4.6.26+)
+
+When your bot starts on an Alpaca account, it may inherit positions
+from whatever bot ran there last. **The framework auto-handles
+asset-class mismatches** — if `asset_type=crypto` and the account
+has stock positions, `BotRunner.run()` liquidates the stocks at
+startup before the first `decide()` tick. No code in your `decide()`
+needs to handle this.
+
+For longer-form transitions (long vs short, different strategies on
+the same asset_class), the v4.6.2 `core.transition` AI cleanup runs
+on the first market-open after the account flip and uses your bot's
+philosophy to decide HOLD / REDUCE / CLOSE per position.
+
+You don't need to wire either of these — they fire automatically as
+long as you use the `BotRunner.run()` framework.
+
 ---
 
 ## 6. Universe generator rules (different — pay attention)

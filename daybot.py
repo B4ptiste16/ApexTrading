@@ -1406,7 +1406,7 @@ def _day_ai_caller(prompt: str):
 def main():
     print("=" * 65)
     print("APEX DAY BOT  -  Bracket Order Strategy")
-    print(f"Universe: {UNIVERSE_FILE}  |  Model: {CLAUDE_MODEL}")
+    print(f"Universe: {UNIVERSE_FILE}  |  Model: {_AI_MODEL}")
     print(f"R/R: 1:{live_tp_atr_mult()/max(live_stop_atr_mult(),1e-9):.1f}  |  "
           f"Risk/trade: {RISK_PER_TRADE_PCT:.0%}  |  "
           f"Max brackets: {live_max_brackets() or 'unlimited'}")
@@ -1427,6 +1427,14 @@ def main():
         _T.record_account_or_flag_transition("DAY", _acct.id)
     except Exception as _e:
         print(f"[transition] DAY init failed: {_e}", flush=True)
+
+    # V4.6.26 — Initial deterministic cleanup: liquidate non-equity
+    # positions a previous bot may have left behind.
+    try:
+        from core.bot_framework import liquidate_off_strategy_positions
+        liquidate_off_strategy_positions(trading_client, "stocks")
+    except Exception as _e:
+        print(f"[startup-cleanup] DAY failed: {_e}", flush=True)
 
     while True:
         try:

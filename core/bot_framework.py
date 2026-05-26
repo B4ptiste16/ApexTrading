@@ -78,6 +78,77 @@ def _alpaca_clients(asset_type: str):
     return TradingClient(key, sec, paper=is_paper), key, sec
 
 
+# V4.6.26 — Initial portfolio cleanup. Runs ONCE at bot startup.
+# Liquidates any position whose Alpaca asset_class doesn't match
+# this bot's declared asset_type. Crypto bot finding stock positions
+# closes them deterministically (no AI needed); a stocks bot finding
+# crypto positions does the same. The existing v4.6.2 transition
+# cleanup handles the subtler long-vs-short case within the same
+# asset class via AI.
+
+_BOT_ASSET_TYPE_TO_ALPACA_CLASS = {
+    "crypto":  "crypto",
+    "stocks":  "us_equity",
+    "etfs":    "us_equity",   # Alpaca treats ETFs as us_equity
+    "options": "us_option",
+}
+
+
+def liquidate_off_strategy_positions(client, asset_type: str) -> list:
+    """Close any open position whose Alpaca asset_class doesn't match
+    this bot's declared asset_type. Returns list of (symbol, action)
+    tuples for logging. Safe to call multiple times — if no positions
+    mismatch, no orders are sent."""
+    asset_type = (asset_type or "").lower()
+    expected = _BOT_ASSET_TYPE_TO_ALPACA_CLASS.get(asset_type)
+    if expected is None:
+        print(f"[startup-cleanup] unknown asset_type='{asset_type}', "
+              f"skipping cleanup", flush=True)
+        return []
+    try:
+        positions = client.get_all_positions()
+    except Exception as e:
+        print(f"[startup-cleanup] get_all_positions failed: {e}",
+              flush=True)
+        return []
+    if not positions:
+        print(f"[startup-cleanup] account is flat — nothing to clean",
+              flush=True)
+        return []
+    actions = []
+    kept = []
+    for p in positions:
+        pos_class = getattr(p, "asset_class", "")
+        # alpaca-py may expose as enum; coerce to string
+        pos_class = str(pos_class).lower().split(".")[-1]
+        sym = getattr(p, "symbol", "?")
+        if pos_class == expected:
+            kept.append(sym)
+            continue
+        # Liquidate — symbol's asset_class doesn't fit our strategy
+        print(f"[startup-cleanup] {sym} (asset_class={pos_class}) "
+              f"doesn't match bot asset_type={asset_type} — "
+              f"liquidating", flush=True)
+        try:
+            client.close_position(sym)
+            actions.append((sym, "liquidated"))
+        except Exception as e:
+            print(f"[startup-cleanup]   close_position({sym}) "
+                  f"failed: {e}", flush=True)
+            actions.append((sym, f"failed: {e}"))
+    if kept:
+        print(f"[startup-cleanup] kept (matching asset_type={asset_type}): "
+              f"{kept}", flush=True)
+    if actions:
+        print(f"[startup-cleanup] {len(actions)} position(s) acted on: "
+              f"{actions}", flush=True)
+    else:
+        print(f"[startup-cleanup] all {len(positions)} position(s) "
+              f"already match asset_type={asset_type} — nothing to do",
+              flush=True)
+    return actions
+
+
 # ── Symbol translation ──────────────────────────────────────────
 
 # yfinance crypto symbols use a hyphen (BTC-USD).
@@ -267,31 +338,75 @@ class BotRunner:
         self.name           = name
 
     def run(self, decide: Callable[..., dict]):
-        print(f"[{self.name}] APEX bot framework v4.6.5  ·  "
+        print(f"[{self.name}] APEX bot framework v4.6.27  ·  "
               f"asset_type={self.asset_type}  ·  "
               f"tick={self.tick_seconds}s", flush=True)
         client, _, _ = _alpaca_clients(self.asset_type)
+        # V4.6.26 — Initial portfolio cleanup. Liquidate any positions
+        # whose asset_class doesn't match this bot's strategy (crypto
+        # bot finding stocks, stocks bot finding options, etc.). Runs
+        # ONCE at startup. The v4.6.2 AI transition cleanup runs after
+        # this to handle the subtler long-vs-short cases.
+        try:
+            liquidate_off_strategy_positions(client, self.asset_type)
+        except Exception as e:
+            print(f"[{self.name}] startup cleanup error: {e}", flush=True)
+        # V4.6.27 — outer loop wrapped in try/except + heartbeat prints
+        # during the inter-tick sleep so users can SEE the bot is alive.
+        # Previously a transient error in _account_snapshot or
+        # _load_universe could kill the whole bot silently, and the
+        # 300s sleep looked indistinguishable from a crash.
+        cycle = 0
         while True:
-            symbols = _load_universe(self.universe_path,
-                                     self.default_symbols)
-            if not symbols:
-                print(f"[{self.name}] no symbols configured — "
-                      f"sleeping {self.tick_seconds}s", flush=True)
-                time.sleep(self.tick_seconds)
-                continue
-            account = _account_snapshot(client)
-            print(f"[{datetime.now(timezone.utc).isoformat(timespec='seconds')}] "
-                  f"tick — equity=${account['equity']:.2f}  "
-                  f"cash=${account['cash']:.2f}  "
-                  f"universe={len(symbols)}", flush=True)
-            for sym in symbols:
-                try:
-                    self._step(client, sym, decide, account)
-                except Exception as e:
-                    print(f"  ERROR {sym}: {e}", flush=True)
-                    traceback.print_exc()
-                time.sleep(1)  # tiny gap between symbols
-            time.sleep(self.tick_seconds)
+            cycle += 1
+            try:
+                symbols = _load_universe(self.universe_path,
+                                         self.default_symbols)
+                if not symbols:
+                    print(f"[{self.name}] no symbols configured — "
+                          f"sleeping {self.tick_seconds}s",
+                          flush=True)
+                    self._heartbeat_sleep(self.tick_seconds, cycle)
+                    continue
+                account = _account_snapshot(client)
+                print(f"[{datetime.now(timezone.utc).isoformat(timespec='seconds')}] "
+                      f"=== cycle {cycle} === equity=${account['equity']:.2f}  "
+                      f"cash=${account['cash']:.2f}  "
+                      f"universe={len(symbols)}", flush=True)
+                for sym in symbols:
+                    try:
+                        self._step(client, sym, decide, account)
+                    except Exception as e:
+                        print(f"  ERROR {sym}: {e}", flush=True)
+                        traceback.print_exc()
+                    time.sleep(1)  # tiny gap between symbols
+                print(f"[{self.name}] cycle {cycle} done — "
+                      f"next tick in {self.tick_seconds}s", flush=True)
+            except Exception as e:
+                # Catch-all so a transient API or yfinance hiccup
+                # doesn't take the whole bot down. Bot will retry
+                # on the next tick.
+                print(f"[{self.name}] cycle {cycle} crashed: {e} "
+                      f"— continuing", flush=True)
+                traceback.print_exc()
+            self._heartbeat_sleep(self.tick_seconds, cycle)
+
+    def _heartbeat_sleep(self, total_seconds: int, cycle: int):
+        """V4.6.27 — sleep with periodic 'alive' prints. Without
+        this, a 5-min sleep looks identical to a crashed bot from
+        the log viewer's point of view. Prints once a minute with
+        the remaining time."""
+        import math
+        elapsed = 0
+        interval = 60   # heartbeat every minute
+        while elapsed < total_seconds:
+            chunk = min(interval, total_seconds - elapsed)
+            time.sleep(chunk)
+            elapsed += chunk
+            remaining = total_seconds - elapsed
+            if remaining > 0:
+                print(f"[{self.name}] sleeping  ·  cycle {cycle}  ·  "
+                      f"next tick in {remaining}s", flush=True)
 
     def _step(self, client, symbol: str, decide, account):
         bars = _fetch_bars(symbol, self.bar_period, self.bar_interval)

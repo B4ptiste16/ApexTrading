@@ -631,6 +631,21 @@ class _GenerateWorker(QThread):
                 "Model output had no `def` — likely returned prose only. "
                 "Try again or pick a different model.")
             return
+        # V4.6.26 — compile()-validate the AI's output before saving.
+        # AIs frequently produce unterminated triple-quotes, half-finished
+        # docstrings, or run out of tokens mid-function. compile() catches
+        # all of those and surfaces a precise (line, msg) so the user
+        # knows what to fix or whether to re-generate.
+        try:
+            compile(cleaned, "<bot>", "exec")
+        except SyntaxError as e:
+            self.done.emit(
+                False,
+                f"AI output has a Python syntax error at line {e.lineno}: "
+                f"{e.msg}. The model likely ran out of tokens mid-function. "
+                f"Try regenerating, picking a higher-quality model, or "
+                f"shortening your prompt so the model has room to finish.")
+            return
         self.done.emit(True, cleaned)
 
 
@@ -1232,6 +1247,17 @@ class MakeBotTab(QWidget):
         name = self._name_edit.text().strip()
         if not code:
             self._toast("Nothing to save — generate or paste code first.", err=True)
+            return
+        # V4.6.26 — compile()-validate before writing to disk. Catches
+        # manual edits (typos, missing colons, broken docstrings) that
+        # the worker's pre-save check can't see because the edit
+        # happened in the editor pane after generation.
+        try:
+            compile(code, "<bot>", "exec")
+        except SyntaxError as e:
+            self._toast(
+                f"Syntax error at line {e.lineno}: {e.msg}. "
+                f"Fix it before saving.", err=True)
             return
         if not name:
             self._toast("Give the bot a name first.", err=True)

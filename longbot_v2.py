@@ -1595,7 +1595,7 @@ def _long_ai_caller(prompt: str):
 def main():
     print("=" * 65)
     print("APEX LONG BOT v2   -  Vision + Technical Analysis")
-    print(f"Model:    {CLAUDE_MODEL}")
+    print(f"Model:    {_AI_MODEL}")
     print(f"Universe: {UNIVERSE_FILE} -> top {TOP_N_FOR_CLAUDE} to Claude")
     print(f"Stops:    ATRx{ATR_STOP_MULTIPLIER} trailing | {TIME_STOP_DAYS}d time stop")
     print(f"Regime:   BULL={BULL_REGIME_MAX_POS} pos | BEAR={BEAR_REGIME_MAX_POS} pos")
@@ -1609,6 +1609,16 @@ def main():
         _T.record_account_or_flag_transition("LONG", _acct.id)
     except Exception as _e:
         print(f"[transition] LONG init failed: {_e}", flush=True)
+
+    # V4.6.26 — Initial deterministic cleanup: liquidate non-equity
+    # positions (e.g. crypto left over from a previous crypto bot
+    # using this account). Asset-class mismatch = bot can't manage
+    # it, so it goes.
+    try:
+        from core.bot_framework import liquidate_off_strategy_positions
+        liquidate_off_strategy_positions(trading_client, "stocks")
+    except Exception as _e:
+        print(f"[startup-cleanup] LONG failed: {_e}", flush=True)
 
     while True:
         try:
