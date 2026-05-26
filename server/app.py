@@ -1246,6 +1246,92 @@ def web_api_ai_stats():
     return out
 
 
+@app.get("/web/api/ai-returns", include_in_schema=False)
+def web_api_ai_returns():
+    """V4.6.22 — return cumulative % return over time grouped by AI
+    provider. Two series:
+      creator: keyed by META.ai_used (which AI BUILT the bot)
+      runner:  keyed by META.runner_ai / META.ai_used (which AI RUNS it)
+    Source: every running cloud bot's *_lifetime.jsonl snapshot file
+    in /opt/apex_users/user_*/. Returns are cumulative from each bot's
+    FIRST snapshot, so the chart shows bot-lifetime returns, not
+    account-lifetime.
+    Each point: {ts: epoch_seconds, pct: cumulative_return_percent}.
+    Multiple bots under the same AI get averaged at each timestamp."""
+    import json as _j
+    from pathlib import Path as _P
+    from collections import defaultdict
+    import os as _os
+
+    users_dir = _P(_os.environ.get(
+        "APEX_USERS_DIR", "/opt/apex_users"))
+    out_creator = defaultdict(list)  # ai_used -> [(ts, pct)]
+    out_runner  = defaultdict(list)
+    if not users_dir.exists():
+        return {"creator": {}, "runner": {}}
+
+    for user_dir in users_dir.glob("user_*"):
+        # Walk every *_lifetime.jsonl in this user's tree
+        for ll in user_dir.glob("*_lifetime.jsonl"):
+            slug = ll.stem.replace("_lifetime", "")
+            # Find the bot's META block (creator_ai / runner_ai)
+            bot_py = user_dir / "private_bots" / f"{slug.lower()}.py"
+            creator_ai, runner_ai = "unknown", "unknown"
+            if bot_py.exists():
+                try:
+                    src = bot_py.read_text(encoding="utf-8",
+                                           errors="replace")
+                    try:
+                        from . import bot_meta as _bm
+                    except ImportError:
+                        import bot_meta as _bm  # type: ignore
+                    meta = _bm.parse_meta(src) or {}
+                    creator_ai = (meta.get("ai_used") or "unknown").lower()
+                    runner_ai  = (meta.get("compatible_models") or
+                                  [meta.get("ai_used")])
+                    runner_ai  = runner_ai[0] if isinstance(runner_ai, list) \
+                                 else runner_ai
+                    runner_ai  = (runner_ai or "unknown").lower()
+                except Exception:
+                    pass
+            # Read snapshots
+            try:
+                with open(ll, "r", encoding="utf-8") as f:
+                    rows = [_j.loads(l) for l in f if l.strip()]
+            except Exception:
+                continue
+            if len(rows) < 2:
+                continue
+            base = float(rows[0].get("equity") or 0) or 1.0
+            from datetime import datetime as _dt
+            for r in rows:
+                try:
+                    ts = _dt.fromisoformat(r["ts"]).timestamp()
+                    eq = float(r.get("equity") or 0)
+                    pct = (eq - base) / base * 100
+                    out_creator[creator_ai].append((ts, pct))
+                    out_runner[runner_ai].append((ts, pct))
+                except Exception:
+                    continue
+
+    # Aggregate: average pct per timestamp per AI (rounded to nearest
+    # 5 minutes so points from different bots align)
+    def _aggregate(series):
+        agg = {}
+        for ai, points in series.items():
+            bucket = defaultdict(list)
+            for ts, pct in points:
+                slot = int(ts // 300) * 300  # 5-min buckets
+                bucket[slot].append(pct)
+            ordered = sorted(bucket.keys())
+            agg[ai] = [{"ts": k, "pct": sum(bucket[k]) / len(bucket[k])}
+                       for k in ordered]
+        return agg
+
+    return {"creator": _aggregate(out_creator),
+            "runner":  _aggregate(out_runner)}
+
+
 @app.post("/api/makebot/generate")
 def api_makebot_generate(payload: dict,
                          authorization: str | None = Header(default=None)):

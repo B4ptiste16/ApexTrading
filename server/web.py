@@ -319,6 +319,14 @@ def landing_page(signed_in_user: dict | None = None) -> HTMLResponse:
       ◈ BAPTOU
     </a>
     <div class="sp"></div>
+    <!-- V4.6.22 — top-bar quick-download button (compact) -->
+    <a href="https://github.com/B4ptiste16/ApexTrading/releases/latest/download/APEX_Setup.exe"
+       style="background:rgba(122,181,162,0.18);color:var(--green);
+              padding:7px 14px;border-radius:5px;font-size:11px;
+              font-weight:600;letter-spacing:1px;text-decoration:none;
+              margin-right:14px;">
+      ⬇ DOWNLOAD
+    </a>
     {topright}
   </nav>
 
@@ -331,7 +339,43 @@ def landing_page(signed_in_user: dict | None = None) -> HTMLResponse:
        into one desktop app. Bots can run locally on your machine
        or on the BAPTOU cloud server — 24/7, even with your laptop off.
        Bring your own Alpaca keys, your own AI keys, your own bots.</p>
+  </section>
 
+  <!-- V4.6.22 — AI return charts above the main download button.
+       Two SVG line charts: one per role (CREATOR / RUNNER).
+       Data from /web/api/ai-returns aggregates marketplace bot
+       lifetime-snapshots grouped by their META.ai_used / runner_ai. -->
+  <section style="max-width:920px;margin:24px auto 8px;padding:0 20px;">
+    <h2 style="font-family:'Syne',sans-serif;letter-spacing:3px;
+               font-size:13px;color:var(--muted);text-align:center;
+               margin:0 0 14px;">AI PERFORMANCE — RETURN OVER TIME</h2>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:18px;">
+      <div>
+        <div style="color:var(--muted);font-size:11px;text-align:center;
+                    letter-spacing:1.5px;margin-bottom:4px;">
+          BOT CREATION
+        </div>
+        <div id="aiReturnCreator" style="min-height:160px;"></div>
+      </div>
+      <div>
+        <div style="color:var(--muted);font-size:11px;text-align:center;
+                    letter-spacing:1.5px;margin-bottom:4px;">
+          BOT EXECUTION
+        </div>
+        <div id="aiReturnRunner" style="min-height:160px;"></div>
+      </div>
+    </div>
+    <div style="color:var(--muted);font-size:10px;text-align:center;
+                margin-top:8px;">
+      Cumulative % return of marketplace bots, grouped by which AI
+      created (left) or runs (right) them. Data populates as users
+      publish + run bots.
+    </div>
+  </section>
+
+  <!-- Main download button moved BELOW the AI charts (v4.6.22) -->
+  <section style="max-width:920px;margin:0 auto;padding:0 20px;
+                  text-align:center;">
     <a class="download"
        href="https://github.com/B4ptiste16/ApexTrading/releases/latest/download/APEX_Setup.exe">
       ⬇  DOWNLOAD FOR WINDOWS
@@ -366,6 +410,93 @@ def landing_page(signed_in_user: dict | None = None) -> HTMLResponse:
     · <a href="/web/login">Sign in</a>
     · <a href="/web/signup">Sign up</a>
   </footer>
+
+  <script>
+    // V4.6.22 — fetch + render AI return-over-time line charts.
+    // Pure SVG, no external chart library.
+    async function loadAiReturns() {{
+      try {{
+        const r = await fetch('/web/api/ai-returns');
+        const j = await r.json();
+        renderLineChart('aiReturnCreator', j.creator || {{}});
+        renderLineChart('aiReturnRunner',  j.runner  || {{}});
+      }} catch (e) {{
+        console.error('ai-returns fetch failed', e);
+      }}
+    }}
+
+    function renderLineChart(targetId, series) {{
+      const el = document.getElementById(targetId);
+      if (!el) return;
+      const names = Object.keys(series).sort();
+      if (names.length === 0) {{
+        el.innerHTML = '<div style="color:var(--muted);font-size:11px;'
+          + 'padding:50px 0;text-align:center;">'
+          + '(no data yet — publish a bot to seed the chart)</div>';
+        return;
+      }}
+      const palette = ['#3eb8a4', '#8a93c9', '#c8a070', '#c28e97',
+                       '#cdc578', '#9aa6c4'];
+      const W = 420, H = 160, pad = 28;
+      // Gather all (ts, pct) points to compute axis ranges
+      let allTs = [], allPct = [];
+      names.forEach(n => {{
+        (series[n] || []).forEach(p => {{
+          allTs.push(p.ts); allPct.push(p.pct);
+        }});
+      }});
+      if (allTs.length === 0) {{
+        el.innerHTML = '<div style="color:var(--muted);font-size:11px;'
+          + 'padding:50px 0;text-align:center;">'
+          + '(no return data yet)</div>';
+        return;
+      }}
+      const minTs = Math.min(...allTs), maxTs = Math.max(...allTs);
+      const minP  = Math.min(...allPct, 0), maxP = Math.max(...allPct, 0);
+      const tsRange = (maxTs - minTs) || 1;
+      const pRange  = (maxP - minP)  || 1;
+      const x = ts  => pad + ((ts - minTs) / tsRange) * (W - 2*pad);
+      const y = pct => H - pad - ((pct - minP) / pRange) * (H - 2*pad);
+
+      // Zero line
+      const zeroY = y(0);
+      let svg = '<svg width="100%" viewBox="0 0 ' + W + ' ' + H
+        + '" preserveAspectRatio="xMidYMid meet" '
+        + 'style="background:rgba(255,255,255,0.02);border-radius:6px;">';
+      svg += '<line x1="' + pad + '" y1="' + zeroY + '" x2="' + (W-pad)
+        + '" y2="' + zeroY + '" stroke="rgba(255,255,255,0.10)" '
+        + 'stroke-dasharray="2 3"/>';
+      // One polyline per AI
+      let legend = '';
+      names.forEach((n, i) => {{
+        const pts = (series[n] || []).map(p => x(p.ts) + ',' + y(p.pct))
+          .join(' ');
+        const color = palette[i % palette.length];
+        if (pts) {{
+          svg += '<polyline points="' + pts + '" fill="none" stroke="'
+            + color + '" stroke-width="1.6"/>';
+        }}
+        // Latest point dot
+        const last = (series[n] || []).slice(-1)[0];
+        if (last) {{
+          svg += '<circle cx="' + x(last.ts) + '" cy="' + y(last.pct)
+            + '" r="3" fill="' + color + '"/>';
+          legend += '<span style="display:inline-flex;align-items:center;'
+            + 'margin:0 8px 4px 0;font-size:10px;color:var(--text);">'
+            + '<span style="width:8px;height:8px;background:' + color
+            + ';border-radius:1px;margin-right:5px;"></span>' + n
+            + ' <span style="color:var(--muted);margin-left:4px;">'
+            + (last.pct >= 0 ? '+' : '') + last.pct.toFixed(1) + '%</span>'
+            + '</span>';
+        }}
+      }});
+      svg += '</svg>';
+      el.innerHTML = svg + '<div style="margin-top:4px;">' + legend + '</div>';
+    }}
+
+    loadAiReturns();
+    setInterval(loadAiReturns, 300000);  // refresh every 5 min
+  </script>
 {_FOOTER}
 </body></html>"""
     return HTMLResponse(body)

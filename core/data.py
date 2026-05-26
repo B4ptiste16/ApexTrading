@@ -937,6 +937,89 @@ def write_env_keys(values: dict) -> None:
 
 
 # ─────────────────────────────────────────
+# PER-BOT LIFETIME SNAPSHOTS  (v4.6.22)
+# ─────────────────────────────────────────
+# Account-level history shows the Alpaca account's full timeline,
+# which is misleading when multiple bots have used the same account
+# over time (e.g. shortbot before crypto). Each active bot also writes
+# its own JSONL snapshot file so the Overview can scope P/L to ONLY
+# the period that bot was in charge.
+#
+# File path:  DATA_DIR/<side>_lifetime.jsonl
+# Append-only. Each line is a JSON object:
+#   {"ts": ISO8601, "equity": float, "portfolio_value": float,
+#    "positions_count": int}
+# Throttled to one snapshot per ~5 minutes per bot to keep the file
+# tiny (a year of 5-min ticks at 200 bytes = ~21 MB max).
+
+def _bot_snapshot_path(side: str):
+    return ROOT / f"{side.lower()}_lifetime.jsonl"
+
+
+def append_bot_snapshot(side: str, *, equity: float = 0.0,
+                        portfolio_value: float = 0.0,
+                        positions_count: int = 0) -> None:
+    """Append one snapshot to the bot's lifetime log. Skips writing
+    if the most recent entry is less than 5 minutes old (so callers
+    can refresh aggressively without ballooning the file)."""
+    import json as _j
+    from datetime import datetime as _dt, timezone as _tz
+    p = _bot_snapshot_path(side)
+    now = _dt.now(_tz.utc)
+    # Throttle
+    try:
+        if p.exists() and p.stat().st_size > 0:
+            # Read last line cheaply
+            with open(p, "rb") as f:
+                f.seek(0, 2)
+                size = f.tell()
+                f.seek(max(0, size - 400))
+                tail = f.read().decode("utf-8", errors="replace").splitlines()
+            if tail:
+                last = _j.loads(tail[-1])
+                last_ts = _dt.fromisoformat(last["ts"])
+                if (now - last_ts).total_seconds() < 300:
+                    return  # < 5 min — skip
+    except Exception:
+        pass
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        with open(p, "a", encoding="utf-8") as f:
+            f.write(_j.dumps({
+                "ts":              now.isoformat(timespec="seconds"),
+                "equity":          float(equity or 0),
+                "portfolio_value": float(portfolio_value or 0),
+                "positions_count": int(positions_count or 0),
+            }) + "\n")
+    except Exception as e:
+        print(f"[snapshot] {side}: append failed: {e}")
+
+
+def read_bot_snapshots(side: str, limit: int = 5000) -> list[dict]:
+    """Read all snapshots for this bot. Returns oldest-first. Used by
+    Overview to compute bot-lifetime P/L when account history is too
+    coarse / pre-dates the bot."""
+    import json as _j
+    p = _bot_snapshot_path(side)
+    if not p.exists():
+        return []
+    out = []
+    try:
+        with open(p, "r", encoding="utf-8") as f:
+            for line in f.readlines()[-limit:]:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    out.append(_j.loads(line))
+                except Exception:
+                    continue
+    except Exception as e:
+        print(f"[snapshot] {side}: read failed: {e}")
+    return out
+
+
+# ─────────────────────────────────────────
 # UNIVERSE BREAKDOWN  (what the universe manager picked, per bot)
 # ─────────────────────────────────────────
 

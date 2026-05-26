@@ -469,8 +469,25 @@ class OverviewTab(QWidget):
                 card.update_value("—", C["muted"])
 
     def _refresh_block(self, side, block):
-        a    = D.get_account(side)
-        pos  = D.get_positions(side)
+        # V4.6.22 — crypto + other custom bots aren't in BOT_COLOR.
+        # Look up the block's own color (set by _account_block) instead
+        # of blowing up on a hardcoded dict lookup. THIS is what was
+        # making crypto's Overview card show "—" for everything: the
+        # method KeyError'd on BOT_COLOR[side] and was caught silently
+        # higher up, so values never got written.
+        block_color = BOT_COLOR.get(side, C["purple"])
+
+        try:
+            a    = D.get_account(side)
+            pos  = D.get_positions(side)
+        except Exception as e:
+            print(f"[overview] get_account/{side} failed: {e}", flush=True)
+            block._cards["PORTFOLIO"].update_value("—", C["muted"])
+            block._cards["DAY P/L"].update_value("—", C["muted"])
+            block._cards["PERIOD P/L"].update_value("—", C["muted"])
+            block._cards["POSITIONS"].update_value("—", C["muted"])
+            return
+
         pv   = a.get("portfolio_value", 0)
         eq   = a.get("equity", 0)
         le   = a.get("last_equity", eq)
@@ -478,9 +495,22 @@ class OverviewTab(QWidget):
         arrow = "▲" if dp >= 0 else "▼"
         dc    = C["green"] if dp >= 0 else C["red"]
 
+        # V4.6.22 — append a snapshot to this bot's lifetime log so the
+        # Overview can later display BOT-lifetime stats (not account
+        # lifetime). The shortbot may have used this Alpaca account
+        # before the crypto bot existed; the lifetime file scopes the
+        # period P/L to ONLY when this bot was the active strategy.
+        try:
+            D.append_bot_snapshot(side, equity=eq,
+                                   portfolio_value=pv,
+                                   positions_count=len(pos))
+        except Exception as _e:
+            print(f"[overview] snapshot append for {side} failed: {_e}",
+                  flush=True)
+
         # Period P/L: history over the period the user selected in the
-        # ALL ACCOUNTS header (V7.1.6). Falls back to 1D if the combo
-        # hasn't been built yet (very early refresh during _build).
+        # ALL ACCOUNTS header. Falls back to the bot's lifetime
+        # snapshot file if account history is empty.
         try:
             hist = D.get_history(side, self._current_period())
             if hist is not None and not hist.empty and len(hist) >= 2:
@@ -490,11 +520,23 @@ class OverviewTab(QWidget):
                 pa    = "▲" if p_pl >= 0 else "▼"
                 period_txt = f"{pa} ${abs(p_pl):,.2f} ({p_pct:+.1f}%)"
             else:
-                period_txt, pc = "—", C["muted"]
+                # V4.6.22 fallback: use this bot's own lifetime log
+                bot_hist = D.read_bot_snapshots(side)
+                if bot_hist and len(bot_hist) >= 2:
+                    first_eq = bot_hist[0].get("equity", 0)
+                    last_eq  = bot_hist[-1].get("equity", 0)
+                    p_pl  = last_eq - first_eq
+                    p_pct = (p_pl / first_eq * 100) if first_eq else 0
+                    pc    = C["green"] if p_pl >= 0 else C["red"]
+                    pa    = "▲" if p_pl >= 0 else "▼"
+                    period_txt = (f"{pa} ${abs(p_pl):,.2f} ({p_pct:+.1f}%) "
+                                  f"· lifetime")
+                else:
+                    period_txt, pc = "—", C["muted"]
         except Exception:
             period_txt, pc = "—", C["muted"]
 
-        block._cards["PORTFOLIO"].update_value(f"${pv:,.2f}", BOT_COLOR[side])
+        block._cards["PORTFOLIO"].update_value(f"${pv:,.2f}", block_color)
         block._cards["DAY P/L"].update_value(f"{arrow} ${abs(dp):,.2f}", dc)
         block._cards["PERIOD P/L"].update_value(period_txt, pc)
         block._cards["POSITIONS"].update_value(str(len(pos)))
