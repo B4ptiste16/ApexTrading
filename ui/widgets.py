@@ -691,15 +691,73 @@ class BotProcessWidget(QWidget):
 
         slug = self.side.lower()
 
+        # V4.6.19 — resolve the universe file the user assigned to
+        # this bot (via the bot-tab dropdown) so we can ship its
+        # current content to Oracle BEFORE the bot starts. Without
+        # this hop the cloud bot reads stale or default tickers.
+        from pathlib import Path as _P
+        universe_blob = None
+        universe_fname = ""
+        try:
+            import core.data as _D
+            _s = _D.load_settings()
+            script_id = _s.get(
+                f"bot_universe_script_{self.side.upper()}", "")
+            if script_id:
+                if script_id == "built-in":
+                    universe_fname = {
+                        "LONG":  "longbot_universe.txt",
+                        "SHORT": "shortbot_universe.txt",
+                        "DAY":   "daybot_universe.txt",
+                    }.get(self.side.upper(), "")
+                else:
+                    for entry in _s.get("universe_scripts", []) or []:
+                        if str(entry.get("id", "")) == script_id:
+                            universe_fname = entry.get("target", "")
+                            break
+            if universe_fname:
+                lp = _P(str(DATA_DIR)) / universe_fname
+                if lp.exists():
+                    universe_blob = lp.read_bytes()
+                    self._log(
+                        f"☁  Uploading universe ({universe_fname}, "
+                        f"{len(universe_blob)} bytes) to Oracle…",
+                        C["muted"])
+        except Exception as _ue:
+            print(f"[cloud-start] universe lookup failed: {_ue}")
+
         class _UploadStart(_QT):
             done = _Sig(bool, str)
+            def __init__(self_, universe_fname=universe_fname,
+                         universe_blob=universe_blob):
+                super().__init__()
+                self_._u_fname = universe_fname
+                self_._u_blob  = universe_blob
             def run(self_):
                 import requests
                 tok = (load_auth() or {}).get("token") or ""
                 base = load_server_url()
                 hdr  = {"Authorization": f"Bearer {tok}"}
                 try:
-                    # 1) Upload
+                    # 0) Upload the universe file the user assigned
+                    if self_._u_fname and self_._u_blob is not None:
+                        try:
+                            uu = requests.post(
+                                f"{base}/bots/private/upload_universe",
+                                headers=hdr,
+                                data={"filename": self_._u_fname},
+                                files={"file": (self_._u_fname,
+                                                self_._u_blob,
+                                                "text/plain")},
+                                timeout=20)
+                            if not uu.ok:
+                                print(f"[cloud-start] universe upload "
+                                      f"failed ({uu.status_code}): "
+                                      f"{uu.text[:200]}")
+                        except Exception as _e:
+                            print(f"[cloud-start] universe upload "
+                                  f"exception: {_e}")
+                    # 1) Upload the bot script
                     up = requests.post(
                         f"{base}/bots/private/upload",
                         headers=hdr,

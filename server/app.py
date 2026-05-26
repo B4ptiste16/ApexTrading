@@ -618,6 +618,41 @@ async def api_private_bot_upload(
             "size_bytes": len(blob), "stored_at": str(dest)}
 
 
+@app.post("/bots/private/upload_universe")
+async def api_private_universe_upload(
+    filename: str      = Form(...),
+    file:     UploadFile = File(...),
+    authorization: str | None = Header(default=None),
+):
+    """V4.6.19 — upload a universe .txt file to the user's data dir on
+    Oracle so cloud-running trading bots can read it. Universe scripts
+    run locally on the user's laptop, so without this hop a crypto
+    bot on Oracle would never see the latest universe the script
+    produced.
+
+    File ends up at /opt/apex_users/user_<id>/<filename>. The bot's
+    load_universe() looks there via APEX_DATA_DIR/<filename>."""
+    user = _current_user(authorization)
+    clean = filename.strip()
+    if not clean.endswith("_universe.txt"):
+        raise HTTPException(400,
+            "filename must end with _universe.txt")
+    # Reject path traversal
+    if "/" in clean or "\\" in clean or ".." in clean:
+        raise HTTPException(400, "filename must be a basename, no path parts")
+    blob = await file.read()
+    if len(blob) > 100_000:  # 100 KB cap — universe files are tiny
+        raise HTTPException(400, "universe file too large (max 100 KB)")
+    user_dir = bot_runner.private_bots_dir(user["id"]).parent  # data dir
+    dest = user_dir / clean
+    try:
+        dest.write_bytes(blob)
+    except Exception as e:
+        raise HTTPException(500, f"write failed: {e}")
+    return {"ok": True, "filename": clean,
+            "size_bytes": len(blob), "stored_at": str(dest)}
+
+
 @app.get("/bots/private")
 def api_private_bot_list(authorization: str | None = Header(default=None)):
     user = _current_user(authorization)
