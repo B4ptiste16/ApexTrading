@@ -1659,16 +1659,47 @@ class ToolsTab(QWidget):
         builtin_labels = {"LONG":  "▲ LONG",
                           "SHORT": "▼ SHORT",
                           "DAY":   "◆ DAY"}
+        # V4.6.18 — built-ins are all US-equity, market-hours bound.
+        # Custom bots declare asset_type in their META block; we read
+        # it here so 24/7 markets (crypto) skip the auto-start toggle.
+        builtin_asset_type = {"LONG":  "stocks", "SHORT": "stocks",
+                              "DAY":   "stocks"}
+        always_on_asset_types = {"crypto"}  # 24/7 markets — no schedule
         any_added = False
+        always_on_labels = []  # collected to render a footnote
         for sid in active:
             if sid in silenced:
                 continue
             label = builtin_labels.get(sid)
             if label is None:
                 label = customs.get(sid, {}).get("label", sid).upper()
+            # Determine asset_type for this bot
+            atype = builtin_asset_type.get(sid)
+            if atype is None:
+                # Custom bot — parse META.asset_type from its .py
+                script_path = customs.get(sid, {}).get("script", "")
+                if script_path:
+                    try:
+                        from core.bot_meta import parse_meta
+                        from pathlib import Path as _P
+                        if _P(script_path).exists():
+                            src = open(script_path, "r",
+                                       encoding="utf-8").read()
+                            atype = (parse_meta(src) or {}).get(
+                                "asset_type", "").lower()
+                    except Exception:
+                        atype = ""
+                atype = atype or "stocks"  # safe default
+            # 24/7 asset → no auto-start needed
+            if atype in always_on_asset_types:
+                always_on_labels.append(f"{label} (24/7 {atype})")
+                continue
             cb = QCheckBox(label)
             cb.setStyleSheet(
                 f"color:{C['text']};font-size:11px;letter-spacing:1px;")
+            cb.setToolTip(
+                f"Auto-start {label} at the next US market open "
+                f"(asset_type={atype}).")
             try:
                 cb.setChecked(D.get_auto_schedule_for(sid))
             except Exception:
@@ -1679,11 +1710,19 @@ class ToolsTab(QWidget):
             self._auto_sched_checks[sid] = cb
             any_added = True
 
-        if not any_added:
+        if not any_added and not always_on_labels:
             empty = QLabel("(no active bots — add some from MORE BOTS)")
             empty.setStyleSheet(f"color:{C['muted']};font-size:10px;")
             layout.addWidget(empty)
         layout.addStretch()
+        # V4.6.18 — show a footnote for 24/7 bots that intentionally
+        # don't get the schedule checkbox.
+        if always_on_labels:
+            note = QLabel("  ·  always-on (no schedule needed):  "
+                          + ", ".join(always_on_labels))
+            note.setStyleSheet(f"color:{C['muted']};font-size:10px;")
+            note.setWordWrap(True)
+            layout.addWidget(note)
 
     def _on_per_bot_schedule_toggled(self, side: str, on: bool):
         try:
