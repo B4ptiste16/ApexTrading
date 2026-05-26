@@ -620,9 +620,95 @@ def dashboard_page(user: dict, tab: str = "overview") -> HTMLResponse:
     </div>
 
     {tab_html}
+
+    <!-- V4.6.16 — AI usage across the whole APEX platform (v4.0.0 spec) -->
+    <div class="card" id="aiUsageCard" style="margin-top:18px;">
+      <h2 style="margin:0 0 10px 0;letter-spacing:1.5px;">AI USAGE  ·  PLATFORM-WIDE</h2>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+        <div>
+          <div style="color:var(--muted);font-size:11px;margin-bottom:6px;
+               letter-spacing:1px;">CREATOR — most-used AIs to BUILD bots</div>
+          <div id="aiCreatorChart" style="min-height:180px;"></div>
+        </div>
+        <div>
+          <div style="color:var(--muted);font-size:11px;margin-bottom:6px;
+               letter-spacing:1px;">RUNNER — most-used AIs to RUN bots</div>
+          <div id="aiRunnerChart" style="min-height:180px;"></div>
+        </div>
+      </div>
+      <div style="color:var(--muted);font-size:10px;margin-top:10px;">
+        Last 100 generations:
+        <span id="aiGenRoll" style="color:var(--text);"></span>
+      </div>
+    </div>
   </div>
 
   <script>
+    // V4.6.16 — render a tiny SVG donut for AI usage (no external chart lib).
+    function renderDonut(targetId, dataMap) {{
+      const el = document.getElementById(targetId);
+      if (!el) return;
+      const entries = Object.entries(dataMap || {{}})
+        .sort((a, b) => b[1] - a[1]).slice(0, 6);
+      const total = entries.reduce((s, [k, v]) => s + v, 0);
+      if (total === 0) {{
+        el.innerHTML = '<div style="color:var(--muted);font-size:11px;'
+          + 'padding:30px 0;text-align:center;">(no data yet — '
+          + 'publish or generate a bot)</div>';
+        return;
+      }}
+      // Color palette pulled from the app's BAPTOU teal theme
+      const palette = ['#3eb8a4', '#8a93c9', '#c8a070', '#c28e97',
+                       '#cdc578', '#9aa6c4'];
+      const r = 64, cx = 90, cy = 90;
+      let cumAngle = -Math.PI / 2;
+      let arcs = '', legend = '';
+      entries.forEach(([k, v], i) => {{
+        const angle = (v / total) * Math.PI * 2;
+        const x1 = cx + r * Math.cos(cumAngle), y1 = cy + r * Math.sin(cumAngle);
+        cumAngle += angle;
+        const x2 = cx + r * Math.cos(cumAngle), y2 = cy + r * Math.sin(cumAngle);
+        const large = angle > Math.PI ? 1 : 0;
+        const color = palette[i % palette.length];
+        arcs += '<path d="M ' + cx + ' ' + cy + ' L ' + x1 + ' ' + y1
+              + ' A ' + r + ' ' + r + ' 0 ' + large + ' 1 '
+              + x2 + ' ' + y2 + ' Z" fill="' + color + '"/>';
+        const pct = ((v / total) * 100).toFixed(0);
+        legend += '<div style="display:flex;align-items:center;'
+                + 'font-size:11px;margin:3px 0;color:var(--text);">'
+                + '<span style="width:10px;height:10px;border-radius:2px;'
+                + 'background:' + color + ';margin-right:8px;"></span>'
+                + k + ' <span style="color:var(--muted);margin-left:auto;">'
+                + v + ' (' + pct + '%)</span></div>';
+      }});
+      el.innerHTML =
+        '<div style="display:flex;align-items:center;gap:18px;">'
+        + '<svg width="180" height="180" viewBox="0 0 180 180">'
+        + arcs
+        + '<circle cx="90" cy="90" r="34" fill="var(--panel)"/>'
+        + '<text x="90" y="86" text-anchor="middle" fill="var(--muted)" '
+        + 'font-size="9" letter-spacing="1">TOTAL</text>'
+        + '<text x="90" y="102" text-anchor="middle" fill="var(--text)" '
+        + 'font-size="15" font-weight="700">' + total + '</text>'
+        + '</svg>'
+        + '<div style="flex:1;">' + legend + '</div></div>';
+    }}
+
+    async function refreshAiStats() {{
+      try {{
+        const r = await fetch('/web/api/ai-stats');
+        const j = await r.json();
+        renderDonut('aiCreatorChart', j.providers);
+        renderDonut('aiRunnerChart',  j.runners);
+        const recent = (j.gen_log || []).slice(0, 8)
+          .map(g => g.model + ' (' + g.credits + '◊)').join('  ·  ');
+        const rEl = document.getElementById('aiGenRoll');
+        if (rEl) rEl.textContent = recent || '(no recent generations)';
+      }} catch (e) {{
+        console.error('ai-stats fetch failed', e);
+      }}
+    }}
+
     // V4.6.14 — dashboard sides come from the server (which discovers
     // custom bots in the user's private_bots/ folder). Default to the
     // built-ins until the first /web/api/status response arrives.
@@ -874,6 +960,10 @@ def dashboard_page(user: dict, tab: str = "overview") -> HTMLResponse:
 
     refresh();
     setInterval(refresh, 30000);
+    // V4.6.16 — AI usage donut refreshes every 2 min (platform-wide
+    // data changes slowly; no need to poll as often as user state).
+    refreshAiStats();
+    setInterval(refreshAiStats, 120000);
   </script>
 {_FOOTER}
 </body></html>"""

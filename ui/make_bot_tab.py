@@ -108,16 +108,17 @@ def _gemini_extract(j: dict) -> str:
 
 
 def _apex_free_build(prompt: str, system: str, key: str, model: str) -> tuple[dict, dict]:
-    """The 'Free (via APEX)' option doesn't need an API key — it routes
-    through the APEX server which uses APEX's own pooled Anthropic key.
-    Rate-limited to 5 calls / hour / signed-in user."""
+    """The 'Via APEX' option doesn't need an API key — it routes
+    through the APEX server which uses a pooled Anthropic key.
+    V4.6.16: passes `model` so the server can apply per-model pricing
+    from MAKEBOT_MODEL_COSTS instead of a flat 10-credit charge."""
     from ui.login import load_auth, load_server_url
     tok = (load_auth() or {}).get("token") or ""
     return (
         {"Authorization": f"Bearer {tok}",
          "Content-Type":  "application/json",
          "X-Apex-Endpoint": f"{load_server_url()}/api/makebot/generate"},
-        {"prompt": prompt, "system": system},
+        {"prompt": prompt, "system": system, "model": model},
     )
 
 
@@ -425,9 +426,31 @@ _SYSTEM_PROMPT_UNIVERSE = (
     "  inline `# note` comments allowed.\n"
     "• Run once and exit cleanly (return from main()) — APEX schedules\n"
     "  the next run; the bot is not a daemon loop.\n"
-    "• requirements: list pip deps (e.g. ccxt for crypto, yfinance is\n"
-    "  bundled). If you `import sklearn`, list 'scikit-learn'.\n"
-    "• Use print(..., flush=True) for status logs."
+    "• Use print(..., flush=True) for status logs.\n\n"
+    "═══ CRITICAL: BUNDLED-LIBS ONLY FOR UNIVERSE BOTS ═══\n\n"
+    "Universe bots execute LOCALLY in the user's frozen APEX install. "
+    "The frozen Python interpreter CANNOT pip-install new packages. "
+    "If you import a library that isn't bundled, the bot crashes with "
+    "ModuleNotFoundError and produces NO universe file.\n\n"
+    "Allowed bundled imports (everything else WILL crash):\n"
+    "  requests       — HTTP, perfect for REST APIs (CoinGecko,\n"
+    "                   Alpaca /v2/assets, Polygon, Finnhub, IEX, etc.)\n"
+    "  yfinance       — historical bars + 24h volume for any ticker.\n"
+    "                   Crypto symbols use BTC-USD format.\n"
+    "  pandas, numpy  — data wrangling, sorting, scoring\n"
+    "  alpaca-py      — fine for READING (assets, bars, account); never\n"
+    "                   call .submit_order() in a universe bot.\n"
+    "  json, os, re, time, datetime, math, statistics — stdlib only.\n\n"
+    "FORBIDDEN imports for universe bots (will ModuleNotFoundError):\n"
+    "  ccxt, talib, ta, scikit-learn, sklearn, openai, anthropic,\n"
+    "  google.generativeai, beautifulsoup4, lxml, scrapy, selenium\n\n"
+    "If the user asks for a CRYPTO universe, use Alpaca's\n"
+    "/v2/assets?asset_class=crypto endpoint or CoinGecko's free public\n"
+    "API via requests — both work with bundled libs. Do NOT use ccxt.\n\n"
+    "If the user asks for fundamentals / earnings, use yfinance's\n"
+    "Ticker.info / Ticker.financials — bundled, works offline-friendly.\n\n"
+    "Always set requirements: (empty after the colon) for universe bots.\n"
+    "The frozen interpreter can't honor declared requirements anyway."
 )
 
 

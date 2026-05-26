@@ -31,6 +31,12 @@ async def _lifespan(app: FastAPI):
     database.init_db()
     creds.init_credentials_table()
     marketplace.init_marketplace_table()
+    # V4.6.16 — algorithmic moderation tables
+    try:
+        from . import auto_moderation as _auto_mod
+        _auto_mod.init_moderation_flags_table()
+    except Exception as _e:
+        print(f"[startup] auto_moderation init failed: {_e}")
     friends.init_friends_db()
     credits_mod.init_credits_tables()
     moderation.init_purchases_table()
@@ -760,6 +766,66 @@ def auth_tos_accept(authorization: str | None = Header(default=None)):
     return {"ok": True, "version": TOS_VERSION}
 
 
+@app.get("/admin/moderation/flags")
+def api_admin_moderation_flags(
+    only_active: bool = True,
+    authorization: str | None = Header(default=None)):
+    """V4.6.16 — list every algorithmic-moderation flag raised by
+    auto_moderation. Admin-only."""
+    user = _current_user(authorization)
+    _require_admin(user)
+    from . import auto_moderation as _auto_mod
+    return {"flags": _auto_mod.list_flags(only_active=only_active)}
+
+
+@app.post("/admin/moderation/flags/{flag_id}/clear")
+def api_admin_clear_flag(
+    flag_id: int,
+    authorization: str | None = Header(default=None)):
+    user = _current_user(authorization)
+    _require_admin(user)
+    from . import auto_moderation as _auto_mod
+    _auto_mod.clear_flag(flag_id)
+    return {"ok": True}
+
+
+@app.post("/admin/moderation/run")
+def api_admin_moderation_run(
+    authorization: str | None = Header(default=None)):
+    """Manually trigger both algorithmic checks. Returns the
+    summary so the admin sees what was flagged."""
+    user = _current_user(authorization)
+    _require_admin(user)
+    from . import auto_moderation as _auto_mod
+    return _auto_mod.run_all_checks()
+
+
+# V4.6.16 — background runner: kicks the algorithmic moderation
+# checks every hour. Lives in a daemon thread so it dies with the
+# uvicorn process and never blocks shutdown.
+def _start_moderation_cron():
+    import threading
+    def _loop():
+        import time as _t
+        while True:
+            try:
+                from . import auto_moderation as _auto_mod
+                result = _auto_mod.run_all_checks()
+                if result.get("new_copyright") or result.get("new_metadata"):
+                    print(f"[auto-mod] flagged "
+                          f"{len(result['new_copyright'])} copyright + "
+                          f"{len(result['new_metadata'])} metadata issues",
+                          flush=True)
+            except Exception as e:
+                print(f"[auto-mod] loop error: {e}", flush=True)
+            _t.sleep(3600)  # hourly
+    threading.Thread(target=_loop, daemon=True,
+                     name="auto_moderation").start()
+
+
+_start_moderation_cron()
+
+
 @app.get("/admin/revenue-split")
 def api_revenue_split_get(authorization: str | None = Header(default=None)):
     """Any admin can SEE the split. Only BOSS_ADMIN can change it."""
@@ -1027,8 +1093,41 @@ _MAKEBOT_RATE: dict = {}                # user_id -> [timestamps]
 _MAKEBOT_RATE_LOCK = _threading.Lock()
 _MAKEBOT_RATE_WINDOW = 3600             # 1 hour
 _MAKEBOT_RATE_LIMIT  = 5                # 5 calls per hour per user
-MAKEBOT_COST_CREDITS = 10               # V3.1.4 — credits charged per "Free via APEX" generation
+MAKEBOT_COST_CREDITS = 10               # V3.1.4 — legacy default cost
 SIGNUP_BONUS_CREDITS = 100              # V3.1.4 — every new signup gets a starting balance
+
+# V4.6.16 — per-model credit pricing for Via-APEX generations.
+# Lookup key = the `model` field of the request (the Make Bot UI
+# sends the model id from its dropdown). Anything not listed falls
+# back to MAKEBOT_COST_CREDITS. Own-key providers (user supplies their
+# own API key in Tools) bypass this endpoint entirely and cost ZERO
+# APEX credits — confirmed in the desktop client by routing to the
+# provider's URL directly, not /api/makebot/generate.
+MAKEBOT_MODEL_COSTS = {
+    # Cheap / fast tier
+    "baptou-haiku":                3,
+    "claude-haiku-4-5-20251001":   3,
+    "gpt-4o-mini":                 3,
+    "gemini-2.5-flash":            2,
+    "gemini-2.0-flash":            2,
+    "llama-3.1-8b-instant":        1,
+    # Mid tier
+    "gemini-2.5-pro":              8,
+    "gpt-4o":                      12,
+    "llama-3.3-70b-versatile":     4,
+    # Premium / Opus
+    "claude-sonnet-4-5-20250929":  20,
+    "gpt-5":                       25,
+    "claude-opus-4-7-20251101":    40,
+}
+
+
+def _makebot_cost_for(model: str) -> int:
+    """Look up the credit cost for a given Make Bot model id. Falls
+    back to MAKEBOT_COST_CREDITS (10) if the model isn't in the
+    pricing table — keeps unknown / new models from running free."""
+    return int(MAKEBOT_MODEL_COSTS.get((model or "").strip(),
+                                       MAKEBOT_COST_CREDITS))
 
 
 def _check_makebot_rate(user_id: int) -> int:
@@ -1044,6 +1143,74 @@ def _check_makebot_rate(user_id: int) -> int:
         return _MAKEBOT_RATE_LIMIT - len(hits)
 
 
+@app.get("/api/makebot/pricing")
+def api_makebot_pricing():
+    """V4.6.16 — pricing table for the Make Bot credit-cost badge.
+    Client reads on tab activate and shows per-model price. Own-key
+    providers (the user supplies their own API key) bypass this
+    endpoint and cost zero APEX credits."""
+    return {
+        "model_costs":  MAKEBOT_MODEL_COSTS,
+        "default_cost": MAKEBOT_COST_CREDITS,
+        "own_key_cost": 0,
+    }
+
+
+# V4.6.16 — AI usage aggregator for the web home page (v4.0.0 spec).
+# Scans every public marketplace bot for its declared creator_ai +
+# runner_ai fields, plus tallies recent make-bot generations from the
+# credits-ledger description column. Used by the dashboard's AI USAGE
+# pie chart + rolling line chart.
+@app.get("/web/api/ai-stats", include_in_schema=False)
+def web_api_ai_stats():
+    """Aggregate AI provider usage across the whole platform.
+    Returns:
+      providers:  {"groq": 42, "anthropic": 12, …}  – bots created per provider
+      runners:    {"anthropic": 88, "openai": 14, …} – bots' runtime AI
+      total_bots: total public bots in marketplace
+      gen_log:    last 100 make-bot generations [{provider, model, ts}, …]
+    """
+    out = {
+        "providers":  {},
+        "runners":    {},
+        "total_bots": 0,
+        "gen_log":    [],
+    }
+    # Provider usage from the marketplace
+    try:
+        rows = marketplace.list_bots(q="", tag="", section="all",
+                                     owner_id=None, page=1, per_page=500)
+        bots = rows.get("bots", []) if isinstance(rows, dict) else rows
+        out["total_bots"] = len(bots)
+        for b in bots:
+            c = (b.get("creator_ai") or "unknown").lower().strip()
+            r = (b.get("runner_ai")  or "unknown").lower().strip()
+            out["providers"][c] = out["providers"].get(c, 0) + 1
+            out["runners"][r]   = out["runners"].get(r, 0) + 1
+    except Exception as e:
+        print(f"[ai-stats] marketplace scan failed: {e}")
+    # Recent make-bot generations from the credits-ledger
+    try:
+        with credits_mod._conn() as _c:
+            cur = _c.execute(
+                "SELECT delta, reason, created_at FROM credits_ledger "
+                "WHERE reason LIKE 'make-bot %' "
+                "ORDER BY id DESC LIMIT 100"
+            )
+            for delta, reason, ts in cur.fetchall():
+                # reason format: 'make-bot <model> (pool|fallback)'
+                parts = reason.split(" ")
+                model = parts[1] if len(parts) >= 2 else "?"
+                out["gen_log"].append({
+                    "model": model,
+                    "credits": abs(int(delta or 0)),
+                    "ts": ts,
+                })
+    except Exception as e:
+        print(f"[ai-stats] credits-ledger scan failed: {e}")
+    return out
+
+
 @app.post("/api/makebot/generate")
 def api_makebot_generate(payload: dict,
                          authorization: str | None = Header(default=None)):
@@ -1052,15 +1219,21 @@ def api_makebot_generate(payload: dict,
     Rate-limited as a secondary safeguard against runaway loops."""
     user = _current_user(authorization)
 
+    # V4.6.16 — per-model pricing. Client sends 'model' in payload;
+    # we look up its cost. Older clients without that field default
+    # to the legacy MAKEBOT_COST_CREDITS (10).
+    requested_model = (payload or {}).get("model", "") or "baptou-haiku"
+    cost = _makebot_cost_for(requested_model)
+
     # 1. Pre-flight credit check
     balance = credits_mod.get_balance(user["id"])
-    if balance < MAKEBOT_COST_CREDITS:
+    if balance < cost:
         raise HTTPException(
             402,                                   # Payment Required
-            f"Insufficient APEX credits — need {MAKEBOT_COST_CREDITS}, "
-            f"you have {balance}. Switch the MAKE BOT provider to "
-            f"Anthropic / OpenAI / OpenRouter with your own API key, "
-            f"or ask an admin to grant you more credits.")
+            f"Insufficient APEX credits — need {cost} for "
+            f"{requested_model}, you have {balance}. Switch to a cheaper "
+            f"model in the Make Bot dropdown, plug in your own API key "
+            f"(zero credits charged), or ask an admin to grant more credits.")
 
     # 2. Rate limit (defence-in-depth even after credits)
     if _check_makebot_rate(user["id"]) <= 0:
@@ -1115,12 +1288,13 @@ def api_makebot_generate(payload: dict,
     # paths charge — the "via APEX" pricing is the same regardless of
     # which key the server happens to use under the hood.
     result = credits_mod.grant(
-        user["id"], -MAKEBOT_COST_CREDITS,
-        f"make-bot generation ({'pool' if used_pool else 'fallback'})",
+        user["id"], -cost,
+        f"make-bot {requested_model} ({'pool' if used_pool else 'fallback'})",
     )
     return {
         "text":             text,
-        "credits_charged":  MAKEBOT_COST_CREDITS,
+        "credits_charged":  cost,
+        "model":            requested_model,
         "new_balance":      result["balance"],
         "key_source":       "pool" if used_pool else "user-fallback",
     }
