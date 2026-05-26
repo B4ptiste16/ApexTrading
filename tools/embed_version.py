@@ -72,5 +72,56 @@ def main():
                 print(f"[embed_version] nuked stale {sub}/")
 
 
+def validate_dist_or_exit():
+    """V4.6.23 — call this AFTER PyInstaller, BEFORE ISCC. Refuses to
+    proceed if dist is incomplete. The v4.6.22 ship-failure was a
+    PyInstaller crash that left a half-baked dist; ISCC happily
+    packaged it into a 29 MB broken installer. This check stops that
+    failure mode by refusing to compile if dist looks wrong."""
+    must_exist = [
+        ("dist/APEX/APEX.exe",                 10 * 1024 * 1024),
+        ("dist/APEX/_internal/version.json",   100),
+        ("dist/APEX/_internal/base_library.zip", 1 * 1024 * 1024),
+    ]
+    failed = []
+    for rel, min_size in must_exist:
+        p = ROOT / rel
+        if not p.exists():
+            failed.append(f"missing: {rel}")
+            continue
+        size = p.stat().st_size
+        if size < min_size:
+            failed.append(f"too small: {rel}  ({size} < {min_size})")
+    if failed:
+        print("[embed_version] DIST VALIDATION FAILED:")
+        for f in failed:
+            print(f"  - {f}")
+        print("[embed_version] refusing to compile a broken installer.")
+        import sys as _s
+        _s.exit(2)
+    # Also verify version.json matches what we just embedded
+    import json as _j
+    on_disk = _j.loads((ROOT / "dist/APEX/_internal/version.json")
+                       .read_text(encoding="utf-8")).get("version", "")
+    if on_disk != version:
+        print(f"[embed_version] DIST VERSION MISMATCH: "
+              f"expected {version}, dist has {on_disk}")
+        import sys as _s
+        _s.exit(2)
+    print(f"[embed_version] dist validated — v{version}, "
+          f"APEX.exe="
+          f"{(ROOT / 'dist/APEX/APEX.exe').stat().st_size // 1024 // 1024} MB")
+
+
 if __name__ == "__main__":
-    main()
+    import sys
+    # When called with --validate-dist, do the post-PyInstaller check
+    # instead of the pre-build embed.
+    if len(sys.argv) > 1 and sys.argv[1] == "--validate-dist":
+        # Read the version from version.json directly so we can call
+        # validate_dist_or_exit() without re-running embed_version
+        version = json.loads(VER_JSON.read_text(encoding="utf-8")).get(
+            "version", "0.0.0")
+        validate_dist_or_exit()
+    else:
+        main()

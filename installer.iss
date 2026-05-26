@@ -67,10 +67,19 @@ Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; \
   IconFilename: "{app}\assets\icon.ico"; Tasks: desktopicon
 
 [Run]
-; Offer to launch APEX immediately after install
+; V4.6.23 — Launch APEX in BOTH normal and silent install modes.
+; The 'skipifsilent' flag used to suppress the post-install launch
+; during /VERYSILENT installs, which is exactly when the in-app
+; updater runs us — meaning users were stranded with no APEX window
+; after clicking Update.
+; - Normal install: checkbox in the wizard offers to launch.
+; - Silent install: launches automatically (runasoriginaluser so it
+;   runs as the user who triggered the install, not LocalSystem).
 Filename: "{app}\{#MyAppExeName}"; \
   Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; \
-  Flags: nowait postinstall skipifsilent
+  Flags: nowait postinstall
+Filename: "{app}\{#MyAppExeName}"; \
+  Flags: nowait runasoriginaluser; Check: WizardSilent
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}\__pycache__"
