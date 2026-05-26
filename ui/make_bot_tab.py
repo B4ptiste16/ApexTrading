@@ -368,7 +368,7 @@ _SYSTEM_PROMPT_TRADE = (
     "a text-only model to look at a chart image — there is no image. "
     "Available env vars for HTTP calls: GROQ_API_KEY, ANTHROPIC_API_KEY, "
     "OPENAI_API_KEY, GOOGLE_AI_API_KEY. Use `requests.post(...)` and "
-    "request `response_format={'type':'json_object'}` when the provider "
+    "request `response_format={{'type':'json_object'}}` when the provider "
     "supports it (Groq + OpenAI do).\n"
     "• AI-driven bots: ALWAYS wrap the LLM call in try/except and fall "
     "back to HOLD on any error. A flaky API call must never crash the bot.\n\n"
@@ -513,6 +513,20 @@ class _GenerateWorker(QThread):
         self.mode     = mode   # "trade" or "universe" (v4.6.4)
 
     def run(self):
+        # V4.6.23 — wrap the whole worker body so any future bug
+        # (system-prompt format error, dict-access on a None, etc.)
+        # surfaces as a user-visible error string instead of an
+        # APEX 'unexpected error' crash dialog.
+        try:
+            self._run_inner()
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            self.done.emit(
+                False,
+                f"Make Bot worker crashed: {type(e).__name__}: {e}")
+
+    def _run_inner(self):
         cfg = PROVIDERS.get(self.provider)
         if not cfg:
             self.done.emit(False, f"Unknown provider: {self.provider}")
