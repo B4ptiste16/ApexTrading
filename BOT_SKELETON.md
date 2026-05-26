@@ -1,104 +1,235 @@
-# How to build a custom bot for APEX
+# How to build a custom bot for APEX (v4.6.20)
 
-This file is a complete reference for writing a trading bot that
-APEX can run. It's intended to be:
+This file is the **complete, authoritative reference** for writing a
+trading bot or universe generator that APEX can run. It is:
 
 1. **Read by a human** who wants to write a bot from scratch.
-2. **Pasted into a chat with an AI** (Claude, GPT, etc.) to get
-   help writing one — every constraint the AI needs to know is
-   stated explicitly below.
+2. **Pasted into the system prompt** of every Make Bot AI generation
+   so the model knows every constraint without guessing.
 
-When you're done with your `.py` file, drag and drop it onto the
-APEX window. APEX will ask whether to install it locally or
-publish it to the public bot library.
+Every rule below was added because a real generated bot violated it
+and broke a real user. The rules are non-negotiable — APEX's runtime
+enforces or detects almost all of them.
+
+---
+
+## 0. The two kinds of bots
+
+| Kind | Job | Output | Runs on |
+|---|---|---|---|
+| **Trading bot** | Reads a universe of tickers, decides BUY/SELL/HOLD per tick, submits orders to Alpaca | Live orders | **Oracle (cloud)** when the user uses Run On Oracle, else locally in the frozen Python |
+| **Universe generator** | Scans the market, picks tickers, writes them into a `*_universe.txt` file. **Never trades.** | A `*_universe.txt` file | **Locally** in the frozen Python (PyInstaller-bundled libs only) |
+
+Both produce `.py` files. The universe generator's output (`*.txt`) is
+the trading bot's input — assigning a universe bot to a trading bot in
+the bot tab's Universe dropdown wires them together.
 
 ---
 
 ## 1. The contract — what APEX expects
 
-A bot is a single Python file (`.py`, max 1 MB) that **exposes a
-`main()` function** with no arguments, AND starts with an
-**`APEX-BOT-META` block** declaring metadata (description, AI used,
-dependencies, etc.) — see below. APEX launches it like this:
+A bot is a single Python file (`.py`, max 1 MB). It **must**:
 
-```
-python -m your_bot_module
-```
+1. Start with an `APEX-BOT-META` docstring block (§2).
+2. Define a top-level `main()` function (no args).
+3. Use `print(..., flush=True)` for all logs.
+4. Read credentials from `os.environ`, **never hardcode keys**.
+5. Honor `APEX_BOT_UNIVERSE` (trading bots) or write to `APEX_DATA_DIR/<META.universe>` (universe bots).
 
-…via PyInstaller-bundled Python, **with `cwd` set to the user's
-APEX data folder** (`%LocalAppData%\APEX Trading Platform` on
-Windows, `~/.apex` on Linux). Your bot can read `.env` from this
-folder for API keys.
+APEX launches it with `cwd` set to the user's APEX data folder
+(`%LocalAppData%\APEX Trading Platform` on Windows). For cloud-run
+custom bots on Oracle, cwd is `/opt/apex_bots` and the data folder is
+`/opt/apex_users/user_<id>/`. **Always use `os.environ['APEX_DATA_DIR']`
+to locate files; never assume cwd.**
 
-### 1a. The mandatory APEX-BOT-META block (v4.6.4+)
+---
 
-Every bot **must** declare its metadata in a docstring at the top
-of the file, starting with the literal line `APEX-BOT-META`. The
-desktop app, the marketplace, and the Oracle server all parse this
-block. It serves three purposes:
+## 2. The APEX-BOT-META block (mandatory)
 
-1. **Publishing info** — name / description / method show on cards.
-2. **Compatibility** — `asset_type` and `compatible_models` tell
-   APEX what universes and AI providers can pair with this bot.
-3. **Dependencies** — `requirements` lists the pip packages the
-   server should install before first start. Without this list,
-   the server falls back to scanning your `import` statements and
-   may guess wrong.
-
-Schema (all fields are optional but **strongly recommended**):
-
-| Key                 | Example                          | Meaning                                          |
-|---------------------|----------------------------------|--------------------------------------------------|
-| `name`              | `CRYPTO momentum bot`            | Human-readable label                             |
-| `description`       | `Trades top BTC/ETH pairs on …`  | One-line pitch                                   |
-| `method`            | `Linear regression + Groq vote`  | How the bot decides, in plain English            |
-| `ai_used`           | `groq`                           | Provider used to GENERATE this bot               |
-| `compatible_models` | `groq, anthropic`                | Providers that can RUN it                        |
-| `asset_type`        | `crypto`                         | One of: stocks, crypto, etfs, futures, options   |
-| `universe`          | `crypto_universe.txt`            | Universe file this bot expects                   |
-| `requirements`      | `scikit-learn, ccxt`             | pip packages beyond APEX's bundled set           |
-
-### Minimal skeleton
+The first docstring of the file MUST be the META block. Every field
+is parsed by APEX and the server. Example for a trading bot:
 
 ```python
 """
 APEX-BOT-META
-name:               My SPY bot
-description:        Buys SPY at open, sells at close
-method:             Single-position day-bracket on SPY
-ai_used:            anthropic
-compatible_models:  anthropic, openai
-asset_type:         stocks
-universe:           longbot_universe.txt
-requirements:
+name:               CRYPTO trend bot
+description:        Linear-regression trend follower on top crypto pairs
+method:             Fit 30-day regression. BUY on positive trend + 2% dip below trendline. SELL when trend flips negative.
+ai_used:            groq
+compatible_models:  groq, anthropic, openai
+asset_type:         crypto
+universe:           crypto_universe.txt
+requirements:       scikit-learn
+"""
+```
+
+| Field | Allowed values | Why it matters |
+|---|---|---|
+| `name` | Free text, ≤60 chars | Marketplace card label |
+| `description` | Free text, ≤200 chars | One-line pitch on the marketplace + the bot tab |
+| `method` | Free text | Plain-English how-it-decides |
+| `ai_used` | `groq` / `anthropic` / `openai` / `gemini` / `none` | Provider that GENERATED this bot. Auto-moderation flags lies. |
+| `compatible_models` | comma-list of providers | Providers that can RUN it at runtime if it makes AI calls |
+| `asset_type` | `stocks` / `crypto` / `etfs` / `futures` / `options` / `universe` | Drives UI behavior — see §3 |
+| `universe` | Filename of the `*_universe.txt` this bot **reads** (trading) or **writes** (universe gen) | Used for the file resolution |
+| `requirements` | Pip packages beyond APEX's bundled set, comma-separated, or empty | Server auto-installs for cloud bots. Frozen local Python ignores. |
+
+---
+
+## 3. `asset_type` drives UI behavior
+
+| `asset_type` | Auto-start scheduler? | Symbol format the bot uses |
+|---|---|---|
+| `stocks`, `etfs`, `futures`, `options` | ✅ Checkbox in Overview AUTOMATION | `AAPL`, `NVDA` (plain) |
+| `crypto` | ❌ No checkbox — listed as `always-on (24/7)` | `BTC-USD` in code, framework translates to `BTC/USD` for Alpaca |
+| `universe` (universe generators) | n/a (doesn't trade) | doesn't matter |
+
+---
+
+## 4. Trading bot template — **start from this** (do not invent your own boilerplate)
+
+```python
+"""
+APEX-BOT-META
+name:               <your name>
+description:        <one-line pitch>
+method:             <plain-english strategy summary>
+ai_used:            <provider>
+compatible_models:  <providers>
+asset_type:         <stocks|crypto|etfs|futures|options>
+universe:           <your_universe_file.txt>
+requirements:       <pkgs or empty>
 """
 
 import os
 import time
 from datetime import datetime, timezone
+from pathlib import Path
 from dotenv import load_dotenv
+import pandas as pd
+import numpy as np
+import yfinance as yf
+from alpaca.trading.client import TradingClient
+from alpaca.trading.requests import MarketOrderRequest
+from alpaca.trading.enums import OrderSide, TimeInForce
 
-load_dotenv()   # picks up ALPACA_API_KEY_LONG etc. from data dir
+# ── 1. Load .env from APEX data dir so ALPACA_API_KEY is populated.
+#       Child processes do NOT inherit .env automatically.
+_data_dir = os.environ.get("APEX_DATA_DIR", "")
+if _data_dir:
+    load_dotenv(os.path.join(_data_dir, ".env"))
+else:
+    load_dotenv()
 
-# 👇 These two env vars are guaranteed to exist when the bot is
-#    started from APEX (the user's keys, scoped to this bot's slot).
-ALPACA_KEY    = os.environ["ALPACA_API_KEY"]
-ALPACA_SECRET = os.environ["ALPACA_SECRET_KEY"]
+ALPACA_KEY      = os.environ["ALPACA_API_KEY"]
+ALPACA_SECRET   = os.environ["ALPACA_SECRET_KEY"]
+
+# ── 2. Honor paper/live toggle. The header pill writes APEX_ALPACA_MODE.
+ALPACA_IS_PAPER = (os.environ.get("APEX_ALPACA_MODE", "paper").lower() != "live")
+
+# ── 3. Default symbols used only if no universe file is found.
+DEFAULT_SYMBOLS = ["BTC-USD", "ETH-USD"]   # change for your asset_type
+
+
+def load_universe():
+    """Read tickers from APEX_BOT_UNIVERSE (set by the bot-tab universe
+    dropdown). Falls back to DEFAULT_SYMBOLS if no file is found so the
+    bot keeps trading even before the user runs their universe script."""
+    fname = os.environ.get("APEX_BOT_UNIVERSE", "<your_universe_file.txt>")
+    candidates = []
+    if os.path.isabs(fname):
+        candidates.append(Path(fname))
+    if _data_dir:
+        candidates.append(Path(_data_dir) / fname)
+    candidates.append(Path.cwd() / fname)
+    candidates.append(Path.cwd().parent / fname)
+    for p in candidates:
+        try:
+            if p.exists():
+                tickers = []
+                for line in p.read_text(encoding="utf-8").splitlines():
+                    line = line.strip()
+                    if not line or line.startswith("#"):
+                        continue
+                    t = line.split("#", 1)[0].strip().split()[0].upper()
+                    if t:
+                        tickers.append(t)
+                if tickers:
+                    print(f"[bot] loaded {len(tickers)} tickers from {p}",
+                          flush=True)
+                    return tickers
+        except Exception as e:
+            print(f"[bot] error reading {p}: {e}", flush=True)
+    print(f"[bot] no universe file '{fname}' — using {DEFAULT_SYMBOLS}",
+          flush=True)
+    return list(DEFAULT_SYMBOLS)
+
+
+# ── 4. Crypto symbol mapping: yfinance uses BTC-USD, Alpaca uses BTC/USD.
+def yf_to_alpaca(symbol):
+    if "/" in symbol:
+        return symbol
+    if "-" in symbol:
+        base, _, quote = symbol.partition("-")
+        return f"{base}/{quote}"
+    return symbol
+
+
+def get_position_qty(client, alpaca_symbol):
+    try:
+        for p in client.get_all_positions():
+            if p.symbol.upper() == alpaca_symbol.upper():
+                return float(p.qty)
+    except Exception:
+        pass
+    return 0.0
+
+
+# ── 5. Order submission via MarketOrderRequest (NOT raw kwargs).
+def submit_market_order(client, alpaca_symbol, side, qty=None, notional=None):
+    try:
+        kwargs = {"symbol": alpaca_symbol, "side": side,
+                  "time_in_force": TimeInForce.GTC}
+        if notional is not None:
+            kwargs["notional"] = notional
+        else:
+            kwargs["qty"] = qty
+        req = MarketOrderRequest(**kwargs)
+        order = client.submit_order(order_data=req)
+        print(f"  {side.name} {alpaca_symbol} "
+              f"{'$'+str(notional) if notional else qty}  id={order.id}",
+              flush=True)
+    except Exception as e:
+        print(f"  {side.name} {alpaca_symbol} FAILED: {e}", flush=True)
 
 
 def main():
-    """Entry point. Must be defined at module level and take no args.
-    APEX calls this in a fresh process and watches stdout. Return
-    normally to exit; raise to signal an error."""
-    from alpaca.trading.client import TradingClient
-    client = TradingClient(ALPACA_KEY, ALPACA_SECRET, paper=True)
-
+    print(f"[bot] starting - mode={'paper' if ALPACA_IS_PAPER else 'LIVE'}",
+          flush=True)
+    client = TradingClient(ALPACA_KEY, ALPACA_SECRET, paper=ALPACA_IS_PAPER)
+    cycle = 0
     while True:
-        # do your work, sleep, etc.
-        # Print logs to stdout — they show up in the APEX bot tab.
-        print(f"[{datetime.now(timezone.utc).isoformat()}] checking…",
-              flush=True)
-        time.sleep(60)
+        cycle += 1
+        # ── 6. Reload universe each cycle so script updates apply
+        #       without a bot restart.
+        symbols = load_universe()
+        for symbol in symbols:
+            try:
+                # ── 7. Your strategy here. The decision MUST be one of:
+                #       BUY (open long), SELL (close long),
+                #       SHORT (open short — STOCKS ONLY, never crypto),
+                #       COVER (close short), HOLD.
+                #
+                #       Decision must compare to CURRENT price, never to a
+                #       fixed multiple of long-term mean (that pattern
+                #       produces deterministic no-op loops).
+                pass
+            except Exception as e:
+                print(f"  ERROR {symbol}: {e}", flush=True)
+            time.sleep(2)  # gap between symbols
+        print(f"[{datetime.now(timezone.utc).isoformat(timespec='seconds')}] "
+              f"cycle {cycle} done - sleeping 300s", flush=True)
+        time.sleep(300)
 
 
 if __name__ == "__main__":
@@ -107,225 +238,230 @@ if __name__ == "__main__":
 
 ---
 
-## 2. What's available to your bot
+## 5. Trading bot rules (must follow)
 
-When APEX bundles your bot script with the desktop app, the
-following packages are guaranteed to be importable. (You don't
-need to ship them — they're already in the installer.)
+### 5a. Credentials
 
-| Package           | Use                                       |
-|-------------------|-------------------------------------------|
-| `alpaca-py`       | Alpaca trading + market data              |
-| `anthropic`       | Claude API (Haiku / Sonnet vision)        |
-| `pandas`, `numpy` | Data wrangling                            |
-| `yfinance`        | Historical bars / fallback quotes         |
-| `requests`        | HTTP                                      |
-| `python-dotenv`   | Read `.env`                               |
+- **MUST call `load_dotenv(APEX_DATA_DIR/.env)` at module top**, before
+  reading any env vars. Child processes don't inherit `.env` automatically.
+- Read `ALPACA_API_KEY` / `ALPACA_SECRET_KEY` from `os.environ`. Never
+  hardcode.
+- Honor `APEX_ALPACA_MODE` for paper vs. live: `paper=(mode != "live")`.
 
-### Need extra packages? (v4.6.4+)
+### 5b. Universe
 
-Any **cloud-run** bot can declare extra dependencies in its
-`APEX-BOT-META → requirements:` line. The Oracle server preflights
-`pip install` into the shared venv on the bot's first start and
-caches a marker so subsequent starts skip the install:
+- **MUST honor `APEX_BOT_UNIVERSE`** env var (set by the bot-tab dropdown).
+  Fall back to `META.universe` filename, then to `DEFAULT_SYMBOLS`.
+- **MUST reload the universe at the start of every cycle**, not just
+  startup. Universe-script updates take effect on the next 5-min tick
+  without a restart.
+- Search order for the file: absolute path → `APEX_DATA_DIR/<file>` →
+  `cwd/<file>` → `cwd.parent/<file>`.
 
-```
-requirements: scikit-learn, ccxt, ta-lib
-```
+### 5c. Orders
 
-If you forget to declare a requirement, the server's import scanner
-will try to detect it from your `import` statements (covers common
-packages like `sklearn` → `scikit-learn`, `cv2` → `opencv-python-headless`).
-Declaring is more reliable.
+- **MUST use `MarketOrderRequest(...)`** wrapped with
+  `client.submit_order(order_data=req)`. Raw kwargs (`symbol=`, `qty=`)
+  to `submit_order` are not supported in modern alpaca-py.
+- Check position BEFORE submitting BUY/SHORT (avoid duplicate entries).
+- Always have an exit condition. A strategy that only enters and never
+  exits is broken.
 
-**Local-run** custom bots use the frozen PyInstaller Python on the
-user's machine — that interpreter can't pip-install new packages.
-Limit local bots to the packages in the table above. If you need
-something outside that list, the bot must run on the cloud.
+### 5d. Crypto-specific
+
+- yfinance uses `BTC-USD`. Alpaca uses `BTC/USD`. Use the `yf_to_alpaca`
+  helper from the template to convert before submitting orders.
+- **Alpaca does NOT allow SHORTING crypto.** For `asset_type=crypto`,
+  use only BUY / SELL / HOLD. Never emit SHORT or COVER.
+
+### 5e. Strategy viability
+
+- ❌ Don't compare `prediction[-1] > mean * 1.1`. Different scales →
+  deterministic no-op loops.
+- ✅ Compare predictions / signals to CURRENT price.
+- ❌ Don't emit the same action every tick regardless of state.
+- ✅ Have at least one clear entry AND one clear exit condition.
+- Print feature values + the decision rule so the user can verify
+  signals are firing.
 
 ---
 
-## 2a. Text-only AI providers (Llama via Groq, GPT-4o-mini, Haiku without vision, etc.)
+## 6. Universe generator rules (different — pay attention)
 
-**Custom bots in the v4.6.5+ framework work fine with text-only AI
-models.** The framework hands your `decide()` function a clean pandas
-DataFrame of OHLCV bars — no chart images involved — so you can build
-any feature set (SMAs, RSI, MACD, regression slopes, regime flags…) as
-numbers and ask the LLM for a structured opinion.
+Universe generators **run LOCALLY in the user's frozen APEX install**.
+The frozen Python interpreter **cannot pip-install** new packages.
 
-Recommended pattern:
+### 6a. Allowed imports (everything else CRASHES)
+
+| Bundled | Use it for |
+|---|---|
+| `requests` | HTTP (Alpaca, CoinGecko, Polygon, Finnhub, IEX) |
+| `yfinance` | Historical bars, 24h volume |
+| `pandas`, `numpy` | Data wrangling |
+| `alpaca-py` | READ-only — assets, bars, account. **No order submission.** |
+| `json`, `os`, `re`, `time`, `datetime`, `math`, `statistics`, `pathlib` | stdlib |
+| `python-dotenv` (`from dotenv import load_dotenv`) | Load `.env` |
+
+### 6b. Forbidden imports
+
+`ccxt`, `talib`, `ta`, `scikit-learn`, `sklearn`, `openai`, `anthropic`,
+`google.generativeai`, `beautifulsoup4`, `lxml`, `scrapy`, `selenium`.
+
+If you need crypto data, use Alpaca `/v2/assets?asset_class=crypto` or
+CoinGecko's free public API. **Do not use ccxt** — it's not bundled.
+
+### 6c. Must do
+
+- **Load `.env`** from `APEX_DATA_DIR/.env` at module top.
+- **Try authenticated source first, then fall back to a no-auth public
+  API.** Example: Alpaca → CoinGecko for crypto, yfinance fallback for
+  stocks.
+- **Write notes in this exact format** so the Universe-tab breakdown
+  table populates the Note column consistently:
+  ```
+  TICKER  # score=N vol=12.3B w=+5.2% m=+18.4%
+  ```
+  - `score` = your composite ranking (used for the Score column / sort)
+  - `vol`   = 24h volume, formatted as `B` / `M` / `K`
+  - `w`     = 7-day return, e.g. `+5.2%` / `-3.1%`
+  - `m`     = 30-day return
+  - You may add other fields (e.g. `atr=14.6%`) but always include vol/w/m
+- **Write to `APEX_DATA_DIR/<META.universe>`**, never to `cwd`.
+- **Run once, exit cleanly.** Not a daemon. APEX schedules re-runs.
+- **If no data source succeeds, return WITHOUT overwriting the .txt.**
+  Empty file = trading bot crashes.
+
+### 6d. Universe generator template
 
 ```python
-import os, json, requests
-
-def _llama_opinion(symbol, features: dict) -> dict:
-    """Ask Llama-3.3-70B on Groq for a JSON decision. Returns a dict
-    with keys: action, conf, reason. Never raises — failures degrade
-    to HOLD so the framework keeps trading."""
-    prompt = (f"{symbol} features: {json.dumps(features)}.\n"
-              f"Reply with JSON ONLY:\n"
-              f'{{"action":"BUY|SELL|HOLD","conf":0..1,"reason":"…"}}')
-    try:
-        r = requests.post(
-            "https://api.groq.com/openai/v1/chat/completions",
-            headers={"Authorization": f"Bearer {os.environ['GROQ_API_KEY']}"},
-            json={"model": "llama-3.3-70b-versatile",
-                  "messages": [{"role": "user", "content": prompt}],
-                  "response_format": {"type": "json_object"}},
-            timeout=20)
-        return json.loads(r.json()["choices"][0]["message"]["content"])
-    except Exception:
-        return {"action": "HOLD", "conf": 0, "reason": "AI call failed"}
-
-
-def decide(symbol, bars, position, account):
-    close = bars["Close"].squeeze()
-    feats = {
-        "price":  float(close.iloc[-1]),
-        "sma20":  float(close.rolling(20).mean().iloc[-1]),
-        "sma50":  float(close.rolling(50).mean().iloc[-1]),
-        "ret_5d": float(close.pct_change(5).iloc[-1] * 100),
-    }
-    opinion = _llama_opinion(symbol, feats)
-    if opinion["conf"] < 0.6 or opinion["action"] == "HOLD":
-        return {"action": "HOLD", "reason": opinion["reason"]}
-    qty = max(1, int(account["buying_power"] * 0.05 / feats["price"]))
-    return {"action": opinion["action"], "qty": qty,
-            "reason": f"Llama (conf {opinion['conf']:.2f}): {opinion['reason']}"}
-```
-
-This pattern works identically with any other text LLM — swap the URL
-and model name. APEX exposes the user's saved API keys as env vars
-(`GROQ_API_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`,
-`GOOGLE_AI_API_KEY`), so no hardcoded credentials.
-
-**When to use vision** (Claude/GPT-4o vision, Gemini): only when your
-strategy genuinely needs to "look at" a chart pattern that's hard to
-encode numerically. For SMA / RSI / MACD-driven strategies, text is
-faster, cheaper, and just as accurate.
-
----
-
-## 3. Environment variables APEX sets
-
-Before launching your bot, APEX exports these to the subprocess
-environment:
-
-| Var                    | Meaning                                              |
-|------------------------|------------------------------------------------------|
-| `ALPACA_API_KEY`       | Alpaca paper key for this bot's slot                 |
-| `ALPACA_SECRET_KEY`    | Matching secret                                      |
-| `ANTHROPIC_API_KEY`    | Claude API key (if the user set one)                 |
-| `APEX_BOT_SIDE`        | e.g. `LONG` / `SHORT` / `DAY` / `CUSTOM`             |
-| `APEX_DATA_DIR`        | Absolute path of the user's data folder              |
-| `PYTHONIOENCODING`     | Always `utf-8` (you can ignore this)                 |
-
-Read them with `os.environ["ALPACA_API_KEY"]` — they're already
-loaded by the time `main()` runs.
-
----
-
-## 4. Logging and persistence
-
-- **stdout / stderr** — every line you `print(..., flush=True)`
-  ends up in the bot's Output panel in real time. Use this for
-  status messages.
-- **State files** — if you want to persist anything across runs
-  (last trade timestamp, accumulated P/L, etc.), write to
-  `APEX_DATA_DIR/<your_bot_name>_state.json`. APEX preserves this
-  file across updates.
-- **Trade log** — append a JSON line per trade to
-  `APEX_DATA_DIR/<your_bot_name>_trade_log.jsonl`. The Overview
-  tab parses these automatically into the sold-trades feed.
-
----
-
-## 5. Constraints — what your bot must NOT do
-
-- **No GUI code.** No Qt, no Tkinter. Bots are headless.
-- **No `sys.exit(0)` on success.** Just `return` from `main()` so
-  APEX can detect clean exits vs. crashes.
-- **No `os.system` / `subprocess.Popen` without a really good
-  reason.** APEX will warn the user before installing a bot that
-  shells out.
-- **No file writes outside `APEX_DATA_DIR`.** Anything else will
-  be rejected when publishing to the library.
-- **No hardcoded keys.** Always read from env vars — the user's
-  keys must stay in their own `.env`.
-- **Max file size 1 MB.** If you need data files, generate them
-  at runtime, don't ship them.
-
----
-
-## 6. Publishing your bot
-
-Two paths:
-
-### Local only (just you)
-
-Drag the `.py` onto the APEX window → "Add to my library". The
-bot appears under MORE BOTS → AVAILABLE TO ADD. Click + to make
-a tab for it.
-
-### Public (everyone can browse + install it)
-
-Drag the `.py` onto the APEX window → "Publish publicly…". APEX
-prompts for:
-
-- **Display name** — what shows on the marketplace card.
-- **Description** — one line. Be specific about strategy.
-- **Tags** — comma-separated, e.g. `long, mean-reversion, daily`.
-
-You must be signed in to publish. APEX uploads the file to the
-shared server and assigns a unique slug. Other users see your
-bot in MORE BOTS → BROWSE PUBLIC BOTS and can install it with
-one click.
-
-You can delete your own published bots at any time from the
-marketplace; downloads stop immediately.
-
----
-
-## 7. Quick checklist before drag-and-drop
-
-- [ ] Single `.py` file, under 1 MB
-- [ ] **`APEX-BOT-META` docstring** at the top with name, description, method, ai_used, compatible_models, asset_type, universe, requirements
-- [ ] `main()` function at module level, no args
-- [ ] Reads API keys from `os.environ`, never hardcoded
-- [ ] Uses `print(..., flush=True)` so logs appear live
-- [ ] Returns from `main()` to exit cleanly
-- [ ] Cloud bot: extra deps declared in `requirements:` — Local bot: only bundled packages
-- [ ] Writes only inside `APEX_DATA_DIR`
-
-If all boxes are ticked, drop it on APEX and you're done.
-
----
-
-## 8. Building a UNIVERSE bot instead of a trading bot (v4.6.4+)
-
-The Make Bot tab has a switch: **Trade Bot** (default) or **Universe Bot**.
-
-A universe bot doesn't open trades — it produces a fresh `*_universe.txt`
-file that a trading bot then consumes. Examples: nightly scanner that
-picks the top 30 momentum stocks, weekly screen for high-beta crypto,
-sentiment-driven shortlist.
-
-A universe bot's META block declares:
-
-```
+"""
 APEX-BOT-META
-name:         Crypto top-20 scanner
-description:  Rewrites crypto_universe.txt nightly with the top-20 movers
-method:       24h-volume rank + price-action filter
-asset_type:   crypto
-universe:     crypto_universe.txt   ← the file this bot REWRITES
-ai_used:      groq
-compatible_models: groq, anthropic
-requirements: ccxt
+name:               <your name>
+description:        <one-line pitch>
+method:             <plain-english>
+ai_used:            none
+compatible_models:  none
+asset_type:         <stocks|crypto|...>
+universe:           <your_universe_file.txt>
+requirements:
+"""
+
+import os
+from pathlib import Path
+
+try:
+    from dotenv import load_dotenv
+    _dd = os.environ.get("APEX_DATA_DIR", "")
+    load_dotenv(os.path.join(_dd, ".env")) if _dd else load_dotenv()
+except Exception:
+    pass
+
+import requests
+import yfinance as yf
+import pandas as pd
+
+def fmt_volume(v):
+    """Format USD volume as 12.3B / 450M / 8.2K."""
+    try: v = float(v)
+    except: return "?"
+    if v >= 1e9: return f"{v/1e9:.1f}B"
+    if v >= 1e6: return f"{v/1e6:.1f}M"
+    if v >= 1e3: return f"{v/1e3:.1f}K"
+    return f"{v:.0f}"
+
+def try_authenticated_source():
+    # Alpaca, Polygon, IEX, etc. Return None on auth failure.
+    pass
+
+def public_fallback_source():
+    # CoinGecko / yfinance / Yahoo / etc. No auth required.
+    pass
+
+def main():
+    syms = try_authenticated_source() or public_fallback_source()
+    if not syms:
+        print("[universe] no source - keeping existing universe", flush=True)
+        return
+
+    rows = []
+    for sym in syms:
+        try:
+            t = yf.Ticker(sym)
+            hist = t.history(period="35d", interval="1d", auto_adjust=False)
+            if hist.empty or len(hist) < 8:
+                continue
+            close = float(hist["Close"].iloc[-1])
+            vol_usd = float(hist["Volume"].iloc[-1]) * close
+            w_pct = (close / float(hist["Close"].iloc[-8]) - 1) * 100
+            m_pct = (close / float(hist["Close"].iloc[-min(31,len(hist))]) - 1) * 100
+            import math
+            score = math.log10(max(vol_usd, 1)) * 10
+            rows.append({
+                "sym":   sym,
+                "score": score,
+                "note":  f"vol={fmt_volume(vol_usd)} w={w_pct:+.1f}% m={m_pct:+.1f}%",
+                "vol":   vol_usd,
+            })
+        except Exception as e:
+            print(f"  skip {sym}: {e}", flush=True)
+    if not rows:
+        print("[universe] no scored symbols - keeping existing universe",
+              flush=True)
+        return
+
+    df = pd.DataFrame(rows).sort_values("vol", ascending=False).head(20)
+
+    data_dir = os.environ.get("APEX_DATA_DIR", ".")
+    out = os.path.join(data_dir, "<your_universe_file.txt>")
+    with open(out, "w", encoding="utf-8") as f:
+        f.write("# asset_type: <your asset_type>\n")
+        for _, r in df.iterrows():
+            f.write(f"{r['sym']}  # score={r['score']:.0f} {r['note']}\n")
+    print(f"[universe] wrote {len(df)} tickers to {out}", flush=True)
+    print("[universe] DONE", flush=True)
+
+if __name__ == "__main__":
+    main()
 ```
 
-The `asset_type` field is what APEX uses to enforce compatibility:
-when you pair a trading bot with a universe in the bot tab, the
-dropdown only lists universes whose `asset_type` matches the trading
-bot's. A `crypto` bot will never accidentally consume a `stocks`
-universe.
+---
+
+## 7. Environment variables APEX exports to every bot
+
+| Var | Set by | Meaning |
+|---|---|---|
+| `APEX_DATA_DIR` | Always | Absolute path of the user's data folder |
+| `APEX_BOT_SIDE` | Always | `LONG` / `SHORT` / `DAY` / your slug |
+| `APEX_BOT_UNIVERSE` | When user assigns one in the bot tab | Filename of the universe .txt the bot should read |
+| `APEX_ALPACA_MODE` | Header paper/live pill | `paper` or `live` — drives `TradingClient(paper=…)` |
+| `ALPACA_API_KEY` / `ALPACA_SECRET_KEY` | From `.env` after `load_dotenv` | Bot's bundled key+secret |
+| `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GROQ_API_KEY`, `GOOGLE_AI_API_KEY` | From `.env` after `load_dotenv` | For AI-driven decision bots |
+| `PYTHONIOENCODING` | Always `utf-8` | Ignore |
+
+---
+
+## 8. Quick checklist before drag-and-drop
+
+### For trading bots
+
+- [ ] APEX-BOT-META block at the top with all 9 fields
+- [ ] `load_dotenv(APEX_DATA_DIR/.env)` at module top
+- [ ] `load_universe()` honors `APEX_BOT_UNIVERSE`
+- [ ] Universe reloaded at the top of every cycle
+- [ ] `MarketOrderRequest(...)` wrapping `submit_order`
+- [ ] Position lookup before BUY/SHORT
+- [ ] Clear entry AND clear exit conditions
+- [ ] Asset-type-correct symbol format + no SHORT for crypto
+- [ ] `print(..., flush=True)` everywhere
+- [ ] try/except around every external call
+
+### For universe generators
+
+- [ ] APEX-BOT-META block with `asset_type` matching the universe purpose
+- [ ] `load_dotenv(APEX_DATA_DIR/.env)` at module top
+- [ ] Imports limited to the bundled list in §6a
+- [ ] Try-authenticated + public-fallback pattern
+- [ ] Notes in the `score=N vol=X w=+Y% m=+Z%` format
+- [ ] Writes to `APEX_DATA_DIR/<META.universe>`
+- [ ] Returns without overwriting the .txt if no source succeeds
+- [ ] Runs once, exits cleanly (not a daemon loop)
