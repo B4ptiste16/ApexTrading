@@ -2466,15 +2466,35 @@ class ApexWindow(QMainWindow):
         # complete before we mutate the tab bar (sibling buttons get
         # repositioned during insertTab, which could destabilise the
         # widget that fired the signal).
-        QTimer.singleShot(0, lambda s=side: (self._add_bot_tab(s),
-                                              self._sync_overview_blocks()))
+        # V4.6.24: also refresh the Tools tab's Alpaca-slot Assigned
+        # dropdowns so the newly-added bot appears as an option without
+        # restarting the app.
+        QTimer.singleShot(0, lambda s=side: (
+            self._add_bot_tab(s),
+            self._sync_overview_blocks(),
+            self._refresh_tools_slot_assigns(),
+        ))
 
     def _on_bot_removed(self, side: str):
         """V7.1.1: deferred so the originating click signal finishes
         before the source widget is destroyed. Removing the QPushButton
         that fired the click from inside the click handler used to
         occasionally tear down the whole window."""
-        QTimer.singleShot(0, lambda s=side: self._do_remove_bot(s))
+        QTimer.singleShot(0, lambda s=side: (
+            self._do_remove_bot(s),
+            self._refresh_tools_slot_assigns(),
+        ))
+
+    def _refresh_tools_slot_assigns(self):
+        """V4.6.24 — repopulate the Tools tab's Alpaca-slot Assigned
+        dropdowns so newly-added / removed bots appear correctly.
+        Silently no-ops if Tools tab not built yet or method missing."""
+        try:
+            tools = getattr(self, "overview_tab", None)
+            if tools and hasattr(tools, "refresh_alpaca_slot_assignments"):
+                tools.refresh_alpaca_slot_assignments()
+        except Exception as e:
+            print(f"[overview] slot-assign refresh failed: {e}")
 
     def _do_remove_bot(self, side: str):
         # Stop bot if running
@@ -3298,12 +3318,61 @@ def _run_bot(side: str, script_path: str = "") -> int:
     mod_name = {"LONG": "longbot_v2",
                 "SHORT": "shortbot_v2",
                 "DAY": "daybot"}.get(side_u)
-    if not mod_name:
-        print(f"Unknown bot: {side}", flush=True)
-        return 2
-    bot = importlib.import_module(mod_name)
-    bot.main()
-    return 0
+    if mod_name:
+        bot = importlib.import_module(mod_name)
+        bot.main()
+        return 0
+
+    # V4.6.25 — custom bot path. Built-in lookup failed, so this is
+    # a custom bot. Find its .py in DATA_DIR/bots/ (or universe_scripts/)
+    # and exec via runpy. Without this, every locally-run custom bot
+    # died with 'Unknown bot' because _run_bot only knew about LONG /
+    # SHORT / DAY / UNIVERSE.
+    from pathlib import Path as _P
+    candidates = []
+    if script_path:
+        candidates.append(_P(script_path))
+    # Slug as stored in the registry — lowercase
+    slug = side.lower()
+    candidates.extend([
+        DATA_DIR / "bots" / f"{slug}.py",
+        DATA_DIR / "bots" / f"{slug}.apex",
+        DATA_DIR / "universe_scripts" / f"{slug}.py",
+    ])
+    # Case-insensitive scan as a last resort
+    for base in (DATA_DIR / "bots", DATA_DIR / "universe_scripts"):
+        if base.exists():
+            for p in base.iterdir():
+                if p.is_file() and p.stem.lower() == slug:
+                    candidates.append(p)
+    for sp in candidates:
+        if sp and sp.exists():
+            print(f"[bot] running custom script {sp.name} "
+                  f"(side={side})", flush=True)
+            # Decrypt .apex on the fly if library is locked
+            run_path_ = sp
+            if sp.suffix == ".apex":
+                try:
+                    from core import secure as _sec
+                    run_path_ = _sec.decrypted_temp_file(sp)
+                except Exception as e:
+                    print(f"[bot] could not decrypt {sp.name}: {e}",
+                          flush=True)
+                    return 1
+            try:
+                import runpy
+                runpy.run_path(str(run_path_), run_name="__main__")
+                return 0
+            except SystemExit as e:
+                return int(getattr(e, "code", 0) or 0)
+            except Exception as e:
+                import traceback
+                print(f"[bot] script crashed: {e}", flush=True)
+                traceback.print_exc()
+                return 1
+    print(f"Unknown bot: {side}  (not in built-ins, no .py found in "
+          f"{DATA_DIR / 'bots'} or universe_scripts/)", flush=True)
+    return 2
 
 
 # ─────────────────────────────────────────

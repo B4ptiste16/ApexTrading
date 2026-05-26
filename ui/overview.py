@@ -824,13 +824,67 @@ class ToolsTab(QWidget):
             self._ibkr_msg.setStyleSheet(f"color:{C['red']};font-size:10px;")
         QTimer.singleShot(8000, lambda: self._ibkr_msg.setText(""))
 
+    def refresh_alpaca_slot_assignments(self):
+        """V4.6.24 — repopulate each slot's Assigned dropdown to pick
+        up newly-created custom bots without forcing an app restart.
+        Called by ApexWindow when bot_added / bot_removed fires.
+        Preserves the currently-selected value per slot when possible."""
+        if not hasattr(self, "_alpaca_slot_edits"):
+            return  # section not built yet (broker != alpaca)
+        # Rebuild SIDE_OPTIONS from the current bot registry
+        SIDE_OPTIONS = [
+            ("LONG",       "▲ LONG bot"),
+            ("SHORT",      "▼ SHORT bot"),
+            ("DAY",        "◆ DAY bot"),
+            ("UNASSIGNED", "(unassigned)"),
+        ]
+        try:
+            reg = D.load_bot_registry()
+            for c in reg.get("custom", []):
+                slug = str(c.get("id", "")).upper()
+                if slug and slug not in {sv for sv, _ in SIDE_OPTIONS}:
+                    SIDE_OPTIONS.append(
+                        (slug, c.get("label", slug) + " bot"))
+        except Exception:
+            pass
+        # Update each existing combo: keep current selection if its
+        # value still exists, else fall back to UNASSIGNED.
+        for slot in self._alpaca_slot_edits:
+            combo = slot.get("assign")
+            if combo is None:
+                continue
+            current = combo.currentData() or "UNASSIGNED"
+            combo.blockSignals(True)
+            combo.clear()
+            for val, lbl in SIDE_OPTIONS:
+                combo.addItem(lbl, val)
+            idx = next((j for j, (v, _) in enumerate(SIDE_OPTIONS)
+                        if v == current), 0)
+            combo.setCurrentIndex(idx)
+            combo.blockSignals(False)
+
     def _build_alpaca_section(self, s):
         """V3.2.0 — slot-based key layout. The user enters up to 3 API
         key/secret pairs and assigns each to LONG / SHORT / DAY via a
         dropdown. On save we translate the slot→bot mapping into the
         underlying ALPACA_API_KEY_{LONG/SHORT/DAY} env vars so the
         existing bot code keeps working unmodified."""
-        s.add(SectionHeader("ALPACA  ·  API KEYS", C["green"]))
+        # V4.6.24 — section header with a refresh button so the user
+        # can force the Assigned dropdowns to pick up new bots without
+        # restarting the app.
+        from PyQt6.QtWidgets import QPushButton as _PB
+        _refresh = _PB("↻ Reload bots")
+        _refresh.setObjectName("toolBtn")
+        _refresh.setStyleSheet(
+            f"QPushButton#toolBtn{{background:rgba(138,147,201,0.15);"
+            f"color:{C['purple']};border:none;border-radius:4px;"
+            f"padding:4px 10px;font-size:10px;font-weight:600;}}")
+        _refresh.setToolTip(
+            "Re-scan the bot registry so newly-created bots show up "
+            "in each slot's Assigned dropdown.")
+        _refresh.clicked.connect(self.refresh_alpaca_slot_assignments)
+        s.add(SectionHeader("ALPACA  ·  API KEYS", C["green"],
+                            controls=_refresh))
         keys_info = QLabel(
             "Enter up to 3 Alpaca paper API key / secret pairs and "
             "assign each to a built-in bot (LONG / SHORT / DAY). Each "
@@ -921,6 +975,11 @@ class ToolsTab(QWidget):
 
             self._alpaca_slot_edits.append(
                 {"key": key_ed, "secret": sec_ed, "assign": assign})
+
+        # V4.6.24 — remember the side-options template + each combo
+        # so refresh_alpaca_slot_assignments() can rebuild contents
+        # when a new bot gets added without forcing an app restart.
+        self._alpaca_side_options_default = list(SIDE_OPTIONS)
 
         last_row = len(existing_pairs) * 3
         show = QCheckBox("Show keys")
