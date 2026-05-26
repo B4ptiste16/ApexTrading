@@ -28,9 +28,7 @@ SCP="scp -i \"$ORACLE_KEY\" -o StrictHostKeyChecking=no"
 run_ssh() { eval "$SSH \"$1\""; }
 
 deploy_files() {
-    echo "→ rsync server/*.py to /tmp on Oracle"
-    # rsync isn't always installed; fall back to scp of the files we own.
-    # Excludes __pycache__ + .pyc to keep the upload tiny.
+    echo "→ scp server/*.py to /tmp on Oracle"
     local files
     files=$(ls server/*.py)
     eval "$SCP $files $ORACLE_USER@$ORACLE_HOST:/tmp/"
@@ -42,6 +40,29 @@ deploy_files() {
         server_files="$server_files /tmp/$(basename "$f")"
     done
     run_ssh "sudo cp $server_files $ORACLE_SERVER_DIR/ && rm $server_files"
+
+    # V4.6.21 — also sync core/*.py to /opt/apex_bots/core/. The
+    # built-in trading bots (longbot_v2, shortbot_v2, daybot) and the
+    # transition cleanup module + bot framework all import from there.
+    # Previously only server/ was synced; core/ai_client missing on
+    # Oracle was the root cause of every cloud bot's
+    # ModuleNotFoundError on cold start.
+    echo "→ scp core/*.py to /tmp on Oracle"
+    local core_files
+    core_files=$(ls core/*.py)
+    eval "$SCP $core_files $ORACLE_USER@$ORACLE_HOST:/tmp/"
+    echo "→ move into /opt/apex_bots/core/ with sudo"
+    local core_dest_files
+    core_dest_files=""
+    for f in core/*.py; do
+        core_dest_files="$core_dest_files /tmp/$(basename "$f")"
+    done
+    run_ssh "sudo mkdir -p /opt/apex_bots/core && \
+             sudo cp $core_dest_files /opt/apex_bots/core/ && \
+             rm $core_dest_files && \
+             (sudo test -f /opt/apex_bots/core/__init__.py || \
+              sudo bash -c 'echo \"\" > /opt/apex_bots/core/__init__.py') && \
+             sudo chown -R apex:apex /opt/apex_bots/core/"
 }
 
 restart_service() {

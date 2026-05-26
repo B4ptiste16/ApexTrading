@@ -3078,15 +3078,34 @@ class ApexWindow(QMainWindow):
     def _tick_schedule(self):
         """V7.1.10: per-bot auto-schedule. Each bot has its own
         checkbox in Tools → AUTOMATION; only the checked ones get
-        started/stopped on the market-open / market-close edge."""
+        started/stopped on the market-open / market-close edge.
+
+        V4.6.21 — emits [schedule] diagnostic lines on every tick so
+        users can see in the apex_crash.log / console exactly why
+        bots aren't auto-starting. Common causes: no checkbox ticked,
+        broker mode not Alpaca, market clock unreachable, edge
+        already passed (APEX started after market open)."""
         try:
             scheduled = set(D.get_auto_schedule_active_bots())
             if not scheduled:
+                # V4.6.21 — log this rarely (once per ~5 ticks ≈ 5 min)
+                # so the user notices when nothing is scheduled.
+                if getattr(self, "_sched_log_counter", 0) % 5 == 0:
+                    print("[schedule] no bots have auto-start enabled — "
+                          "check the AUTOMATION row in Overview", flush=True)
+                self._sched_log_counter = \
+                    getattr(self, "_sched_log_counter", 0) + 1
                 return
             from core.schedule import market_is_open
             is_open = market_is_open()
             if is_open is None:
+                print("[schedule] market clock unreachable — broker not "
+                      "Alpaca, or get_clock() raised. Scheduled bots: "
+                      f"{sorted(scheduled)}", flush=True)
                 return
+            print(f"[schedule] tick: market_is_open={is_open}  "
+                  f"prev={self._mkt_open_prev}  "
+                  f"scheduled={sorted(scheduled)}", flush=True)
             if is_open and self._mkt_open_prev in (None, False):
                 started = []
                 for side in scheduled:
