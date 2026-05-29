@@ -262,6 +262,35 @@ def _submit(client, alpaca_symbol: str, action: str, qty: float):
     return client.submit_order(order_data=req)
 
 
+def _write_trade_log(slug: str, symbol: str, action: str,
+                     qty, price, reason: str = "") -> None:
+    """V4.6.30 — append a trade-log entry so the bot's tab Closed
+    Trades feed + equity history populate. Written to
+    APEX_DATA_DIR/<side>_trade_log.jsonl in the same shape the
+    built-in bots use (so core.data.load_jsonl + the feed parse it).
+
+    Uses APEX_BOT_SIDE (the registry slug APEX launched us with) for
+    the filename — NOT the BotRunner display name — so it matches
+    what core.data.log_files_for(side) reads."""
+    import json as _j
+    from datetime import datetime as _dt, timezone as _tz
+    data_dir = os.environ.get("APEX_DATA_DIR") or "."
+    side = os.environ.get("APEX_BOT_SIDE", slug)
+    path = Path(data_dir) / f"{side.lower()}_trade_log.jsonl"
+    try:
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(_j.dumps({
+                "time":    _dt.now(_tz.utc).isoformat(timespec="seconds"),
+                "symbol":  symbol,
+                "action":  action,
+                "qty":     qty,
+                "price":   price,
+                "reason":  reason,
+            }) + "\n")
+    except Exception as e:
+        print(f"  [trade-log] write failed: {e}", flush=True)
+
+
 # ── Universe loading ────────────────────────────────────────────
 
 def _load_universe(universe_path: str | Path,
@@ -427,6 +456,15 @@ class BotRunner:
             order = _submit(client, alpaca_sym, action, d["qty"])
             print(f"  {action:<6} {symbol:<10}  qty={d['qty']}  "
                   f"id={order.id}  ({d['reason']})", flush=True)
+            # V4.6.30 — record the trade so the bot tab's Closed Trades
+            # feed + equity history populate (custom bots showed nothing
+            # under the console before this).
+            try:
+                last_price = float(bars["Close"].squeeze().iloc[-1])
+            except Exception:
+                last_price = 0.0
+            _write_trade_log(self.name, symbol, action, d["qty"],
+                             last_price, d.get("reason", ""))
         except Exception as e:
             print(f"  {action:<6} {symbol:<10}  FAILED: {e}",
                   flush=True)

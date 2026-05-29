@@ -268,16 +268,21 @@ class OverviewTab(QWidget):
                 f"color:{C['muted']};font-size:11px;padding:14px;"
                 f"background:{C['panel']};border:1px dashed {C['border']};"
                 f"border-radius:8px;")
-            self._blocks_row.addWidget(empty, 0, 0, 1, 3)
+            self._blocks_row.addWidget(empty, 0, 0, 1, 2)
             return
 
-        # V4.0.0 — wrapping grid: row = idx // 3, col = idx % 3
+        # V4.6.30 — 2-wide grid: row = idx // 2, col = idx % 2.
+        # Each block has 4-6 metric cards; 3-per-row was too cramped to
+        # read the numbers. Two per row gives each block room to breathe
+        # and stacks additional bots underneath.
+        self._blocks_row.setColumnStretch(0, 1)
+        self._blocks_row.setColumnStretch(1, 1)
         for idx, meta in enumerate(bots):
             block = self._account_block(meta["side"],
                                         label_text=meta["label"],
                                         color=meta["color"])
             self.blocks[meta["side"]] = block
-            self._blocks_row.addWidget(block, idx // 3, idx % 3)
+            self._blocks_row.addWidget(block, idx // 2, idx % 2)
 
     # Public alias for main.py to call after registry mutations.
     def refresh_active_bots(self):

@@ -67,6 +67,28 @@ SNAPSHOT_FILES = {
     "DAY":   [ROOT/"daybot_snapshots.jsonl"],
 }
 
+
+def log_files_for(side: str) -> list:
+    """V4.6.30 — resolve trade-log paths for ANY bot side, built-in or
+    custom. Custom bots write to <slug>_trade_log.jsonl (the BotRunner
+    framework + the crypto template do this). Without this, custom
+    bot tabs showed an empty Closed Trades feed because LOG_FILES had
+    no entry for them."""
+    s = side.upper()
+    if s in LOG_FILES:
+        return LOG_FILES[s]
+    return [ROOT / f"{side.lower()}_trade_log.jsonl"]
+
+
+def snapshot_files_for(side: str) -> list:
+    """V4.6.30 — resolve snapshot/equity-history paths for any side.
+    Custom bots use their <slug>_lifetime.jsonl (written by the
+    Overview refresh + the framework)."""
+    s = side.upper()
+    if s in SNAPSHOT_FILES:
+        return SNAPSHOT_FILES[s]
+    return [ROOT / f"{side.lower()}_lifetime.jsonl"]
+
 DAY_STATE = ROOT / "daybot_state.json"
 
 # Anthropic pricing (per million tokens) — update if pricing changes
@@ -1146,7 +1168,7 @@ def load_snapshots(side: str) -> pd.DataFrame:
     future bot version that writes snapshots explicitly still works.
     """
     # Primary source: dedicated snapshots file (if it exists)
-    rows = load_jsonl(SNAPSHOT_FILES.get(side, []))
+    rows = load_jsonl(snapshot_files_for(side))
     if rows:
         df = pd.DataFrame(rows)
         df["time"] = pd.to_datetime(df["time"], utc=True, errors="coerce")
@@ -1157,7 +1179,7 @@ def load_snapshots(side: str) -> pd.DataFrame:
     # Fallback: synthesize from the trade log. Each entry carries the
     # portfolio_value before AND after the run; we pick "after" since
     # that's the latest state the bot saw.
-    log_rows = load_jsonl(LOG_FILES.get(side, []))
+    log_rows = load_jsonl(log_files_for(side))
     if not log_rows:
         return pd.DataFrame()
 
@@ -1194,7 +1216,7 @@ def load_snapshots(side: str) -> pd.DataFrame:
 
 
 def load_bot_log(side: str) -> pd.DataFrame:
-    rows = load_jsonl(LOG_FILES.get(side, []))
+    rows = load_jsonl(log_files_for(side))
     if not rows:
         return pd.DataFrame()
     parsed = []
