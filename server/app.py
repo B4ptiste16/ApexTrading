@@ -861,6 +861,40 @@ def _start_moderation_cron():
 _start_moderation_cron()
 
 
+# V4.6.27 — server-side bot auto-start scheduler. Runs in a daemon
+# thread inside uvicorn so cloud bots auto-start at the US market
+# open even when the user's desktop APEX is closed.
+def _start_auto_scheduler():
+    try:
+        from . import auto_scheduler as _as
+        _as.start_cron()
+    except Exception as e:
+        print(f"[startup] auto_scheduler init failed: {e}", flush=True)
+_start_auto_scheduler()
+
+
+# V4.6.28 — bot performance aggregator for optimal-value recs.
+def _start_bot_optimums():
+    try:
+        from . import bot_optimums as _bo
+        _bo.init_tables()
+        _bo.start_cron()
+    except Exception as e:
+        print(f"[startup] bot_optimums init failed: {e}", flush=True)
+_start_bot_optimums()
+
+
+@app.get("/api/bots/{slug}/optimums", include_in_schema=False)
+def api_bot_optimums(slug: str,
+                     authorization: str | None = Header(default=None)):
+    """V4.6.28 — return pooled optimal-setting recommendations for a
+    bot, computed across all users. Client shows these as hints next
+    to each setting control."""
+    _ = _current_user(authorization)  # require auth
+    from . import bot_optimums as _bo
+    return _bo.get_optimums(slug)
+
+
 @app.get("/admin/revenue-split")
 def api_revenue_split_get(authorization: str | None = Header(default=None)):
     """Any admin can SEE the split. Only BOSS_ADMIN can change it."""

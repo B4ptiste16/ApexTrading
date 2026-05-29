@@ -233,8 +233,8 @@ _apex_data_dir = os.environ.get("APEX_DATA_DIR") or str(
         str(__import__("pathlib").Path.home())
     ) / "APEX Trading Platform"
 )
-load_dotenv(__import__("pathlib").Path(_apex_data_dir) / ".env")
-load_dotenv()  # fallback: also search CWD / parent dirs
+load_dotenv(__import__("pathlib").Path(_apex_data_dir) / ".env", override=True)
+load_dotenv(override=True)  # fallback: also search CWD / parent dirs
 os.makedirs(CHART_DIR, exist_ok=True)
 
 _AI_PROVIDER, _AI_MODEL, _AI_KEY, _AI_MODE = load_ai_config()

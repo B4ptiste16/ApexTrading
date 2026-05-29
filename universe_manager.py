@@ -57,9 +57,26 @@ import yfinance as yf
 from dotenv import load_dotenv
 from anthropic import Anthropic
 
-load_dotenv()
+# V4.6.28 — load .env from APEX_DATA_DIR explicitly AND with
+# override=True. Plain load_dotenv() walks the cwd tree, which in
+# the frozen build may not include the data dir, AND it DOES NOT
+# override existing empty env vars — APEX's QProcessEnvironment
+# pre-populates ANTHROPIC_API_KEY="" before the bot starts, which
+# load_dotenv (default override=False) refused to replace. Result:
+# 'Could not resolve authentication method' on every cloud bot
+# Anthropic call. override=True forces .env values to win.
+_dd = os.environ.get("APEX_DATA_DIR", "")
+if _dd:
+    load_dotenv(os.path.join(_dd, ".env"), override=True)
+load_dotenv(override=True)   # fallback — also walks cwd
 
-anthropic_client = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+_anthropic_key = os.getenv("ANTHROPIC_API_KEY", "").strip()
+if not _anthropic_key:
+    print("[universe-manager] ERROR: ANTHROPIC_API_KEY missing from "
+          ".env. Open Tools → AI PROVIDER KEYS, paste your Anthropic "
+          "key, save. Then re-run.", flush=True)
+    sys.exit(2)
+anthropic_client = Anthropic(api_key=_anthropic_key)
 
 # ─────────────────────────────────────────
 # CONFIG

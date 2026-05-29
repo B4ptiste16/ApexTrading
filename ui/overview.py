@@ -469,12 +469,11 @@ class OverviewTab(QWidget):
                 card.update_value("—", C["muted"])
 
     def _refresh_block(self, side, block):
-        # V4.6.22 — crypto + other custom bots aren't in BOT_COLOR.
-        # Look up the block's own color (set by _account_block) instead
-        # of blowing up on a hardcoded dict lookup. THIS is what was
-        # making crypto's Overview card show "—" for everything: the
-        # method KeyError'd on BOT_COLOR[side] and was caught silently
-        # higher up, so values never got written.
+        # V4.6.28 — ALL P/L metrics scoped to the BOT'S lifetime, never
+        # the Alpaca account's. A brand-new bot on a previously-used
+        # account shows 0% / $0 until its first tick establishes a
+        # baseline. Switching SHORT bot in for DAY bot doesn't carry
+        # SHORT's history into DAY's display.
         block_color = BOT_COLOR.get(side, C["purple"])
 
         try:
@@ -488,18 +487,12 @@ class OverviewTab(QWidget):
             block._cards["POSITIONS"].update_value("—", C["muted"])
             return
 
-        pv   = a.get("portfolio_value", 0)
-        eq   = a.get("equity", 0)
-        le   = a.get("last_equity", eq)
-        dp   = eq - le
-        arrow = "▲" if dp >= 0 else "▼"
-        dc    = C["green"] if dp >= 0 else C["red"]
+        pv = a.get("portfolio_value", 0)
+        eq = a.get("equity", 0)
 
-        # V4.6.22 — append a snapshot to this bot's lifetime log so the
-        # Overview can later display BOT-lifetime stats (not account
-        # lifetime). The shortbot may have used this Alpaca account
-        # before the crypto bot existed; the lifetime file scopes the
-        # period P/L to ONLY when this bot was the active strategy.
+        # Append the current snapshot to this bot's JSONL log (throttled
+        # to 1 entry per 5 min by core.data). First call establishes the
+        # baseline; subsequent calls extend the timeline.
         try:
             D.append_bot_snapshot(side, equity=eq,
                                    portfolio_value=pv,
@@ -508,37 +501,94 @@ class OverviewTab(QWidget):
             print(f"[overview] snapshot append for {side} failed: {_e}",
                   flush=True)
 
-        # Period P/L: history over the period the user selected in the
-        # ALL ACCOUNTS header. Falls back to the bot's lifetime
-        # snapshot file if account history is empty.
+        bot_hist = []
         try:
-            hist = D.get_history(side, self._current_period())
-            if hist is not None and not hist.empty and len(hist) >= 2:
-                p_pl  = hist["equity"].iloc[-1] - hist["equity"].iloc[0]
-                p_pct = p_pl / hist["equity"].iloc[0] * 100 if hist["equity"].iloc[0] else 0
-                pc    = C["green"] if p_pl >= 0 else C["red"]
-                pa    = "▲" if p_pl >= 0 else "▼"
-                period_txt = f"{pa} ${abs(p_pl):,.2f} ({p_pct:+.1f}%)"
-            else:
-                # V4.6.22 fallback: use this bot's own lifetime log
-                bot_hist = D.read_bot_snapshots(side)
-                if bot_hist and len(bot_hist) >= 2:
-                    first_eq = bot_hist[0].get("equity", 0)
-                    last_eq  = bot_hist[-1].get("equity", 0)
-                    p_pl  = last_eq - first_eq
-                    p_pct = (p_pl / first_eq * 100) if first_eq else 0
-                    pc    = C["green"] if p_pl >= 0 else C["red"]
-                    pa    = "▲" if p_pl >= 0 else "▼"
-                    period_txt = (f"{pa} ${abs(p_pl):,.2f} ({p_pct:+.1f}%) "
-                                  f"· lifetime")
-                else:
-                    period_txt, pc = "—", C["muted"]
+            bot_hist = D.read_bot_snapshots(side)
         except Exception:
-            period_txt, pc = "—", C["muted"]
+            pass
+
+        # ── DAY P/L: scoped to BOT lifetime ─────────────────────
+        # Find the earliest snapshot from today (UTC midnight).
+        # Bot started today AFTER market open → DAY P/L = since first
+        # tick today. Bot started yesterday → DAY P/L = since last tick
+        # before today's UTC midnight.
+        from datetime import datetime as _dt, timezone as _tz
+        now_utc = _dt.now(_tz.utc)
+        midnight = now_utc.replace(hour=0, minute=0, second=0, microsecond=0)
+        today_baseline_eq = None
+        for s in bot_hist:
+            try:
+                ts = _dt.fromisoformat(s["ts"])
+                if ts >= midnight:
+                    today_baseline_eq = float(s.get("equity", eq))
+                    break
+            except Exception:
+                continue
+        if today_baseline_eq is None and bot_hist:
+            # No tick yet today — use the most recent pre-midnight snapshot
+            for s in reversed(bot_hist):
+                try:
+                    ts = _dt.fromisoformat(s["ts"])
+                    if ts < midnight:
+                        today_baseline_eq = float(s.get("equity", eq))
+                        break
+                except Exception:
+                    continue
+        if today_baseline_eq is None:
+            # Brand-new bot, no snapshots yet — 0 P/L (just appended above)
+            today_baseline_eq = eq
+        day_pl = eq - today_baseline_eq
+        day_pct = (day_pl / today_baseline_eq * 100
+                   if today_baseline_eq else 0)
+        d_arrow = "▲" if day_pl >= 0 else "▼"
+        d_color = C["green"] if day_pl >= 0 else C["red"]
+
+        # ── PERIOD P/L: scoped to BOT lifetime, filtered by user's
+        #    selected period (1D / 1W / 1M / 3M / 6M / 1Y) ──────
+        period = self._current_period()
+        period_days = {"1D": 1, "1W": 7, "1M": 30, "3M": 90,
+                       "6M": 180, "1Y": 365}.get(period, 1)
+        from datetime import timedelta as _td
+        period_start = now_utc - _td(days=period_days)
+        period_baseline_eq = None
+        for s in bot_hist:
+            try:
+                ts = _dt.fromisoformat(s["ts"])
+                if ts >= period_start:
+                    period_baseline_eq = float(s.get("equity", eq))
+                    break
+            except Exception:
+                continue
+        if period_baseline_eq is None:
+            # Bot's whole lifetime is shorter than the period — use the
+            # earliest snapshot ever (= bot's birth equity).
+            if bot_hist:
+                period_baseline_eq = float(bot_hist[0].get("equity", eq))
+            else:
+                period_baseline_eq = eq
+        p_pl  = eq - period_baseline_eq
+        p_pct = (p_pl / period_baseline_eq * 100
+                 if period_baseline_eq else 0)
+        if len(bot_hist) < 2:
+            # First-ever tick — show 0 / 0% (no historical comparison
+            # makes sense yet)
+            period_txt = "$0.00 (0.0%) · new bot"
+            p_color    = C["muted"]
+        else:
+            p_arrow = "▲" if p_pl >= 0 else "▼"
+            p_color = C["green"] if p_pl >= 0 else C["red"]
+            period_txt = (f"{p_arrow} ${abs(p_pl):,.2f} ({p_pct:+.1f}%) "
+                          f"· bot lifetime")
 
         block._cards["PORTFOLIO"].update_value(f"${pv:,.2f}", block_color)
-        block._cards["DAY P/L"].update_value(f"{arrow} ${abs(dp):,.2f}", dc)
-        block._cards["PERIOD P/L"].update_value(period_txt, pc)
+        if len(bot_hist) < 2:
+            block._cards["DAY P/L"].update_value("$0.00 (0.0%)",
+                                                  C["muted"])
+        else:
+            block._cards["DAY P/L"].update_value(
+                f"{d_arrow} ${abs(day_pl):,.2f} ({day_pct:+.1f}%)",
+                d_color)
+        block._cards["PERIOD P/L"].update_value(period_txt, p_color)
         block._cards["POSITIONS"].update_value(str(len(pos)))
 
 
@@ -1369,8 +1419,17 @@ class ToolsTab(QWidget):
         # bot_runner can construct TradingClient with the right paper
         # flag. Default 'paper' for safety.
         try:
-            payload["APEX_ALPACA_MODE"] = D.load_settings().get(
-                "alpaca_mode", "paper")
+            _s = D.load_settings()
+            payload["APEX_ALPACA_MODE"] = _s.get("alpaca_mode", "paper")
+            # V4.6.27 — sync per-bot auto-schedule flags so the cloud
+            # scheduler can auto-start bots at market open even when
+            # APEX is closed. Reads the v7.1.10 'auto_schedule_<SIDE>'
+            # keys and exports as APEX_AUTO_SCHEDULE_<SIDE>=1/0.
+            for k in list(_s.keys()):
+                if k.startswith("auto_schedule_"):
+                    side = k[len("auto_schedule_"):].upper()
+                    payload[f"APEX_AUTO_SCHEDULE_{side}"] = (
+                        "1" if _s.get(k) else "0")
         except Exception:
             payload["APEX_ALPACA_MODE"] = "paper"
         if not payload:
@@ -1833,6 +1892,14 @@ class ToolsTab(QWidget):
         # V7.1.13: schedule changes affect the cloud schedule too —
         # only the intersection cloud ∩ scheduled gets pushed to server.
         self._push_schedule_to_server()
+        # V4.6.27 — also re-sync the credentials blob so the new flag
+        # propagates to the server-side auto_scheduler which actually
+        # fires the bot start at market open (even with APEX closed).
+        try:
+            self._sync_keys_to_server()
+        except Exception as e:
+            print(f"[schedule] credentials re-sync after toggle "
+                  f"{side}: {e}")
 
     # ── V7.1.13: cloud toggles ─────────────────────────────────
 
@@ -2034,8 +2101,17 @@ class ToolsTab(QWidget):
         payload = {k: v for k, v in all_keys.items() if v}
         # V4.6.8 — include paper/live toggle alongside the keys
         try:
-            payload["APEX_ALPACA_MODE"] = D.load_settings().get(
-                "alpaca_mode", "paper")
+            _s = D.load_settings()
+            payload["APEX_ALPACA_MODE"] = _s.get("alpaca_mode", "paper")
+            # V4.6.27 — sync per-bot auto-schedule flags so the cloud
+            # scheduler can auto-start bots at market open even when
+            # APEX is closed. Reads the v7.1.10 'auto_schedule_<SIDE>'
+            # keys and exports as APEX_AUTO_SCHEDULE_<SIDE>=1/0.
+            for k in list(_s.keys()):
+                if k.startswith("auto_schedule_"):
+                    side = k[len("auto_schedule_"):].upper()
+                    payload[f"APEX_AUTO_SCHEDULE_{side}"] = (
+                        "1" if _s.get(k) else "0")
         except Exception:
             payload["APEX_ALPACA_MODE"] = "paper"
         if not payload:
