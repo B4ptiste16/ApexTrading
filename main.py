@@ -533,10 +533,16 @@ class MoreBotsTab(QWidget):
             info = BUILTIN_BOTS.get(side)
             if info:
                 return broker in info.get("brokers", ["alpaca"])
-            # Custom bots: check their broker tag; default = compatible with all
+            # Custom bots: V4.6.29 stores a singular 'broker' string in
+            # the registry entry; older entries may have a 'brokers'
+            # list. Normalize both. Missing → compatible with all.
             for c in custom:
                 if c.get("id") == side:
-                    return broker in c.get("brokers", [broker])
+                    if "brokers" in c:
+                        return broker in c.get("brokers", [broker])
+                    if "broker" in c:
+                        return c.get("broker", broker) == broker
+                    return True  # untagged custom bot — show everywhere
             return True
 
         # ACTIVE section — only broker-compatible, non-silenced bots
@@ -2271,10 +2277,22 @@ class ApexWindow(QMainWindow):
         but no tab is created for them."""
         reg = _load_registry()
         broker = D.load_settings().get("broker_mode", "alpaca")
+        custom = {c.get("id"): c for c in reg.get("custom", [])
+                  if isinstance(c, dict)}
         for side in reg["active"]:
             info = BUILTIN_BOTS.get(side)
             if info and broker not in info.get("brokers", ["alpaca"]):
                 continue  # Alpaca-only bot — don't create a tab on IBKR / other brokers
+            # V4.6.29 — custom bots: skip if their declared broker
+            # doesn't match the current broker mode.
+            if not info:
+                c = custom.get(side, {})
+                cb = c.get("broker")
+                cbs = c.get("brokers")
+                if cbs is not None and broker not in cbs:
+                    continue
+                if cb is not None and cb != broker:
+                    continue
             self._add_bot_tab(side, silenced=side in reg["silenced"])
 
     def _add_bot_tab(self, side: str, silenced: bool = False):

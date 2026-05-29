@@ -484,17 +484,57 @@ _SYSTEM_PROMPT_UNIVERSE = (
 )
 
 
-def _make_system_prompt(mode: str = "trade") -> str:
-    """Return the system prompt for the requested mode.
+_IBKR_BROKER_RULES = (
+    "\n\n═══ BROKER: INTERACTIVE BROKERS (IBKR) ═══\n\n"
+    "This bot targets IBKR, NOT Alpaca. Generate accordingly:\n"
+    "• Use `ib_insync` (declare it in requirements: ib_insync). Connect\n"
+    "  with `from ib_insync import IB, Stock, MarketOrder` then\n"
+    "  `ib = IB(); ib.connect('127.0.0.1', 7497, clientId=<unique>)`.\n"
+    "  Port 7497 = TWS paper, 7496 = TWS live, 4002 = Gateway paper,\n"
+    "  4001 = Gateway live. Read the port from os.environ.get(\n"
+    "  'APEX_IBKR_PORT', '7497').\n"
+    "• Set META broker: ibkr  AND a unique clientId per bot (read\n"
+    "  from os.environ.get('APEX_IBKR_CLIENT_ID', '<n>')) so multiple\n"
+    "  IBKR bots can share one TWS/Gateway connection.\n"
+    "• Do NOT import alpaca — this is an IBKR bot. Do NOT read\n"
+    "  ALPACA_API_KEY.\n"
+    "• Place orders with `ib.placeOrder(contract, MarketOrder('BUY', qty))`.\n"
+    "• Wrap the connect() in try/except — if TWS/Gateway isn't running,\n"
+    "  print a clear 'IBKR not reachable on port X — is TWS/Gateway "
+    "running?' message and exit cleanly.\n"
+)
 
-    mode: "trade" for a trading bot, "universe" for a universe-file
-          generator. See ui controls."""
+_ALPACA_BROKER_RULES = (
+    "\n\n═══ BROKER: ALPACA ═══\n\n"
+    "This bot targets Alpaca. It MUST:\n"
+    "• load_dotenv(APEX_DATA_DIR/.env, override=True) at module top.\n"
+    "• Read ALPACA_API_KEY + ALPACA_SECRET_KEY from os.environ.\n"
+    "• Construct TradingClient(key, secret, paper=(APEX_ALPACA_MODE "
+    "!= 'live')).\n"
+    "• Set META broker: alpaca.\n"
+    "• Never connect to TWS / ib_insync — that's the IBKR path.\n"
+)
+
+
+def _make_system_prompt(mode: str = "trade", broker: str = "alpaca") -> str:
+    """Return the system prompt for the requested mode + broker.
+
+    mode:   "trade" for a trading bot, "universe" for a universe-file
+            generator.
+    broker: "alpaca" (default) or "ibkr" — appends broker-specific
+            rules so the AI generates the right SDK + key handling.
+            v4.6.29."""
     guide = _load_skeleton_guide() or (
         "(Bot skeleton guide unavailable.)")
     if mode == "universe":
+        # Universe generators are broker-agnostic (they only write a
+        # .txt) — broker rules don't apply.
         return _SYSTEM_PROMPT_UNIVERSE.format(guide=guide)
-    return _SYSTEM_PROMPT_TRADE.format(
+    base = _SYSTEM_PROMPT_TRADE.format(
         guide=guide, template=_TRADE_TEMPLATE)
+    broker_rules = (_IBKR_BROKER_RULES if broker == "ibkr"
+                    else _ALPACA_BROKER_RULES)
+    return base + broker_rules
 
 
 # ── Worker thread for the API call ───────────────────────────────────
@@ -504,13 +544,15 @@ class _GenerateWorker(QThread):
     progress = pyqtSignal(str)          # status line for the UI
 
     def __init__(self, *, provider: str, model: str, key: str,
-                 prompt: str, mode: str = "trade"):
+                 prompt: str, mode: str = "trade",
+                 broker: str = "alpaca"):
         super().__init__()
         self.provider = provider
         self.model    = model
         self.key      = key
         self.prompt   = prompt
         self.mode     = mode   # "trade" or "universe" (v4.6.4)
+        self.broker   = broker # "alpaca" or "ibkr" (v4.6.29)
 
     def run(self):
         # V4.6.23 — wrap the whole worker body so any future bug
@@ -537,7 +579,8 @@ class _GenerateWorker(QThread):
         # and either way it MUST emit an APEX-BOT-META block with
         # ai_used = the actual provider used to generate this bot.
         headers, body = cfg["build"](
-            self.prompt, _make_system_prompt(self.mode),
+            self.prompt,
+            _make_system_prompt(self.mode, self.broker),
             self.key, self.model)
         url = cfg["url"]
         # Free-via-APEX: the build hook stuffs the real endpoint into a
@@ -748,6 +791,39 @@ class MakeBotTab(QWidget):
         kind_hint.setStyleSheet(f"color:{C['muted']};font-size:10px;")
         kind_hint.setWordWrap(True)
         s.add(kind_hint)
+
+        # ── V4.6.29 — Broker selector ───────────────────────────
+        # Determines which broker SDK + key style the generated bot
+        # uses, and stamps META.broker so the broker-mode switch can
+        # show/hide the bot. Alpaca = alpaca-py + ALPACA_API_KEY;
+        # IBKR = ib_insync + a running TWS/Gateway connection.
+        broker_row = QHBoxLayout()
+        broker_lbl = QLabel("Broker:")
+        broker_lbl.setStyleSheet(f"color:{C['text']};font-size:11px;")
+        self._broker_alpaca_radio = QRadioButton("Alpaca (stocks + crypto, API keys)")
+        self._broker_ibkr_radio   = QRadioButton("IBKR (Interactive Brokers, TWS/Gateway)")
+        self._broker_alpaca_radio.setChecked(True)
+        self._broker_alpaca_radio.setStyleSheet(f"color:{C['text']};font-size:11px;")
+        self._broker_ibkr_radio.setStyleSheet(f"color:{C['text']};font-size:11px;")
+        self._broker_group = QButtonGroup(self)
+        self._broker_group.addButton(self._broker_alpaca_radio)
+        self._broker_group.addButton(self._broker_ibkr_radio)
+        broker_row.addWidget(broker_lbl)
+        broker_row.addSpacing(8)
+        broker_row.addWidget(self._broker_alpaca_radio)
+        broker_row.addSpacing(14)
+        broker_row.addWidget(self._broker_ibkr_radio)
+        broker_row.addStretch()
+        bw = QWidget(); bw.setLayout(broker_row)
+        s.add(bw)
+        broker_hint = QLabel(
+            "Alpaca bots authenticate with API keys you paste in Tools "
+            "and run on the APEX cloud or locally. IBKR bots connect to "
+            "a running TWS or IB Gateway via ib_insync — IBKR bots only "
+            "appear when the app is in IBKR broker mode (switch top-right).")
+        broker_hint.setStyleSheet(f"color:{C['muted']};font-size:10px;")
+        broker_hint.setWordWrap(True)
+        s.add(broker_hint)
 
         # ── Provider + Model + Key form ─────────────────────────────
         form = QFrame()
@@ -1143,8 +1219,14 @@ class MakeBotTab(QWidget):
                                      None) and \
                             self._mode_universe_radio.isChecked() \
                          else "trade"
+        # V4.6.29 — broker selection drives which SDK the generated bot
+        # uses + the META.broker stamp.
+        broker = "ibkr" if getattr(self, "_broker_ibkr_radio", None) \
+                          and self._broker_ibkr_radio.isChecked() \
+                       else "alpaca"
         self._worker = _GenerateWorker(
-            provider=prov, model=model, key=key, prompt=prompt, mode=mode)
+            provider=prov, model=model, key=key, prompt=prompt,
+            mode=mode, broker=broker)
         self._worker.progress.connect(
             lambda msg: self._status.setText(msg))
         self._worker.done.connect(self._on_generated)
@@ -1317,13 +1399,24 @@ class MakeBotTab(QWidget):
         # Register in the user's bot registry so MORE BOTS picks it up
         try:
             reg = D.load_bot_registry()
+            # V4.6.29 — read META.broker so the registry entry records
+            # which broker this bot targets. Defaults to alpaca. Used
+            # by the broker-mode switch to show/hide the bot.
+            bot_broker = "alpaca"
+            try:
+                from core.bot_meta import parse_meta
+                bot_broker = (parse_meta(code) or {}).get(
+                    "broker", "alpaca").lower() or "alpaca"
+            except Exception:
+                pass
             existing = [c["id"] for c in reg.get("custom", [])]
             if slug not in existing:
                 reg.setdefault("custom", []).append({
-                    "id":     slug,
-                    "label":  name,
-                    "script": str(dest),
-                    "color":  C["purple"],
+                    "id":      slug,
+                    "label":   name,
+                    "script":  str(dest),
+                    "color":   C["purple"],
+                    "broker":  bot_broker,
                 })
                 D.save_bot_registry(reg)
         except Exception as e:

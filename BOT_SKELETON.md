@@ -73,6 +73,7 @@ requirements:       scikit-learn
 | `asset_type` | `stocks` / `crypto` / `etfs` / `futures` / `options` / `universe` | Drives UI behavior — see §3 |
 | `universe` | Filename of the `*_universe.txt` this bot **reads** (trading) or **writes** (universe gen) | Used for the file resolution |
 | `requirements` | Pip packages beyond APEX's bundled set, comma-separated, or empty | Server auto-installs for cloud bots. Frozen local Python ignores. |
+| `broker` | `alpaca` (default) or `ibkr` | Which broker the bot trades through. The broker-mode switch (top-right) hides bots whose broker doesn't match. Alpaca bots use API keys; IBKR bots use ib_insync + a running TWS/Gateway. |
 
 ---
 
