@@ -12,6 +12,7 @@ anthropic
 google-generativeai
 openai
 alpaca-py
+ib_async
 python-dotenv
 requests
 cryptography

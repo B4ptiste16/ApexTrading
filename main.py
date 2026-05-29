@@ -222,8 +222,8 @@ BUILTIN_BOTS = {
         "description": "Momentum + mean-reversion portfolio. "
                        "Uses Claude Vision on charts to rank candidates.",
         "cost":        "~$0.05–0.20 / day",
-        "account":     "Alpaca — 1 dedicated API key pair",
-        "brokers":     ["alpaca"],
+        "account":     "1 dedicated API key pair (Alpaca) or shared TWS connection (IBKR)",
+        "brokers":     ["alpaca", "ibkr"],
     },
     "SHORT": {
         "label":       "SHORT",
@@ -232,8 +232,8 @@ BUILTIN_BOTS = {
         "description": "Bear momentum, defensive in BULL regime. "
                        "Sells short on weakness, covers on strength.",
         "cost":        "~$0.03–0.12 / day",
-        "account":     "Alpaca — 1 dedicated API key pair",
-        "brokers":     ["alpaca"],
+        "account":     "1 dedicated API key pair (Alpaca) or shared TWS connection (IBKR)",
+        "brokers":     ["alpaca", "ibkr"],
     },
     "DAY": {
         "label":       "DAY",
@@ -242,8 +242,8 @@ BUILTIN_BOTS = {
         "description": "Single high-conviction intraday bracket orders. "
                        "ATR-based stop-loss and take-profit.",
         "cost":        "~$0.02–0.08 / day",
-        "account":     "Alpaca — 1 dedicated API key pair",
-        "brokers":     ["alpaca"],
+        "account":     "1 dedicated API key pair (Alpaca) or shared TWS connection (IBKR)",
+        "brokers":     ["alpaca", "ibkr"],
     },
 }
 
@@ -260,34 +260,34 @@ def _registry_key() -> str:
 def _load_registry() -> dict:
     s = D.load_settings()
     broker = s.get("broker_mode", "alpaca")
-    # Default active bots depend on the broker:
-    # • Alpaca  → all three built-ins active and visible
-    # • Others  → no active bot tabs; built-ins silenced in the More Bots list
-    if broker == "alpaca":
-        default = {"active": ["LONG","SHORT","DAY"], "silenced": [], "custom": []}
-    else:
-        default = {
-            "active":   ["LONG", "SHORT", "DAY"],
-            "silenced": ["LONG", "SHORT", "DAY"],
-            "custom":   [],
-        }
+    # Default: all three built-ins active for any broker (LONG/SHORT/DAY now
+    # support both Alpaca and IBKR).
+    default = {"active": ["LONG","SHORT","DAY"], "silenced": [], "custom": []}
     key = _registry_key()
     reg = s.get(key)
     if reg is None:
-        if broker == "alpaca":
-            # Migration path 1: per-user key without broker suffix (prev version)
-            try:
-                from ui.login import load_auth
-                auth = load_auth() or {}
-                uid = auth.get("user_id") or auth.get("email") or ""
-                if uid:
-                    reg = s.get(f"bot_registry_{uid}")
-            except Exception:
-                pass
-        if reg is None:
-            # Migration path 2: legacy global key
-            reg = dict(s.get("bot_registry", default))
-    # Ensure all keys exist
+        # Migration path 1: old per-broker key without mode suffix (< v4.6.31)
+        try:
+            from ui.login import load_auth
+            auth = load_auth() or {}
+            uid = auth.get("user_id") or auth.get("email") or ""
+            if uid:
+                reg = s.get(f"bot_registry_{uid}_{broker}")
+        except Exception:
+            pass
+    if reg is None and broker == "alpaca":
+        # Migration path 2: per-user key without broker suffix (pre-v3)
+        try:
+            from ui.login import load_auth
+            auth = load_auth() or {}
+            uid = auth.get("user_id") or auth.get("email") or ""
+            if uid:
+                reg = s.get(f"bot_registry_{uid}")
+        except Exception:
+            pass
+    if reg is None:
+        # Migration path 3: legacy global key
+        reg = dict(s.get("bot_registry", default))
     for k in default:
         reg.setdefault(k, default[k])
     return reg
@@ -1857,13 +1857,18 @@ class ApexWindow(QMainWindow):
             return
 
         self._restyle_alpaca_mode_btn()
-        # Refresh tabs so bots compatible-with-new-mode become active /
-        # incompatible ones get hidden under SILENCED, same UX as the
-        # broker switch.
+        # Refresh tabs so each mode's independent bot list is shown, and
+        # rebuild the Tools tab so IBKR settings switch to the new mode.
         try:
             self._rebuild_broker_bot_tabs()
         except Exception:
             pass
+        try:
+            broker = D.load_settings().get("broker_mode", "alpaca")
+            if hasattr(self, "tools_tab") and hasattr(self.tools_tab, "rebuild_for_mode"):
+                self.tools_tab.rebuild_for_mode(broker)
+        except Exception as e:
+            print(f"[mode-toggle] tools rebuild: {e}")
         # Tell the user the switch landed and that running bots will
         # pick it up on their next cycle (start_bot reads the env var).
         from PyQt6.QtWidgets import QMessageBox as _Q
@@ -2061,15 +2066,23 @@ class ApexWindow(QMainWindow):
         • Alpaca  → LONG/SHORT/DAY tabs come back (from per-broker registry)
         • IBKR    → no Alpaca-only tabs; built-ins silenced in More Bots
         • Others  → no compatible built-in tabs (coming-soon page shown)"""
-        # Stop any running bots first (safe to call even if not running)
+        # Stop only LOCAL running bots. CLOUD bots keep trading on Oracle —
+        # a broker / paper-live VIEW switch must never halt a 24/7 cloud bot
+        # (e.g. switching the desktop to IBKR must not stop your Alpaca cloud
+        # bots). Their tabs are rebuilt below and resume status via Oracle.
         for side, tab in list(self._bot_tabs.items()):
             bot_ctrl = getattr(tab, "bot_ctrl", None)
-            if bot_ctrl:
-                try:
-                    if bot_ctrl.is_running():
-                        bot_ctrl.stop_bot()
-                except Exception:
-                    pass
+            if not bot_ctrl:
+                continue
+            try:
+                is_cloud = (bot_ctrl._is_cloud_mode()
+                            or getattr(bot_ctrl, "_cloud_running", False))
+                if is_cloud:
+                    continue  # leave it running on the server
+                if bot_ctrl.is_running():
+                    bot_ctrl.stop_bot()
+            except Exception:
+                pass
 
         # Remove all existing bot tabs
         for side in list(self._bot_tabs.keys()):
@@ -2083,6 +2096,13 @@ class ApexWindow(QMainWindow):
             self._insert_bot_tabs()
         except Exception as e:
             print(f"[broker-switch] insert: {e}")
+
+        # Reconnect any still-running cloud bots to their freshly-built tabs
+        # so the UI reflects that they never stopped.
+        try:
+            self._resume_cloud_bots()
+        except Exception as e:
+            print(f"[broker-switch] cloud-resume: {e}")
 
         # Refresh More Bots panel so section counts update
         if hasattr(self, "more_bots_tab"):

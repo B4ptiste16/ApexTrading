@@ -12,12 +12,12 @@ from __future__ import annotations
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame,
-    QGridLayout, QLineEdit, QComboBox, QTableWidget, QTableWidgetItem,
+    QGridLayout, QLineEdit, QTableWidget, QTableWidgetItem,
     QHeaderView, QMessageBox, QSizePolicy,
 )
 
 from ui.styles  import COLORS
-from ui.widgets import ScrollContent, SectionHeader, MetricCard
+from ui.widgets import ScrollContent, SectionHeader, MetricCard, NoScrollComboBox
 
 C = COLORS
 
@@ -245,7 +245,7 @@ class ManualTradingTab(QWidget):
         g.addWidget(self._sym_edit, 1, 1)
 
         g.addWidget(lbl("SIDE"), 2, 0)
-        self._dir_combo = QComboBox()
+        self._dir_combo = NoScrollComboBox()
         self._dir_combo.addItems(["BUY", "SELL"])
         g.addWidget(self._dir_combo, 2, 1)
 
@@ -255,7 +255,7 @@ class ManualTradingTab(QWidget):
         g.addWidget(self._qty_edit, 3, 1)
 
         g.addWidget(lbl("ORDER TYPE"), 4, 0)
-        self._type_combo = QComboBox()
+        self._type_combo = NoScrollComboBox()
         self._type_combo.addItems(["MARKET", "LIMIT"])
         self._type_combo.currentTextChanged.connect(self._on_type_changed)
         g.addWidget(self._type_combo, 4, 1)

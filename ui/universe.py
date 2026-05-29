@@ -116,9 +116,13 @@ class UniverseTab(QWidget):
             self._on_script_changed)
         # Refresh button to rescan the universe_scripts/ folder
         refresh_btn = QPushButton("↻")
-        refresh_btn.setToolTip("Rescan universe scripts")
+        refresh_btn.setToolTip("Rescan universe scripts AND re-read "
+                              "every *_universe.txt to repopulate the "
+                              "breakdown cards below")
         refresh_btn.setFixedWidth(28)
-        refresh_btn.clicked.connect(self._populate_script_combo)
+        # V4.6.27 — use refresh() (script combo + breakdown grid)
+        # instead of only _populate_script_combo (script combo only).
+        refresh_btn.clicked.connect(self.refresh)
         pick_row.addWidget(pick_lbl)
         pick_row.addWidget(self._script_combo)
         pick_row.addWidget(refresh_btn)
@@ -133,6 +137,17 @@ class UniverseTab(QWidget):
         # built-in universe_manager.py path.
         self.runner = BotProcessWidget("UNIVERSE", D.UNIVERSE_SCRIPT)
         s.add(self.runner)
+        # V4.6.27 — refresh the breakdown grid when the universe runner
+        # transitions from running → stopped. Without this, the cards
+        # show whatever tickers were on disk at app start; running
+        # universe_manager later refreshes the .txt files but the UI
+        # doesn't reflect the new contents until the user restarts APEX.
+        try:
+            self.runner.status_changed.connect(
+                lambda _side, running: (None if running
+                                        else self.refresh()))
+        except Exception as e:
+            print(f"[universe-tab] could not wire status_changed: {e}")
 
         s.add(SectionHeader("UNIVERSE BREAKDOWN", C["purple"]))
         layout_hint = QLabel(

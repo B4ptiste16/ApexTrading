@@ -104,6 +104,9 @@ python -m PyInstaller ^
     --collect-submodules google.generativeai ^
     --collect-all openai ^
     --collect-all alpaca ^
+    --collect-all ib_async ^
+    --collect-all eventkit ^
+    --hidden-import nest_asyncio ^
     main.py
 
 if not exist "dist\APEX\APEX.exe" (

@@ -114,9 +114,17 @@ _clients = {}
 def get_client(side: str):
     if not HAS_ALPACA:
         return None
+    s = load_settings()
+    # In non-Alpaca broker modes (e.g. IBKR) we must NOT fall back to the
+    # Alpaca account — that would surface the wrong broker's returns. Each
+    # broker owns its own data path.
+    if s.get("broker_mode", "alpaca") != "alpaca":
+        return None
     side = side.upper()
-    if side in _clients:
-        return _clients[side]
+    mode = s.get("alpaca_mode", "paper")          # paper / live
+    cache_key = f"{side}:{mode}"
+    if cache_key in _clients:
+        return _clients[cache_key]
     # Build env-var names dynamically so any custom bot slug (e.g. "CRYPTO")
     # resolves to ALPACA_API_KEY_CRYPTO / ALPACA_SECRET_KEY_CRYPTO.
     fallback_key    = os.getenv("ALPACA_API_KEY", "")
@@ -126,8 +134,8 @@ def get_client(side: str):
     if not api_key or not api_secret:
         return None
     try:
-        client = TradingClient(api_key, api_secret, paper=True)
-        _clients[side] = client
+        client = TradingClient(api_key, api_secret, paper=(mode != "live"))
+        _clients[cache_key] = client
         return client
     except Exception as e:
         print(f"[client] {side}: {e}")
@@ -173,6 +181,9 @@ def load_jsonl(paths) -> list:
 # ─────────────────────────────────────────
 
 def get_account(side: str) -> dict:
+    if load_settings().get("broker_mode", "alpaca") == "ibkr":
+        from core import ibkr_data
+        return ibkr_data.get_account(side)
     c = get_client(side)
     if not c:
         return {}
@@ -471,29 +482,47 @@ def load_settings() -> dict:
         return {}
 
 
-def bot_registry_key() -> str:
-    """Return the per-user, per-broker settings key for the bot registry.
-    Safe to call from any module — no Qt dependency.
+def bot_registry_key(mode: str | None = None) -> str:
+    """Return the per-user, per-broker, per-mode settings key for the bot
+    registry.  Paper and live trading have completely independent bot lists.
     Falls back to plain "bot_registry" when no user is logged in."""
     try:
         from ui.login import load_auth
         auth = load_auth() or {}
         uid = auth.get("user_id") or auth.get("email") or ""
-        broker = load_settings().get("broker_mode", "alpaca")
+        s = load_settings()
+        broker = s.get("broker_mode", "alpaca")
+        if mode is None:
+            mode = s.get("alpaca_mode", "paper")
         if uid:
-            return f"bot_registry_{uid}_{broker}"
+            return f"bot_registry_{uid}_{broker}_{mode}"
     except Exception:
         pass
     return "bot_registry"
 
 
 def load_bot_registry() -> dict:
-    """Load the per-user, per-broker bot registry from settings.
-    Falls back to the legacy global key for backward compatibility.
-    Always returns a dict with at least 'active', 'silenced', 'custom' keys."""
+    """Load the per-user, per-broker, per-mode bot registry from settings.
+    Migration chain (newest → oldest):
+      bot_registry_{uid}_{broker}_{mode}   ← current
+      bot_registry_{uid}_{broker}          ← pre-mode-split (< v4.6.31)
+      bot_registry                         ← global legacy
+    Always returns a dict with 'active', 'silenced', 'custom' keys."""
     s   = load_settings()
     key = bot_registry_key()
-    reg = s.get(key) or s.get("bot_registry") or {}
+    reg = s.get(key)
+    if reg is None:
+        # Migrate from old per-broker key (no mode suffix)
+        try:
+            from ui.login import load_auth
+            auth = load_auth() or {}
+            uid = auth.get("user_id") or auth.get("email") or ""
+            broker = s.get("broker_mode", "alpaca")
+            if uid:
+                reg = s.get(f"bot_registry_{uid}_{broker}")
+        except Exception:
+            pass
+    reg = reg or s.get("bot_registry") or {}
     reg.setdefault("active",   [])
     reg.setdefault("silenced", [])
     reg.setdefault("custom",   [])
@@ -506,6 +535,22 @@ def save_bot_registry(reg: dict) -> None:
     s[bot_registry_key()] = reg
     with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
         json.dump(s, f, indent=2)
+
+
+def load_all_custom_bots() -> list[dict]:
+    """Return every custom bot the user has defined across ALL broker/mode
+    registries, de-duplicated by id.  Bot DEFINITIONS are not mode-specific —
+    a bot built under Alpaca should still be selectable under IBKR — so the
+    add/replace pickers look here rather than at a single registry."""
+    s = load_settings()
+    seen: dict[str, dict] = {}
+    for key, val in s.items():
+        if not str(key).startswith("bot_registry") or not isinstance(val, dict):
+            continue
+        for c in val.get("custom", []):
+            if isinstance(c, dict) and c.get("id"):
+                seen.setdefault(c["id"], c)
+    return list(seen.values())
 
 
 def get_auto_schedule() -> bool:
@@ -523,40 +568,49 @@ def set_auto_schedule(on: bool) -> None:
         json.dump(s, f, indent=2)
 
 
-# ── V7.1.10: per-bot auto-schedule ──────────────────────────────────
+# ── V7.1.10: per-bot auto-schedule (v4.6.31: also per trading-mode) ──
+
+def _auto_schedule_key() -> str:
+    """Settings key for auto-schedule flags — scoped to the current mode
+    (paper / live) so schedules are independent between the two."""
+    mode = load_settings().get("alpaca_mode", "paper")
+    return f"auto_schedule_bots_{mode}"
+
 
 def get_auto_schedule_for(side: str) -> bool:
-    """Per-bot auto-schedule. Falls back to the legacy global flag for
-    users upgrading from before V7.1.10."""
+    """Per-bot, per-mode auto-schedule flag.
+    Migration: falls back to the shared 'auto_schedule_bots' key (< v4.6.31)
+    and then to the legacy global flag (< V7.1.10)."""
     s = load_settings()
-    per_bot = s.get("auto_schedule_bots", None)
+    # Current per-mode key
+    per_bot = s.get(_auto_schedule_key())
+    if per_bot is None:
+        # Pre-mode-split key
+        per_bot = s.get("auto_schedule_bots")
     if per_bot is not None and side in per_bot:
         return bool(per_bot[side])
-    # No per-bot entry yet → use the legacy global as a default so
-    # existing users don't suddenly lose their schedule.
     return bool(s.get("auto_schedule", False))
 
 
 def set_auto_schedule_for(side: str, on: bool) -> None:
     s = load_settings()
-    per_bot = dict(s.get("auto_schedule_bots") or {})
+    key = _auto_schedule_key()
+    per_bot = dict(s.get(key) or {})
     per_bot[side] = bool(on)
-    s["auto_schedule_bots"] = per_bot
-    # Drop the legacy global once any per-bot entry exists, otherwise
-    # newly-added bots would silently inherit the old global.
+    s[key] = per_bot
     s.pop("auto_schedule", None)
     with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
         json.dump(s, f, indent=2)
 
 
 def get_auto_schedule_active_bots() -> list[str]:
-    """Set of bot sides currently flagged for auto-start at open."""
+    """Bot sides flagged for auto-start at market open, current mode only."""
     s = load_settings()
-    per_bot = s.get("auto_schedule_bots", None)
+    per_bot = s.get(_auto_schedule_key())
+    if per_bot is None:
+        per_bot = s.get("auto_schedule_bots")
     if per_bot is not None:
         return [side for side, on in per_bot.items() if on]
-    # Legacy migration — if the global flag was on, treat every active
-    # bot from the registry as scheduled.
     if s.get("auto_schedule"):
         reg = load_bot_registry()
         return list(reg.get("active", ["LONG", "SHORT", "DAY"]))

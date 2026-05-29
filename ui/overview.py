@@ -683,9 +683,34 @@ class ToolsTab(QWidget):
             s.add(wrap)
 
     def _build_ibkr_section(self, s):
-        """Full IBKR connection setup — same structure logic as Alpaca."""
-        s.add(SectionHeader("IBKR  ·  GATEWAY CONNECTION", C["green"]))
+        """Full IBKR connection setup — gateway + per-bot client IDs + % allocation.
+        Configuration is stored per trading mode (paper / live) so the two
+        environments are completely independent."""
+        settings = D.load_settings()
+        ibkr_mode = settings.get("alpaca_mode", "paper")
+        self._ibkr_mode_key = f"ibkr_{ibkr_mode}"
 
+        # ── Mode banner ──────────────────────────────────────────────────
+        mode_color = C["orange"] if ibkr_mode == "paper" else C["red"]
+        mode_label = "PAPER" if ibkr_mode == "paper" else "LIVE"
+        banner = QFrame()
+        banner.setStyleSheet(
+            f"background:rgba(255,165,0,0.07);border:none;border-radius:8px;"
+            f"border-left:3px solid {mode_color};")
+        banner_row = QHBoxLayout(banner)
+        banner_row.setContentsMargins(14, 10, 14, 10)
+        banner_lbl = QLabel(
+            f"{'⚙' if ibkr_mode == 'paper' else '⚠'}  Configuring IBKR  "
+            f"<b>{mode_label} mode</b> — "
+            f"{'simulated paper trading account.' if ibkr_mode == 'paper' else 'REAL money live account.'}"
+            f"  Switch modes via the Paper / Live toggle in the app header.")
+        banner_lbl.setStyleSheet(f"color:{mode_color};font-size:11px;")
+        banner_lbl.setWordWrap(True)
+        banner_row.addWidget(banner_lbl)
+        s.add(banner)
+
+        # ── Gateway connection ────────────────────────────────────────────
+        s.add(SectionHeader("IBKR  ·  GATEWAY CONNECTION", C["green"]))
         conn_info = QLabel(
             "Interactive Brokers uses the IB Gateway or TWS desktop app as a local "
             "API bridge. Enter your connection details below. All BAPTOU bots share "
@@ -702,7 +727,8 @@ class ToolsTab(QWidget):
         fl.setHorizontalSpacing(12)
         fl.setVerticalSpacing(10)
 
-        cur = D.load_settings().get("ibkr", {})
+        # Load config for THIS mode; fall back to legacy "ibkr" key on first run
+        cur = settings.get(self._ibkr_mode_key, settings.get("ibkr", {}))
 
         def lbl(text):
             w = QLabel(text)
@@ -715,12 +741,13 @@ class ToolsTab(QWidget):
             e.setText(str(cur.get(key, default)))
             return e
 
+        default_port = "7497" if ibkr_mode == "paper" else "7496"
         fl.addWidget(lbl("TWS / Gateway Host"), 0, 0)
         self._ibkr_host = inp("127.0.0.1", "host", "127.0.0.1")
         fl.addWidget(self._ibkr_host, 0, 1)
 
-        fl.addWidget(lbl("Port  (paper: 7497 · live: 7496)"), 1, 0)
-        self._ibkr_port = inp("7497", "port", "7497")
+        fl.addWidget(lbl(f"Port  (paper: 7497 · live: 7496)"), 1, 0)
+        self._ibkr_port = inp(default_port, "port", default_port)
         fl.addWidget(self._ibkr_port, 1, 1)
 
         fl.addWidget(lbl("Master Account (optional)"), 2, 0)
@@ -729,74 +756,80 @@ class ToolsTab(QWidget):
 
         s.add(form)
 
-        # Per-bot client IDs
-        s.add(SectionHeader("BOT → CLIENT ID MAPPING", C["purple"]))
-        cid_info = QLabel(
-            "Each bot uses a unique clientId so their orders don't interfere. "
-            "IBKR requires clientId to be unique per connection. "
-            "Leave as defaults unless you run another IB application.")
-        cid_info.setStyleSheet(f"color:{C['muted']};font-size:11px;")
-        cid_info.setWordWrap(True)
-        s.add(cid_info)
+        # ── Bot client IDs & % allocation (combined table) ────────────────
+        s.add(SectionHeader("BOT  ·  CLIENT IDs & FUND ALLOCATION (%)", C["purple"]))
+        bot_info = QLabel(
+            "Each bot uses a unique Client ID on the shared TWS connection. "
+            "Allocate a <b>percentage of available account cash</b> per bot — "
+            "e.g. 30% means the bot may use up to 30% of the IBKR account's "
+            "buying power. Percentages should sum to ≤ 100%. "
+            "Built-in bots (LONG / SHORT / DAY) are fully IBKR-compatible. "
+            "When a bot is replaced, the incoming bot inherits the slot's positions; "
+            "positions incompatible with its asset class are auto-liquidated on first run.")
+        bot_info.setStyleSheet(f"color:{C['muted']};font-size:11px;")
+        bot_info.setWordWrap(True)
+        s.add(bot_info)
 
-        cid_form = QFrame()
-        cid_form.setStyleSheet(
+        # Live allocation indicator (% remaining)
+        alloc_bar = QFrame()
+        alloc_bar.setStyleSheet(
             f"background:{C['panel']};border:none;border-radius:8px;")
-        cf = QGridLayout(cid_form)
-        cf.setContentsMargins(16, 14, 16, 14)
-        cf.setHorizontalSpacing(12)
-        cf.setVerticalSpacing(10)
+        alloc_row = QHBoxLayout(alloc_bar)
+        alloc_row.setContentsMargins(16, 12, 16, 12)
+        self._ibkr_remaining_lbl = QLabel("Allocated: 0%  ·  Remaining: 100%")
+        self._ibkr_remaining_lbl.setStyleSheet(
+            f"color:{C['green']};font-size:11px;font-weight:700;")
+        alloc_row.addWidget(self._ibkr_remaining_lbl)
+        alloc_row.addStretch()
+        s.add(alloc_bar)
 
-        self._ibkr_cid: dict[str, QLineEdit] = {}
-        cids = cur.get("client_ids", {})
-        for i, (side, color, default_id) in enumerate([
-            ("LONG",  C["green"],  "1"),
-            ("SHORT", C["red"],    "2"),
-            ("DAY",   C["orange"], "3"),
-        ]):
-            lab = QLabel(f"▸  {side} bot")
-            lab.setStyleSheet(f"color:{color};font-size:11px;font-weight:700;")
-            cf.addWidget(lab, i, 0)
-            e = QLineEdit(str(cids.get(side, default_id)))
-            e.setPlaceholderText(f"Client ID for {side}")
-            cf.addWidget(e, i, 1)
-            self._ibkr_cid[side] = e
-
-        s.add(cid_form)
-
-        # Money allocation
-        s.add(SectionHeader("FUND ALLOCATION", C["yellow"]))
-        alloc_info = QLabel(
-            "Allocate portions of your IB account to each bot. "
-            "Amounts are advisory — bots check buying power before placing orders. "
-            "Short bots may use margin (negative equity) — the real money check "
-            "flag will label the account as LIVE vs PAPER automatically.")
-        alloc_info.setStyleSheet(f"color:{C['muted']};font-size:11px;")
-        alloc_info.setWordWrap(True)
-        s.add(alloc_info)
-
-        alloc_form = QFrame()
-        alloc_form.setStyleSheet(
+        # Dynamic bot rows container
+        self._ibkr_rows_frame = QFrame()
+        self._ibkr_rows_frame.setStyleSheet(
             f"background:{C['panel']};border:none;border-radius:8px;")
-        af = QGridLayout(alloc_form)
-        af.setContentsMargins(16, 14, 16, 14)
-        af.setHorizontalSpacing(12)
-        af.setVerticalSpacing(10)
+        self._ibkr_rows_layout = QVBoxLayout(self._ibkr_rows_frame)
+        self._ibkr_rows_layout.setContentsMargins(16, 14, 16, 14)
+        self._ibkr_rows_layout.setSpacing(8)
+        self._ibkr_bot_rows: list[dict] = []
 
-        allocs = cur.get("allocations", {})
-        self._ibkr_alloc: dict[str, QLineEdit] = {}
-        for i, (side, color) in enumerate([
-            ("LONG", C["green"]), ("SHORT", C["red"]), ("DAY", C["orange"])
-        ]):
-            lab = QLabel(f"▸  {side} bot  ($)")
-            lab.setStyleSheet(f"color:{color};font-size:11px;font-weight:700;")
-            af.addWidget(lab, i, 0)
-            e = QLineEdit(str(allocs.get(side, "")))
-            e.setPlaceholderText("e.g. 10000")
-            af.addWidget(e, i, 1)
-            self._ibkr_alloc[side] = e
+        # Column header
+        hdr_w = QWidget()
+        hdr_l = QHBoxLayout(hdr_w)
+        hdr_l.setContentsMargins(0, 0, 0, 4)
+        hdr_l.setSpacing(8)
+        for txt, w in [("Bot", 155), ("Client ID", 80), ("Alloc %", 70)]:
+            h = QLabel(txt)
+            h.setStyleSheet(
+                f"color:{C['muted']};font-size:10px;font-weight:700;")
+            h.setFixedWidth(w)
+            hdr_l.addWidget(h)
+        hdr_l.addStretch()
+        self._ibkr_rows_layout.addWidget(hdr_w)
 
-        s.add(alloc_form)
+        for entry in self._ibkr_load_saved_bots(cur):
+            self._ibkr_add_bot_row(
+                entry["id"],
+                entry.get("client_id", ""),
+                entry.get("allocation", ""))
+
+        s.add(self._ibkr_rows_frame)
+
+        # Add bot row
+        add_frame = QFrame()
+        add_frame.setStyleSheet(
+            f"background:{C['panel']};border:none;border-radius:8px;")
+        add_row = QHBoxLayout(add_frame)
+        add_row.setContentsMargins(16, 10, 16, 10)
+        self._ibkr_add_combo = NoScrollComboBox()
+        self._ibkr_add_combo.setMinimumWidth(180)
+        self._ibkr_refresh_add_combo()
+        add_btn_w = QPushButton("+ Add bot")
+        add_btn_w.setObjectName("addBotBtn")
+        add_btn_w.clicked.connect(self._ibkr_add_from_combo)
+        add_row.addWidget(self._ibkr_add_combo)
+        add_row.addWidget(add_btn_w)
+        add_row.addStretch()
+        s.add(add_frame)
 
         # Save + test row
         btn_row = QHBoxLayout()
@@ -815,45 +848,336 @@ class ToolsTab(QWidget):
         bw = QWidget(); bw.setLayout(btn_row)
         s.add(bw)
 
-        # Short bots + Alpaca→IBKR migration note
         s.add(SectionHeader("NOTES", C["muted"]))
         notes = QLabel(
             "• Short bots hold negative positions (borrowed shares). "
-            "IBKR requires a margin account for shorting — paper trading accounts "
-            "support this.\n"
-            "• Use TOOLS → BROKER CONVERSION to export Alpaca positions as IBKR "
-            "order files when migrating real money.\n"
-            "• Money transfer between Alpaca and IBKR is done outside the app via "
-            "IBKR Fund Transfers or ACH from your bank.\n"
-            "• To detect live vs paper: a paper IBKR account has 'DU' prefix, "
-            "a live account has 'U' prefix (e.g. U1234567). BAPTOU labels it "
-            "automatically once connected."
-        )
+            "IBKR requires a margin account for shorting — paper accounts support this.\n"
+            "• Paper IBKR account IDs start with 'DU'; live IDs start with 'U'.\n"
+            "• Bot tab settings (LONG / SHORT / DAY) are independent per mode — "
+            "switch modes in the header to configure each independently.\n"
+            "• When replacing a bot, the new bot inherits existing positions. "
+            "Positions outside its asset class are auto-liquidated on its first cycle.")
         notes.setStyleSheet(
             f"font-family:'JetBrains Mono';font-size:11px;"
             f"color:{C['text']};line-height:1.8;")
         notes.setWordWrap(True)
         s.add(notes)
 
+        self._update_ibkr_remaining()
+
+    # ── IBKR helpers ────────────────────────────────────────────────────
+
+    def _ibkr_load_saved_bots(self, cur: dict) -> list[dict]:
+        """Return bot list from settings; migrates legacy separate dicts format."""
+        bots = cur.get("bots", None)
+        if bots is not None:
+            return bots
+        # Migrate legacy format: separate client_ids + allocations dicts
+        old_cids   = cur.get("client_ids",  {})
+        old_allocs = cur.get("allocations", {})
+        _DEFAULTS = ["LONG", "SHORT", "DAY"]
+        try:
+            reg = D.load_bot_registry()
+            active = reg.get("active", _DEFAULTS)
+        except Exception:
+            active = _DEFAULTS
+        result = []
+        for i, bid in enumerate(active):
+            result.append({
+                "id":         bid,
+                "client_id":  old_cids.get(bid, str(i + 1)),
+                "allocation": old_allocs.get(bid, ""),
+            })
+        if not result:
+            for i, bid in enumerate(_DEFAULTS):
+                result.append({"id": bid, "client_id": str(i + 1), "allocation": ""})
+        return result
+
+    def _ibkr_bot_meta(self, bot_id: str) -> tuple:
+        """Return (display_label, color_hex) for a bot ID."""
+        _BUILTIN = {
+            "LONG":  ("▲  LONG",  BOT_COLOR.get("LONG",  C["green"])),
+            "SHORT": ("▼  SHORT", BOT_COLOR.get("SHORT", C["red"])),
+            "DAY":   ("◆  DAY",   BOT_COLOR.get("DAY",   C["orange"])),
+        }
+        if bot_id in _BUILTIN:
+            return _BUILTIN[bot_id]
+        try:
+            for c in D.load_all_custom_bots():
+                if isinstance(c, dict) and c.get("id") == bot_id:
+                    return f"●  {c.get('label', bot_id)}", c.get("color", C["purple"])
+        except Exception:
+            pass
+        return f"●  {bot_id}", C["muted"]
+
+    def _ibkr_add_bot_row(self, bot_id: str, client_id: str = "", allocation: str = ""):
+        """Append one bot row to the dynamic IBKR bot table."""
+        label, color = self._ibkr_bot_meta(bot_id)
+
+        row_w = QWidget()
+        row_l = QHBoxLayout(row_w)
+        row_l.setContentsMargins(0, 0, 0, 0)
+        row_l.setSpacing(6)
+
+        lbl_w = QLabel(label)
+        lbl_w.setStyleSheet(
+            f"color:{color};font-size:11px;font-weight:700;")
+        lbl_w.setFixedWidth(155)
+
+        auto_cid = client_id if client_id else str(len(self._ibkr_bot_rows) + 1)
+        cid_edit = QLineEdit(auto_cid)
+        cid_edit.setPlaceholderText("ID")
+        cid_edit.setFixedWidth(80)
+        cid_edit.textChanged.connect(self._update_ibkr_remaining)
+
+        alloc_edit = QLineEdit(str(allocation))
+        alloc_edit.setPlaceholderText("e.g. 30")
+        alloc_edit.setFixedWidth(70)
+        alloc_edit.textChanged.connect(self._update_ibkr_remaining)
+
+        # Replace button — opens picker to swap this slot to another bot
+        repl_btn = QPushButton("↔ Replace")
+        repl_btn.setFixedWidth(72)
+        repl_btn.setFixedHeight(26)
+        repl_btn.setStyleSheet(
+            f"QPushButton{{background:rgba(138,147,201,0.18);color:{C['purple']};"
+            f"border:none;border-radius:4px;font-size:10px;font-weight:600;}}"
+            f"QPushButton:hover{{background:rgba(138,147,201,0.30);}}")
+
+        rm_btn = QPushButton("✕")
+        rm_btn.setFixedWidth(26)
+        rm_btn.setFixedHeight(26)
+        rm_btn.setStyleSheet(
+            f"QPushButton{{background:rgba(231,76,60,0.15);color:{C['red']};"
+            f"border:none;border-radius:4px;font-size:11px;font-weight:700;}}"
+            f"QPushButton:hover{{background:rgba(231,76,60,0.30);}}")
+
+        row_l.addWidget(lbl_w)
+        row_l.addWidget(cid_edit)
+        row_l.addWidget(alloc_edit)
+        row_l.addWidget(repl_btn)
+        row_l.addWidget(rm_btn)
+        row_l.addStretch()
+
+        entry = {
+            "id": bot_id, "label": label, "color": color,
+            "cid_edit": cid_edit, "alloc_edit": alloc_edit,
+            "lbl_widget": lbl_w, "row_widget": row_w,
+        }
+        self._ibkr_bot_rows.append(entry)
+        self._ibkr_rows_layout.addWidget(row_w)
+
+        def _remove(_e=entry):
+            if _e in self._ibkr_bot_rows:
+                self._ibkr_bot_rows.remove(_e)
+            _e["row_widget"].deleteLater()
+            self._ibkr_refresh_add_combo()
+            self._update_ibkr_remaining()
+
+        rm_btn.clicked.connect(_remove)
+        repl_btn.clicked.connect(lambda checked=False, _e=entry: self._ibkr_start_replace(_e))
+        self._ibkr_refresh_add_combo()
+        self._update_ibkr_remaining()
+
+    def _ibkr_start_replace(self, entry: dict):
+        """Open a picker to choose the replacement bot for this slot."""
+        from PyQt6.QtWidgets import QDialog, QDialogButtonBox, QVBoxLayout as _VL
+        already = {r["id"] for r in self._ibkr_bot_rows if r is not entry}
+        options: list[tuple] = []
+        for bid in ("LONG", "SHORT", "DAY"):
+            if bid not in already:
+                lbl, _ = self._ibkr_bot_meta(bid)
+                options.append((bid, lbl.strip()))
+        try:
+            for c in D.load_all_custom_bots():
+                if not isinstance(c, dict):
+                    continue
+                bid = c.get("id", "")
+                if bid and bid not in already and bid != entry["id"]:
+                    options.append((bid, c.get("label", bid)))
+        except Exception:
+            pass
+        if not options:
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.information(
+                self, "No bots available",
+                "All available bots are already in the table.")
+            return
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Replace bot")
+        dlg.setMinimumWidth(380)
+        dlg.setStyleSheet(self.window().styleSheet() if self.window() else "")
+        vl = _VL(dlg)
+        vl.setSpacing(10)
+        vl.setContentsMargins(20, 16, 20, 16)
+
+        info = QLabel(
+            f"Replacing  <b>{entry['label'].strip()}</b>  (Client ID {entry['cid_edit'].text()}).<br>"
+            f"The replacement bot inherits this slot's Client ID and allocation %.<br>"
+            f"<span style='color:{C['muted']};font-size:10px;'>"
+            f"Existing positions in this IBKR slot are inherited by the new bot. "
+            f"Positions incompatible with the new bot's asset class will be "
+            f"auto-liquidated on its first cycle.</span>")
+        info.setWordWrap(True)
+        info.setStyleSheet(f"color:{C['text']};font-size:11px;")
+        vl.addWidget(info)
+
+        pick_lbl = QLabel("Replace with:")
+        pick_lbl.setStyleSheet(f"color:{C['text']};font-size:11px;font-weight:700;")
+        vl.addWidget(pick_lbl)
+
+        pick_combo = NoScrollComboBox()
+        for bid, lbl_txt in options:
+            pick_combo.addItem(lbl_txt, bid)
+        vl.addWidget(pick_combo)
+
+        btns = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        btns.accepted.connect(dlg.accept)
+        btns.rejected.connect(dlg.reject)
+        btns.setStyleSheet(
+            f"QPushButton{{background:{C['panel']};color:{C['text']};"
+            f"border:none;border-radius:6px;padding:6px 18px;font-weight:700;}}"
+            f"QPushButton:hover{{background:{C['purple']};color:#fff;}}")
+        vl.addWidget(btns)
+
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        new_id = pick_combo.currentData()
+        if not new_id or new_id == entry["id"]:
+            return
+        self._ibkr_do_replace(entry, new_id)
+
+    def _ibkr_do_replace(self, old_entry: dict, new_id: str):
+        """Swap the bot in a table row, stop the old bot subprocess, save."""
+        old_id = old_entry["id"]
+        new_label, new_color = self._ibkr_bot_meta(new_id)
+
+        # Update the row's display
+        old_entry["id"] = new_id
+        old_entry["label"] = new_label
+        old_entry["color"] = new_color
+        old_entry["lbl_widget"].setText(new_label)
+        old_entry["lbl_widget"].setStyleSheet(
+            f"color:{new_color};font-size:11px;font-weight:700;")
+
+        # Save settings immediately
+        self._save_ibkr_settings()
+
+        # Stop the old bot subprocess if it's running locally
+        try:
+            main_win = self.window()
+            bot_tabs = getattr(main_win, "_bot_tabs", {})
+            old_tab = bot_tabs.get(old_id)
+            if old_tab:
+                ctrl = getattr(old_tab, "bot_ctrl", None)
+                if ctrl and ctrl.is_running():
+                    ctrl.stop_bot()
+        except Exception as e:
+            print(f"[ibkr-replace] stop old bot: {e}")
+
+        self._ibkr_refresh_add_combo()
+        self._update_ibkr_remaining()
+
+        # Confirm message
+        if hasattr(self, "_ibkr_msg"):
+            old_lbl = old_id  # old_entry["label"] is now updated
+            self._ibkr_msg.setText(
+                f"✓ Slot replaced → {new_label.strip()}. "
+                f"Start it from its tab.")
+            self._ibkr_msg.setStyleSheet(f"color:{C['green']};font-size:10px;")
+            QTimer.singleShot(6000, lambda: self._ibkr_msg.setText(""))
+
+    def _ibkr_refresh_add_combo(self):
+        """Refresh the 'add bot' combo: only bots not yet in the table."""
+        if not hasattr(self, "_ibkr_add_combo"):
+            return
+        already = {r["id"] for r in getattr(self, "_ibkr_bot_rows", [])}
+        options: list[tuple] = []
+        for bid in ("LONG", "SHORT", "DAY"):
+            if bid not in already:
+                label, _ = self._ibkr_bot_meta(bid)
+                options.append((bid, label.strip()))
+        try:
+            for c in D.load_all_custom_bots():
+                if not isinstance(c, dict):
+                    continue
+                bid = c.get("id", "")
+                if bid and bid not in already:
+                    options.append((bid, c.get("label", bid)))
+        except Exception:
+            pass
+        self._ibkr_add_combo.blockSignals(True)
+        self._ibkr_add_combo.clear()
+        for bot_id, label in options:
+            self._ibkr_add_combo.addItem(label, bot_id)
+        if not options:
+            self._ibkr_add_combo.addItem("— all bots added —", None)
+        self._ibkr_add_combo.blockSignals(False)
+
+    def _ibkr_add_from_combo(self):
+        bot_id = self._ibkr_add_combo.currentData()
+        if not bot_id:
+            return
+        used_ids: set[int] = set()
+        for r in self._ibkr_bot_rows:
+            try:
+                used_ids.add(int(r["cid_edit"].text()))
+            except ValueError:
+                pass
+        next_cid = 1
+        while next_cid in used_ids:
+            next_cid += 1
+        self._ibkr_add_bot_row(bot_id, str(next_cid), "")
+
+    def _update_ibkr_remaining(self):
+        """Recompute and display allocated / remaining % across all IBKR bot rows."""
+        if not hasattr(self, "_ibkr_remaining_lbl"):
+            return
+        allocated = 0.0
+        for r in getattr(self, "_ibkr_bot_rows", []):
+            txt = r["alloc_edit"].text().strip().rstrip("%")
+            if txt:
+                try:
+                    allocated += float(txt)
+                except ValueError:
+                    pass
+        remaining = 100.0 - allocated
+        color = C["green"] if remaining >= 0 else C["red"]
+        self._ibkr_remaining_lbl.setText(
+            f"Allocated: {allocated:.1f}%  ·  Remaining: {remaining:.1f}%")
+        self._ibkr_remaining_lbl.setStyleSheet(
+            f"color:{color};font-size:11px;font-weight:700;")
+
     def _save_ibkr_settings(self):
         try:
             import json
             s = D.load_settings()
-            s["ibkr"] = {
+            # Save under the per-mode key (ibkr_paper / ibkr_live)
+            key = getattr(self, "_ibkr_mode_key", "ibkr")
+            s[key] = {
                 "host":    self._ibkr_host.text().strip() or "127.0.0.1",
                 "port":    self._ibkr_port.text().strip() or "7497",
                 "account": self._ibkr_account.text().strip(),
-                "client_ids": {
-                    k: v.text().strip() or str(i + 1)
-                    for i, (k, v) in enumerate(self._ibkr_cid.items())
-                },
-                "allocations": {
-                    k: v.text().strip()
-                    for k, v in self._ibkr_alloc.items()
-                },
+                "bots": [
+                    {
+                        "id":         r["id"],
+                        "client_id":  r["cid_edit"].text().strip() or str(i + 1),
+                        "allocation": r["alloc_edit"].text().strip().rstrip("%"),
+                    }
+                    for i, r in enumerate(self._ibkr_bot_rows)
+                ],
             }
             with open(D.SETTINGS_FILE, "w", encoding="utf-8") as f:
                 json.dump(s, f, indent=2)
+            # Drop the cached IBKR snapshot so new host/port/allocations apply
+            try:
+                from core import ibkr_data
+                ibkr_data.reset()
+            except Exception:
+                pass
             self._ibkr_msg.setText("✓ Saved")
             self._ibkr_msg.setStyleSheet(f"color:{C['green']};font-size:10px;")
         except Exception as e:
