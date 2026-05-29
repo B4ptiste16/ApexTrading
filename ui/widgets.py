@@ -499,6 +499,9 @@ class BotProcessWidget(QWidget):
             # V4.6.8 — Alpaca paper/live mode propagation.
             _amode = _s.get("alpaca_mode", "paper")
             env.insert("APEX_ALPACA_MODE", str(_amode))
+            # V4.6.32 — broker propagation so the bot writes its trade log /
+            # state into the per-broker data folder (separate P/L per broker).
+            env.insert("APEX_BROKER", str(_s.get("broker_mode", "alpaca")))
         except Exception:
             pass
         self.process.setProcessEnvironment(env)

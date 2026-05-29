@@ -68,28 +68,70 @@ SNAPSHOT_FILES = {
 }
 
 
+def current_broker() -> str:
+    return load_settings().get("broker_mode", "alpaca")
+
+
+def broker_data_dir(broker: str | None = None) -> Path:
+    """V4.6.32 — per-broker data subdir so the SAME bot can run independently
+    on Alpaca and IBKR with separate P/L history, trade logs and state.
+    Alpaca keeps the historic flat layout at ROOT (no migration, no history
+    loss); every other broker gets its own ROOT/<broker>/ folder.
+    Shared across brokers (NOT scoped): universes, .env, settings, credits."""
+    if broker is None:
+        broker = current_broker()
+    if broker == "alpaca":
+        return ROOT
+    d = ROOT / broker
+    try:
+        d.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        pass
+    return d
+
+
+# Built-in conventional file stems per side (used to find non-alpaca logs)
+_BUILTIN_LOG_NAME = {
+    "LONG":  "longv2_trade_log.jsonl",
+    "SHORT": "shortv2_trade_log.jsonl",
+    "DAY":   "daybot_trade_log.jsonl",
+}
+
+
 def log_files_for(side: str) -> list:
-    """V4.6.30 — resolve trade-log paths for ANY bot side, built-in or
-    custom. Custom bots write to <slug>_trade_log.jsonl (the BotRunner
-    framework + the crypto template do this). Without this, custom
-    bot tabs showed an empty Closed Trades feed because LOG_FILES had
-    no entry for them."""
+    """V4.6.30 — resolve trade-log paths for ANY bot side, built-in or custom.
+    V4.6.32 — Alpaca uses the historic flat paths; other brokers read from
+    their own ROOT/<broker>/ folder so each broker keeps separate trades."""
     s = side.upper()
-    if s in LOG_FILES:
-        return LOG_FILES[s]
-    return [ROOT / f"{side.lower()}_trade_log.jsonl"]
+    if current_broker() == "alpaca":
+        if s in LOG_FILES:
+            return LOG_FILES[s]
+        return [ROOT / f"{side.lower()}_trade_log.jsonl"]
+    bdir = broker_data_dir()
+    paths = [bdir / f"{side.lower()}_trade_log.jsonl"]
+    if s in _BUILTIN_LOG_NAME:
+        paths.append(bdir / _BUILTIN_LOG_NAME[s])
+    return paths
 
 
 def snapshot_files_for(side: str) -> list:
     """V4.6.30 — resolve snapshot/equity-history paths for any side.
-    Custom bots use their <slug>_lifetime.jsonl (written by the
-    Overview refresh + the framework)."""
+    V4.6.32 — per-broker (Alpaca = historic flat layout)."""
     s = side.upper()
-    if s in SNAPSHOT_FILES:
-        return SNAPSHOT_FILES[s]
-    return [ROOT / f"{side.lower()}_lifetime.jsonl"]
+    if current_broker() == "alpaca":
+        if s in SNAPSHOT_FILES:
+            return SNAPSHOT_FILES[s]
+        return [ROOT / f"{side.lower()}_lifetime.jsonl"]
+    return [broker_data_dir() / f"{side.lower()}_lifetime.jsonl"]
 
 DAY_STATE = ROOT / "daybot_state.json"
+
+
+def day_state_path() -> Path:
+    """Per-broker daybot state file (Alpaca = historic flat path)."""
+    if current_broker() == "alpaca":
+        return DAY_STATE
+    return broker_data_dir() / "daybot_state.json"
 
 # Anthropic pricing (per million tokens) — update if pricing changes
 HAIKU_INPUT_PER_M  = 0.80
@@ -1029,7 +1071,11 @@ def write_env_keys(values: dict) -> None:
 # tiny (a year of 5-min ticks at 200 bytes = ~21 MB max).
 
 def _bot_snapshot_path(side: str):
-    return ROOT / f"{side.lower()}_lifetime.jsonl"
+    # V4.6.32 — per-broker lifetime file. Alpaca keeps its historic flat
+    # path (no migration); IBKR / others write to ROOT/<broker>/.
+    if current_broker() == "alpaca":
+        return ROOT / f"{side.lower()}_lifetime.jsonl"
+    return broker_data_dir() / f"{side.lower()}_lifetime.jsonl"
 
 
 def append_bot_snapshot(side: str, *, equity: float = 0.0,
@@ -1298,10 +1344,11 @@ def load_bot_log(side: str) -> pd.DataFrame:
 
 
 def load_day_state() -> dict:
-    if not DAY_STATE.exists():
+    p = day_state_path()
+    if not p.exists():
         return {}
     try:
-        with open(DAY_STATE) as f:
+        with open(p) as f:
             return json.load(f)
     except:
         return {}

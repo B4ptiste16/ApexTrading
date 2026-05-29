@@ -276,7 +276,18 @@ def _write_trade_log(slug: str, symbol: str, action: str,
     from datetime import datetime as _dt, timezone as _tz
     data_dir = os.environ.get("APEX_DATA_DIR") or "."
     side = os.environ.get("APEX_BOT_SIDE", slug)
-    path = Path(data_dir) / f"{side.lower()}_trade_log.jsonl"
+    # V4.6.32 — per-broker trade log so the same bot keeps separate history
+    # on each broker. Alpaca writes the historic flat path; others nest under
+    # <data_dir>/<broker>/ to match core.data.log_files_for().
+    broker = (os.environ.get("APEX_BROKER") or "alpaca").lower()
+    base = Path(data_dir)
+    if broker != "alpaca":
+        base = base / broker
+        try:
+            base.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            pass
+    path = base / f"{side.lower()}_trade_log.jsonl"
     try:
         with open(path, "a", encoding="utf-8") as f:
             f.write(_j.dumps({

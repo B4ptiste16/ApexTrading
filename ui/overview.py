@@ -492,6 +492,18 @@ class OverviewTab(QWidget):
             block._cards["POSITIONS"].update_value("—", C["muted"])
             return
 
+        # V4.6.32 — if the broker isn't connected (e.g. IBKR with no gateway
+        # reachable, or Alpaca with no keys), show a neutral "not connected"
+        # state. Critically, do NOT fall through with equity=0 — that would
+        # both render a bogus -100% loss and append a 0-equity snapshot that
+        # corrupts the bot's lifetime baseline.
+        if not a or not a.get("connected"):
+            block._cards["PORTFOLIO"].update_value("—", C["muted"])
+            block._cards["DAY P/L"].update_value("—", C["muted"])
+            block._cards["PERIOD P/L"].update_value("not connected", C["muted"])
+            block._cards["POSITIONS"].update_value("—", C["muted"])
+            return
+
         pv = a.get("portfolio_value", 0)
         eq = a.get("equity", 0)
 
