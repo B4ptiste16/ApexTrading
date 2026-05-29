@@ -64,18 +64,14 @@ def _yf():
 
 
 def _alpaca_clients(asset_type: str):
-    """Return (trading_client, ALPACA_KEY, ALPACA_SECRET).
-    V4.6.8 — honors APEX_ALPACA_MODE env var. 'live' creates a
-    real-money TradingClient (paper=False); anything else falls back
-    to paper trading. The desktop's header toggle writes this var."""
-    from alpaca.trading.client import TradingClient
-    key = os.environ["ALPACA_API_KEY"]
-    sec = os.environ["ALPACA_SECRET_KEY"]
-    mode = (os.environ.get("APEX_ALPACA_MODE") or "paper").lower()
-    is_paper = (mode != "live")
-    print(f"[framework] Alpaca client mode: "
-          f"{'PAPER' if is_paper else 'LIVE'}", flush=True)
-    return TradingClient(key, sec, paper=is_paper), key, sec
+    """Return (trading_client, KEY, SECRET).
+    V4.6.34 — delegates to core.broker_client.get_broker_client so framework
+    custom bots automatically use the IBKR shim when APEX_BROKER=ibkr.
+    Alpaca behavior is byte-for-byte unchanged when APEX_BROKER is unset or
+    'alpaca' (the only path before v4.6.34).  Name kept for back-compat with
+    any imports."""
+    from core.broker_client import get_broker_client
+    return get_broker_client(asset_type)
 
 
 # V4.6.26 — Initial portfolio cleanup. Runs ONCE at bot startup.

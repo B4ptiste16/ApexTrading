@@ -403,29 +403,72 @@ class BotProcessWidget(QWidget):
         # file — they NEVER submit orders, so Alpaca credentials are
         # genuinely not needed. Previously hitting RUN on the Universe
         # Manager surfaced a misleading "MUST ASSIGN API KEY" dialog.
-        # V4.6.33 — broker-aware pre-flight. IBKR order EXECUTION isn't wired
-        # yet: bots place orders only through Alpaca's TradingClient. Starting
-        # one in IBKR mode would silently trade the Alpaca account, so block it
-        # with an honest message instead of the misleading Alpaca-key dialog.
+        # V4.6.34 — broker-aware pre-flight.
+        # • Alpaca: same Alpaca-key check as before (unchanged).
+        # • IBKR built-ins (LONG/SHORT/DAY): still BLOCKED — those bots call
+        #   alpaca-py directly; refactoring them to the broker abstraction is
+        #   the next release.  Starting them in IBKR mode would silently
+        #   trade the Alpaca account.
+        # • IBKR custom/framework bots: ALLOWED if (a) the bot has a Client
+        #   ID in Tools → IBKR and (b) the gateway port is reachable.
         try:
             from core import data as _D
-            _broker = _D.load_settings().get("broker_mode", "alpaca")
+            _settings = _D.load_settings()
+            _broker = _settings.get("broker_mode", "alpaca")
         except Exception:
+            _settings = {}
             _broker = "alpaca"
-        if _broker != "alpaca" and not self._is_non_trading_script():
-            from PyQt6.QtWidgets import QMessageBox as _QMB
-            _QMB.information(
-                self.window(),
-                "IBKR execution not available yet",
-                f"Bots can't place orders through {_broker.upper()} yet — order "
-                f"execution still runs through Alpaca. Starting a bot while in "
-                f"{_broker.upper()} mode is disabled so it can't trade your "
-                f"Alpaca account by surprise.<br><br>"
-                f"Switch to <b>Alpaca</b> (broker chip in the header) to run "
-                f"this bot. {_broker.upper()} order execution is coming.")
-            return
 
-        if not self._is_non_trading_script() \
+        if _broker == "ibkr" and not self._is_non_trading_script():
+            from PyQt6.QtWidgets import QMessageBox as _QMB
+            _builtin = str(self.side).upper() in ("LONG", "SHORT", "DAY")
+            if _builtin:
+                _QMB.information(
+                    self.window(),
+                    "Built-in bot not yet wired to IBKR",
+                    f"<b>{self.side}</b> uses Alpaca's order API directly. "
+                    f"Refactoring it to the new broker abstraction is the "
+                    f"next release.<br><br>"
+                    f"Custom bots (the ones you build in Make Bot) DO execute "
+                    f"through IBKR in this release — try one of those, or "
+                    f"switch to Alpaca to run {self.side}.")
+                return
+            # Custom/framework bot — verify IBKR readiness before launch.
+            _amode = _settings.get("alpaca_mode", "paper")
+            _ibkr_cfg = _settings.get(f"ibkr_{_amode}", _settings.get("ibkr", {})) or {}
+            _has_cid = any(
+                isinstance(b, dict)
+                and str(b.get("id", "")).upper() == str(self.side).upper()
+                for b in (_ibkr_cfg.get("bots") or [])
+            )
+            if not _has_cid:
+                _QMB.warning(
+                    self.window(),
+                    "Bot not in IBKR tools",
+                    f"<b>{self.side}</b> isn't in the IBKR bot table. "
+                    f"Open <b>Tools → IBKR</b>, click <b>+ Add bot</b> and "
+                    f"give it a Client ID + allocation, then save.")
+                return
+            _host = str(_ibkr_cfg.get("host", "127.0.0.1"))
+            try:
+                _port = int(str(_ibkr_cfg.get("port",
+                    "7497" if _amode == "paper" else "7496")))
+            except ValueError:
+                _port = 7497
+            import socket as _sock
+            try:
+                _s_sock = _sock.create_connection((_host, _port), timeout=3)
+                _s_sock.close()
+            except Exception as _e:
+                _QMB.warning(
+                    self.window(),
+                    "IB Gateway not reachable",
+                    f"Couldn't reach {_host}:{_port} ({_e}). Start IB Gateway "
+                    f"or TWS and enable API access, then try again. "
+                    f"Settings live in <b>Tools → IBKR</b>.")
+                return
+
+        if _broker == "alpaca" and not self._is_non_trading_script() \
                 and not self._has_alpaca_key_for_side():
             from PyQt6.QtWidgets import QMessageBox as _QMB
             _QMB.warning(
@@ -523,7 +566,23 @@ class BotProcessWidget(QWidget):
             env.insert("APEX_ALPACA_MODE", str(_amode))
             # V4.6.32 — broker propagation so the bot writes its trade log /
             # state into the per-broker data folder (separate P/L per broker).
-            env.insert("APEX_BROKER", str(_s.get("broker_mode", "alpaca")))
+            _broker_now = str(_s.get("broker_mode", "alpaca"))
+            env.insert("APEX_BROKER", _broker_now)
+            # V4.6.34 — when running on IBKR, hand the bot subprocess the
+            # gateway address + its own client ID so core.broker_client can
+            # connect.  Reads from the per-mode IBKR config the user set up
+            # in Tools → IBKR.
+            if _broker_now == "ibkr":
+                _ibkr_cfg = _s.get(f"ibkr_{_amode}", _s.get("ibkr", {})) or {}
+                env.insert("APEX_IBKR_HOST", str(_ibkr_cfg.get("host", "127.0.0.1")))
+                env.insert("APEX_IBKR_PORT", str(_ibkr_cfg.get("port",
+                    "7497" if _amode == "paper" else "7496")))
+                _cid_for_side = "1"
+                for _b in (_ibkr_cfg.get("bots") or []):
+                    if isinstance(_b, dict) and str(_b.get("id", "")).upper() == str(self.side).upper():
+                        _cid_for_side = str(_b.get("client_id", "1"))
+                        break
+                env.insert("APEX_IBKR_CLIENT_ID", _cid_for_side)
         except Exception:
             pass
         self.process.setProcessEnvironment(env)
