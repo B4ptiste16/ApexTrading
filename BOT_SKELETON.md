@@ -72,8 +72,34 @@ requirements:       scikit-learn
 | `compatible_models` | comma-list of providers | Providers that can RUN it at runtime if it makes AI calls |
 | `asset_type` | `stocks` / `crypto` / `etfs` / `futures` / `options` / `universe` | Drives UI behavior — see §3 |
 | `universe` | Filename of the `*_universe.txt` this bot **reads** (trading) or **writes** (universe gen) | Used for the file resolution |
-| `requirements` | Pip packages beyond APEX's bundled set, comma-separated, or empty | Server auto-installs for cloud bots. Frozen local Python ignores. |
+| `requirements` | Pip packages beyond APEX's bundled set, comma-separated, or empty | Server auto-installs for cloud bots. **Locally, APEX pre-flights this list**: any pip name that isn't importable in the frozen build (see §2b) blocks the bot start with a clear "needs cloud run or rebuild" message — no more opaque ImportError at launch. |
 | `broker` | `alpaca` (default) or `ibkr` | Which broker the bot trades through. The broker-mode switch (top-right) hides bots whose broker doesn't match. Alpaca bots use API keys; IBKR bots use ib_insync + a running TWS/Gateway. |
+
+---
+
+## 2b. Packages bundled in the frozen build (safe to import locally)
+
+These ship with `APEX_Setup.exe` and import cleanly with **no** `requirements:`
+entry needed.  If your bot only uses these, it runs locally AND on Oracle:
+
+| Category | Packages |
+|---|---|
+| Data / math | `numpy`, `pandas`, `scipy`, `sklearn` (scikit-learn), `matplotlib` |
+| Markets | `yfinance` |
+| Brokers | `alpaca` (alpaca-py), `ib_async` |
+| AI providers | `anthropic`, `openai`, `google.generativeai` |
+| Misc | `dotenv` (python-dotenv), `requests`, `cryptography`, `PIL` (Pillow) |
+
+If you need ANYTHING outside this list (e.g. `ccxt`, `statsmodels`, `ta-lib`):
+
+- Declare it in `requirements:` so the cloud auto-installs it.
+- **Local runs will be blocked** by the v4.6.35 pre-flight (clear message
+  tells the user to enable "Run on Oracle" or rebuild APEX with that
+  package added).  Don't expect the AI-generated bot to "just work"
+  locally with non-bundled deps.
+
+When in doubt, prefer a bundled package.  `sklearn.linear_model.LinearRegression`
+covers most of what `statsmodels` does for trend-following.
 
 ---
 
@@ -240,6 +266,88 @@ if __name__ == "__main__":
 ---
 
 ## 5. Trading bot rules (must follow)
+
+### 5_AI. Decision-making MUST be AI-driven (the longbot pattern)
+
+**The whole point of APEX bots is that an AI makes the trading decision.**
+A bot that only runs `sklearn` / `statsmodels` / a hand-coded indicator
+without ever calling an LLM is a *machine-learning* bot, not an AI bot,
+and **must mark itself honestly** (see 5_AI.iv below). The default for
+every generated trading bot is the AI pattern — only use ML-only when
+the user explicitly asks for it.
+
+#### 5_AI.i — Every cycle, every candidate, ask the AI
+
+The bot iterates its universe and asks the model (Claude / GPT / Gemini
+/ Groq, picked from `compatible_models`) to score each candidate against
+the **current portfolio**. The AI must be told:
+
+- the candidate's recent bars (or a chart screenshot for vision models),
+- every position the bot currently holds,
+- the bot's cash / buying-power.
+
+It must return JSON of the form:
+
+```json
+{
+  "decision":         "ALLOCATE" | "HOLD",
+  "target_portfolio": {"AAPL": 0.30, "NVDA": 0.25, ...},
+  "confidence":       0.0_to_1.0,
+  "reasoning":        "short why"
+}
+```
+
+#### 5_AI.ii — `min_confidence` gate (MANDATORY)
+
+Every bot MUST read its `min_confidence` from `apex_settings.json` under
+the bot's slug, fall back to `0.60` if missing, and **return HOLD when
+the AI's `confidence < min_confidence`**:
+
+```python
+def live_min_confidence() -> float:
+    try:
+        with open("apex_settings.json", encoding="utf-8") as f:
+            v = json.load(f).get(BOT_SIDE, {}).get("min_confidence")
+        return float(v) if v is not None else 0.60
+    except Exception:
+        return 0.60
+
+mc = live_min_confidence()
+if signal["confidence"] < mc:
+    return {"decision": "HOLD",
+            "reasoning": f"Confidence {signal['confidence']:.2f} < {mc:.2f}"}
+```
+
+This is what the Overview's `min_confidence` slider controls — without
+this gate, the slider does nothing for your bot.
+
+#### 5_AI.iii — Position-replacement assessment (the longbot pattern)
+
+When the AI picks a `target_portfolio` that differs from current holdings,
+the bot must **let the AI decide whether to replace each existing
+position**, not just blindly liquidate. Concretely, for each currently-held
+ticker that is NOT in `target_portfolio`, give the AI a second pass to say
+"keep" or "replace with X" — `longbot_v2.ask_claude_vision()` is the
+reference implementation. Mechanical liquidation of anything off-list is a
+common mistake; don't make it.
+
+#### 5_AI.iv — Honesty: ML-only bots MUST declare it
+
+If the bot's decision logic is pure ML / heuristics with **no LLM call**:
+
+- `ai_used: none`
+- `compatible_models: none`
+- `description:` must start with "**ML-only**" so users know what they're
+  buying / running.
+
+Examples:
+- ✅ `ai_used: claude` + `compatible_models: anthropic, openai` for a bot
+  whose `decide()` posts to the Claude API each cycle.
+- ✅ `ai_used: none` + `compatible_models: none` for a linear-regression
+  trend follower with no LLM call (e.g. the original crypto bot).
+- ❌ `ai_used: groq` + `compatible_models: groq, anthropic, openai` for a
+  bot that doesn't actually make any API call. This is a lie that the
+  auto-moderation flags.
 
 ### 5a. Credentials
 

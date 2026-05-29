@@ -179,6 +179,36 @@ class _IBKRShim:
             ))
         return out
 
+    # ── single-symbol position lookup (alpaca-py compat) ──────────────
+
+    def get_open_position(self, symbol: str):
+        """Mirrors alpaca-py: returns the position object or raises if the
+        symbol has no open position (alpaca-py raises APIError; we raise
+        ValueError, which the built-in bots already catch as Exception)."""
+        for p in self.get_all_positions():
+            if p.symbol.upper() == str(symbol).upper():
+                return p
+        raise ValueError(f"position does not exist for {symbol}")
+
+    # ── market clock (alpaca-py compat) ────────────────────────────────
+
+    def get_clock(self):
+        """Returns an object with .is_open / .timestamp matching alpaca-py's
+        Clock surface, derived from US equity hours (9:30–16:00 ET, M–F).
+        Holidays aren't honored — the bot's AI tends to HOLD on quiet days
+        and IBKR itself rejects orders on a closed exchange.  For crypto
+        bots this is irrelevant (asset_type='crypto' → 24/7 path)."""
+        from datetime import datetime, timezone, timedelta
+        from types import SimpleNamespace
+        # Cheap ET offset: -4 for EDT roughly Mar–Nov, -5 for EST otherwise.
+        # Good enough for is_open; precise scheduling lives in the AI loop.
+        now = datetime.now(timezone.utc)
+        et = now - timedelta(hours=5 if now.month in (12, 1, 2) else 4)
+        weekday_open = et.weekday() < 5
+        minutes = et.hour * 60 + et.minute
+        is_open = weekday_open and (9 * 60 + 30) <= minutes < (16 * 60)
+        return SimpleNamespace(is_open=is_open, timestamp=now)
+
     # ── close one symbol ───────────────────────────────────────────────
 
     def close_position(self, symbol: str):

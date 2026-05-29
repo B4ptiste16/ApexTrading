@@ -14,6 +14,7 @@ openai
 alpaca-py
 ib_async
 python-dotenv
+scikit-learn
 requests
 cryptography
 Pillow

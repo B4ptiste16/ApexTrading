@@ -421,17 +421,19 @@ class BotProcessWidget(QWidget):
 
         if _broker == "ibkr" and not self._is_non_trading_script():
             from PyQt6.QtWidgets import QMessageBox as _QMB
-            _builtin = str(self.side).upper() in ("LONG", "SHORT", "DAY")
-            if _builtin:
+            # V4.6.36 — LONG is now broker-aware (Phase 2A). SHORT and DAY
+            # still call alpaca-py directly and stay blocked in IBKR mode.
+            _blocked_builtins = ("SHORT", "DAY")
+            if str(self.side).upper() in _blocked_builtins:
                 _QMB.information(
                     self.window(),
                     "Built-in bot not yet wired to IBKR",
-                    f"<b>{self.side}</b> uses Alpaca's order API directly. "
-                    f"Refactoring it to the new broker abstraction is the "
-                    f"next release.<br><br>"
-                    f"Custom bots (the ones you build in Make Bot) DO execute "
-                    f"through IBKR in this release — try one of those, or "
-                    f"switch to Alpaca to run {self.side}.")
+                    f"<b>{self.side}</b> still uses Alpaca's order API "
+                    f"directly. Refactoring it to the broker abstraction is "
+                    f"the next release.<br><br>"
+                    f"LONG and any custom bot (Make Bot) DO execute through "
+                    f"IBKR in this release — try one of those, or switch to "
+                    f"Alpaca to run {self.side}.")
                 return
             # Custom/framework bot — verify IBKR readiness before launch.
             _amode = _settings.get("alpaca_mode", "paper")
@@ -467,6 +469,30 @@ class BotProcessWidget(QWidget):
                     f"or TWS and enable API access, then try again. "
                     f"Settings live in <b>Tools → IBKR</b>.")
                 return
+
+        # V4.6.35 — verify META.requirements are importable in the frozen
+        # build BEFORE launching, so a bot whose model picked an unbundled
+        # package (e.g. scikit-learn) gets a helpful message rather than
+        # exit-1 with "No module named X" five lines into its log.
+        try:
+            _missing = self._missing_requirements()
+        except Exception:
+            _missing = []
+        if _missing:
+            from PyQt6.QtWidgets import QMessageBox as _QMB
+            _lines = "<br>".join(
+                f"&nbsp;&nbsp;• <b>{pip}</b>" for pip, _imp in _missing)
+            _QMB.warning(
+                self.window(),
+                "Bot needs packages not in this build",
+                f"<b>{self.side}</b> declares pip requirements that aren't "
+                f"bundled into APEX:<br><br>{_lines}<br><br>"
+                f"Two ways forward:<br>"
+                f"&nbsp;1. <b>Run on Oracle</b> — the cloud server auto-installs "
+                f"requirements (Tools → Automation → Run on Oracle).<br>"
+                f"&nbsp;2. Add the package(s) to <code>build.bat</code> "
+                f"(<code>--collect-all &lt;name&gt;</code>) and rebuild APEX.")
+            return
 
         if _broker == "alpaca" and not self._is_non_trading_script() \
                 and not self._has_alpaca_key_for_side():
@@ -618,6 +644,60 @@ class BotProcessWidget(QWidget):
                       "This is normal — wait for its header.", C["muted"])
         else:
             self._log("Failed to start process", C["red"])
+
+    # Map pip-install names → importable module names for requirements
+    # whose names diverge.  Add entries when AI-generated bots trip on a
+    # new one — most pip names match the import name directly.
+    _PIP_TO_IMPORT = {
+        "scikit-learn":   "sklearn",
+        "python-dotenv":  "dotenv",
+        "pyyaml":         "yaml",
+        "beautifulsoup4": "bs4",
+        "pillow":         "PIL",
+        "msgpack-python": "msgpack",
+        "google-generativeai": "google.generativeai",
+        "ib-async":       "ib_async",
+        "ib_insync":      "ib_insync",
+    }
+
+    def _missing_requirements(self) -> list:
+        """V4.6.35 — read the bot's META.requirements and return any pip
+        packages that aren't importable from the frozen Python.  Custom
+        bots declare extras (e.g. scikit-learn) which only get installed
+        for cloud runs; locally they crash at import.  Surfacing this in
+        pre-flight gives a helpful message instead of an opaque ImportError."""
+        try:
+            from pathlib import Path as _P
+            from core.bot_meta import parse_meta
+            import importlib.util as _imp
+            script_path = getattr(self, "script_path", None) \
+                          or getattr(self, "script", None)
+            if not script_path:
+                return []
+            sp = _P(str(script_path))
+            if not sp.exists():
+                return []
+            src = sp.read_text(encoding="utf-8", errors="replace")
+            meta = parse_meta(src) or {}
+            reqs = meta.get("requirements") or []
+            if isinstance(reqs, str):
+                reqs = [r.strip() for r in reqs.split(",")]
+            missing = []
+            for raw in reqs:
+                name = str(raw).strip().lower()
+                if not name:
+                    continue
+                # strip version pin
+                name = name.split("==")[0].split(">=")[0].split("<")[0].strip()
+                import_name = self._PIP_TO_IMPORT.get(name, name.replace("-", "_"))
+                try:
+                    if _imp.find_spec(import_name) is None:
+                        missing.append((name, import_name))
+                except Exception:
+                    missing.append((name, import_name))
+            return missing
+        except Exception:
+            return []
 
     def _is_non_trading_script(self) -> bool:
         """Universe-manager + universe-generator custom bots don't need

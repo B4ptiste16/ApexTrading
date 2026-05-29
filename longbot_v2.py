@@ -240,14 +240,22 @@ os.makedirs(CHART_DIR, exist_ok=True)
 _AI_PROVIDER, _AI_MODEL, _AI_KEY, _AI_MODE = load_ai_config()
 print(f"[ai] provider={_AI_PROVIDER}  model={_AI_MODEL}  mode={_AI_MODE}")
 
-# V4.6.8 — honor APEX_ALPACA_MODE so the header Paper/Live toggle
-# steers this bot too. Defaults to paper for safety.
+# V4.6.8 — honor APEX_ALPACA_MODE so the header Paper/Live toggle steers
+# this bot too. Defaults to paper for safety.
 _ALPACA_IS_PAPER = (os.environ.get("APEX_ALPACA_MODE", "paper").lower() != "live")
-trading_client   = TradingClient(
-    os.getenv("ALPACA_API_KEY_LONG", os.getenv("ALPACA_API_KEY")),
-    os.getenv("ALPACA_SECRET_KEY_LONG", os.getenv("ALPACA_SECRET_KEY")),
-    paper=_ALPACA_IS_PAPER
-)
+# V4.6.36 — route through the broker abstraction so this bot can trade on
+# IBKR (APEX_BROKER=ibkr) without rewriting any of its decision logic.
+# Alpaca path: surface the per-side LONG keys under the generic env names
+# the abstraction reads, so behavior is byte-for-byte unchanged on Alpaca.
+if (os.environ.get("APEX_BROKER", "alpaca").lower() == "alpaca"):
+    _k = os.getenv("ALPACA_API_KEY_LONG") or os.environ.get("ALPACA_API_KEY", "")
+    _s = os.getenv("ALPACA_SECRET_KEY_LONG") or os.environ.get("ALPACA_SECRET_KEY", "")
+    if _k:
+        os.environ["ALPACA_API_KEY"] = _k
+    if _s:
+        os.environ["ALPACA_SECRET_KEY"] = _s
+from core.broker_client import get_broker_client
+trading_client, _, _ = get_broker_client("stocks")
 
 
 # =========================================================

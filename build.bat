@@ -106,6 +106,7 @@ python -m PyInstaller ^
     --collect-all alpaca ^
     --collect-all ib_async ^
     --collect-all eventkit ^
+    --collect-all sklearn ^
     --hidden-import nest_asyncio ^
     main.py
 
