@@ -10,7 +10,7 @@
 ; -----------------------------------------------------
 
 #define MyAppName      "APEX Trading Platform"
-#define MyAppVersion   "4.6.36"
+#define MyAppVersion   "4.6.37"
 #define MyAppPublisher "APEX"
 #define MyAppExeName   "APEX.exe"
 
@@ -43,6 +43,14 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; \
   GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
+
+[InstallDelete]
+; v4.6.37 — wipe the bundled-libs dir before copying so a previous install
+; whose files were locked (e.g. APEX was running during an /VERYSILENT in-app
+; update) can't leave half-populated sub-packages behind. Specifically this
+; ensures sklearn/__check_build (the v4.6.36 install-skip culprit) and any
+; future newly-added subpackage get freshly created.
+Type: filesandordirs; Name: "{app}\_internal"
 
 [Files]
 ; Whole PyInstaller --onedir folder: APEX.exe + _internal\ (bundled libs,
@@ -83,3 +91,21 @@ Filename: "{app}\{#MyAppExeName}"; \
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}\__pycache__"
+
+[Code]
+// v4.6.37 — force-kill any running APEX.exe BEFORE files are copied so a
+// silent in-app update can never leave a half-installed bundle (which is
+// what made v4.6.36 ship sklearn without its __check_build subpackage on
+// machines where APEX was still open).  Inno's built-in 'close apps'
+// prompt is skipped under /VERYSILENT, so we do the force-kill ourselves.
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+var
+  ResultCode: Integer;
+begin
+  Exec(ExpandConstant('{sys}\taskkill.exe'),
+       '/F /IM APEX.exe /T',
+       '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  // brief pause so Windows releases handles before we start copying
+  Sleep(800);
+  Result := '';
+end;
