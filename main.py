@@ -2615,8 +2615,17 @@ class ApexWindow(QMainWindow):
 
     def _resume_cloud_bots(self):
         """Ask each cloud-flagged bot's controller to query Oracle for
-        its current running state, and restore the UI accordingly."""
+        its current running state, and restore the UI accordingly.
+        V4.6.33 — only resume bots flagged cloud in the CURRENT broker, so a
+        cloud bot started under Alpaca doesn't show as running in the IBKR
+        view (cloud lifecycle is keyed by side only on the server)."""
+        try:
+            cloud_here = {s.upper() for s in D.get_cloud_bots()}
+        except Exception:
+            cloud_here = set()
         for side, tab in self._bot_tabs.items():
+            if str(side).upper() not in cloud_here:
+                continue
             bc = getattr(tab, "bot_ctrl", None)
             if bc and hasattr(bc, "cloud_resume_if_running"):
                 try:

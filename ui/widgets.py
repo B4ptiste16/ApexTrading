@@ -403,6 +403,28 @@ class BotProcessWidget(QWidget):
         # file — they NEVER submit orders, so Alpaca credentials are
         # genuinely not needed. Previously hitting RUN on the Universe
         # Manager surfaced a misleading "MUST ASSIGN API KEY" dialog.
+        # V4.6.33 — broker-aware pre-flight. IBKR order EXECUTION isn't wired
+        # yet: bots place orders only through Alpaca's TradingClient. Starting
+        # one in IBKR mode would silently trade the Alpaca account, so block it
+        # with an honest message instead of the misleading Alpaca-key dialog.
+        try:
+            from core import data as _D
+            _broker = _D.load_settings().get("broker_mode", "alpaca")
+        except Exception:
+            _broker = "alpaca"
+        if _broker != "alpaca" and not self._is_non_trading_script():
+            from PyQt6.QtWidgets import QMessageBox as _QMB
+            _QMB.information(
+                self.window(),
+                "IBKR execution not available yet",
+                f"Bots can't place orders through {_broker.upper()} yet — order "
+                f"execution still runs through Alpaca. Starting a bot while in "
+                f"{_broker.upper()} mode is disabled so it can't trade your "
+                f"Alpaca account by surprise.<br><br>"
+                f"Switch to <b>Alpaca</b> (broker chip in the header) to run "
+                f"this bot. {_broker.upper()} order execution is coming.")
+            return
+
         if not self._is_non_trading_script() \
                 and not self._has_alpaca_key_for_side():
             from PyQt6.QtWidgets import QMessageBox as _QMB

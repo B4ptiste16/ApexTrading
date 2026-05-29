@@ -661,14 +661,28 @@ def get_auto_schedule_active_bots() -> list[str]:
 
 # ── V7.1.13: per-bot cloud-execution toggle ─────────────────────────
 
+def _cloud_bots_key() -> str:
+    """V4.6.33 — cloud-execution flags are per-broker so a bot started on
+    Alpaca's cloud doesn't show as running in the IBKR view (and vice-versa)."""
+    return f"cloud_bots_{current_broker()}"
+
+
 def get_cloud_bots() -> list[str]:
-    """Sides set to run on the APEX Oracle server instead of locally."""
-    return list(load_settings().get("cloud_bots", []))
+    """Sides set to run on the APEX Oracle server instead of locally,
+    scoped to the current broker."""
+    s = load_settings()
+    key = _cloud_bots_key()
+    if key in s:
+        return list(s[key])
+    # Migrate the legacy global list into Alpaca (the only pre-v4.6.33 broker).
+    if current_broker() == "alpaca":
+        return list(s.get("cloud_bots", []))
+    return []
 
 
 def set_cloud_bots(sides: list[str]) -> None:
     s = load_settings()
-    s["cloud_bots"] = sorted({str(x).upper() for x in sides})
+    s[_cloud_bots_key()] = sorted({str(x).upper() for x in sides})
     with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
         json.dump(s, f, indent=2)
 
