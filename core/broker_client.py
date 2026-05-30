@@ -336,11 +336,20 @@ class _IBKRShim:
 
     # ── submit (market orders) ─────────────────────────────────────────
 
-    def submit_order(self, req):
+    def submit_order(self, order_data=None, req=None):
         """Accepts alpaca-py MarketOrderRequest (qty- or notional-sized).
         Anything else raises so the bug surfaces loudly rather than silently
         mis-trading.  When a ledger is active the order is constrained to —
-        and recorded against — this bot's sub-portfolio."""
+        and recorded against — this bot's sub-portfolio.
+
+        V4.6.45 — alpaca-py's TradingClient.submit_order is called as
+        `submit_order(order_data=req)` by the framework and built-in bots, so
+        the shim must accept that exact keyword (it previously used a bare
+        `req` positional and crashed with 'unexpected keyword argument
+        order_data'). Accepts positional, order_data=, or req= for safety."""
+        req = order_data if order_data is not None else req
+        if req is None:
+            raise ValueError("submit_order: no order request provided")
         side_str = str(getattr(req, "side", "")).split(".")[-1].upper()
         if side_str not in ("BUY", "SELL"):
             raise ValueError(f"Unsupported order side for IBKR shim: {req.side}")
