@@ -63,6 +63,24 @@ deploy_files() {
              (sudo test -f /opt/apex_bots/core/__init__.py || \
               sudo bash -c 'echo \"\" > /opt/apex_bots/core/__init__.py') && \
              sudo chown -R apex:apex /opt/apex_bots/core/"
+
+    # V4.6.40 — also sync the built-in bot scripts to /opt/apex_bots root.
+    # bot_runner spawns them as `import longbot_v2/shortbot_v2/daybot`. They
+    # were previously deployed once (stale at v4.6.27); shortbot_v2 has since
+    # been refactored onto the broker abstraction (IBKR support), so they
+    # must be re-pushed or cloud SHORT keeps trading the old way.
+    echo "→ scp built-in bot scripts to /tmp on Oracle"
+    local bot_scripts="longbot_v2.py shortbot_v2.py daybot.py"
+    eval "$SCP $bot_scripts $ORACLE_USER@$ORACLE_HOST:/tmp/"
+    echo "→ move into /opt/apex_bots/ with sudo"
+    local bot_dest_files
+    bot_dest_files=""
+    for f in $bot_scripts; do
+        bot_dest_files="$bot_dest_files /tmp/$(basename "$f")"
+    done
+    run_ssh "sudo cp $bot_dest_files /opt/apex_bots/ && \
+             rm $bot_dest_files && \
+             sudo chown apex:apex /opt/apex_bots/*.py"
 }
 
 restart_service() {

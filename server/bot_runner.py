@@ -164,6 +164,29 @@ def private_bots_dir(user_id: int) -> Path:
     return p
 
 
+def _cloud_broker(blob: dict, side: str) -> str:
+    """Which broker this user's cloud bot should trade on. Per-side override
+    APEX_BROKER_<SIDE> wins over the per-user default APEX_CLOUD_BROKER;
+    defaults to 'alpaca' so nothing regresses for existing users."""
+    return str(blob.get(f"APEX_BROKER_{side.upper()}")
+               or blob.get("APEX_CLOUD_BROKER") or "alpaca").lower()
+
+
+def _ibkr_client_id(blob: dict, side: str) -> int:
+    """Stable, collision-resistant clientId for this side on the user's
+    shared gateway. Honors a desktop-synced IBKR_CLIENT_ID_<SIDE> when set,
+    else derives a deterministic id from the side name (stable across
+    processes, unlike hash())."""
+    import zlib
+    explicit = blob.get(f"IBKR_CLIENT_ID_{side.upper()}")
+    if explicit:
+        try:
+            return int(explicit)
+        except (TypeError, ValueError):
+            pass
+    return 1 + (zlib.crc32(side.upper().encode()) % 990)
+
+
 def _build_env(user_id: int, side: str) -> dict[str, str]:
     """Return os.environ-style dict for the spawned bot."""
     env = os.environ.copy()
@@ -204,6 +227,22 @@ def _build_env(user_id: int, side: str) -> dict[str, str]:
                    "XAI_API_KEY", "GROQ_API_KEY"):
         if blob.get(ai_key):
             env[ai_key] = blob[ai_key]
+
+    # ── Cloud-IBKR (v4.6.40) ────────────────────────────────────────
+    # When this user's cloud bot is flagged to trade on IBKR, point the
+    # bot at the per-user IB Gateway that start_bot() launched on this
+    # same host (127.0.0.1:user_port). The broker abstraction in
+    # core.broker_client reads APEX_BROKER=='ibkr' and builds the
+    # ledger-backed IBKR shim instead of Alpaca. Each side connects with
+    # its own clientId so they share one gateway without colliding.
+    if _cloud_broker(blob, side) == "ibkr":
+        from . import ibkr_gateway
+        env["APEX_BROKER"]          = "ibkr"
+        env["APEX_ALPACA_MODE"]     = str(
+            blob.get("IBKR_TRADING_MODE", "paper")).lower()
+        env["APEX_IBKR_HOST"]       = "127.0.0.1"
+        env["APEX_IBKR_PORT"]       = str(ibkr_gateway.user_port(user_id))
+        env["APEX_IBKR_CLIENT_ID"]  = str(_ibkr_client_id(blob, side))
 
     # Per-bot AI config: AI_PROVIDER_<SIDE>, AI_MODEL_<SIDE>, AI_MODE_<SIDE>
     # take precedence over the global AI_PROVIDER / AI_MODEL / AI_MODE.
@@ -265,16 +304,34 @@ def start_bot(user_id: int, side: str) -> dict:
                           f"For custom bots, upload the .py first via "
                           f"POST /bots/private/upload."}
 
-    # Validate that we have keys for this bot
+    # Validate that we have credentials for this bot — broker-aware.
     blob = creds.load_credentials(user_id) or {}
     s = side.upper()
-    if not (blob.get(f"ALPACA_API_KEY_{s}") and
-            blob.get(f"ALPACA_SECRET_KEY_{s}")):
-        return {"ok": False,
-                "detail": f"MUST ASSIGN API KEY IN TOOLS. No Alpaca "
-                          f"keys synced for {side}. Open Tools → "
-                          f"ACCOUNT LINKING and Sync your slot keys to "
-                          f"the APEX server."}
+    cloud_broker = _cloud_broker(blob, s)
+    if cloud_broker == "ibkr":
+        # V4.6.40 — IBKR cloud: need a synced paper login and a live
+        # server-side IB Gateway BEFORE we spawn the bot, otherwise it
+        # would just fail to connect on every tick.
+        if not (blob.get("IBKR_USERNAME") and blob.get("IBKR_PASSWORD")):
+            return {"ok": False,
+                    "detail": "No IBKR paper login synced. Open Tools → "
+                              "IBKR, enter your paper username/password and "
+                              "enable 'Run IBKR bots on Oracle', then Sync."}
+        try:
+            from . import ibkr_gateway as _gw
+            _gw.ensure_gateway(
+                user_id, blob["IBKR_USERNAME"], blob["IBKR_PASSWORD"],
+                str(blob.get("IBKR_TRADING_MODE", "paper")).lower())
+        except Exception as e:
+            return {"ok": False, "detail": f"IBKR gateway not ready: {e}"}
+    else:
+        if not (blob.get(f"ALPACA_API_KEY_{s}") and
+                blob.get(f"ALPACA_SECRET_KEY_{s}")):
+            return {"ok": False,
+                    "detail": f"MUST ASSIGN API KEY IN TOOLS. No Alpaca "
+                              f"keys synced for {side}. Open Tools → "
+                              f"ACCOUNT LINKING and Sync your slot keys to "
+                              f"the APEX server."}
 
     if not VENV_PYTHON.exists():
         return {"ok": False,

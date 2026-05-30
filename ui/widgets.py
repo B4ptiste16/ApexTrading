@@ -377,17 +377,34 @@ class BotProcessWidget(QWidget):
         except Exception:
             return "alpaca"
 
+    def _ibkr_cloud_enabled(self) -> bool:
+        """V4.6.40 — True when the user enabled 'Run IBKR bots on Oracle' for
+        the current paper/live mode AND a paper login is stored. APEX runs a
+        per-user IB Gateway on the server, so IBKR bots CAN run on the cloud."""
+        try:
+            from core import data as _D
+            s    = _D.load_settings()
+            mode = s.get("alpaca_mode", "paper")
+            cur  = s.get(f"ibkr_{mode}", {}) or {}
+            return (bool(cur.get("run_on_oracle", False))
+                    and bool(str(cur.get("cloud_username", "")).strip())
+                    and bool(str(cur.get("cloud_password", ""))))
+        except Exception:
+            return False
+
     def _is_cloud_mode(self) -> bool:
         """True if the user has flagged this bot for cloud execution.
 
-        V4.6.39 — IBKR bots can NEVER run on Oracle: the cloud server has no
-        network route to the user's local TWS/Gateway, and the cloud runner is
-        Alpaca-only (it never sets APEX_BROKER). So in IBKR mode we force LOCAL
-        execution regardless of the 'Run on Oracle' toggle — otherwise a bot the
-        user believes is on IBKR would silently keep trading Alpaca on the
-        cloud."""
+        V4.6.39 — IBKR bots used to NEVER run on Oracle (the cloud runner was
+        Alpaca-only and had no route to the user's local TWS/Gateway).
+
+        V4.6.40 — IBKR bots CAN run on Oracle when the user enabled 'Run IBKR
+        bots on Oracle' (Tools → IBKR): APEX launches a per-user IB Gateway on
+        the server logged into their paper account, and the cloud runner sets
+        APEX_BROKER=ibkr. Without that toggle, IBKR bots stay LOCAL so a bot
+        the user believes is on IBKR can't silently trade Alpaca on the cloud."""
         try:
-            if self._broker_mode() == "ibkr":
+            if self._broker_mode() == "ibkr" and not self._ibkr_cloud_enabled():
                 return False
             from core import data as _D
             return _D.is_cloud_bot(self.side)
@@ -851,8 +868,13 @@ class BotProcessWidget(QWidget):
         V4.6.39 — if the desktop is in IBKR mode, an Oracle-resident bot is an
         orphan from a prior Alpaca session (the cloud can't trade IBKR). Don't
         re-attach to it — STOP it so it can't keep trading the Alpaca account
-        behind the user's back, then tell them to run it locally."""
-        _ibkr = (self._broker_mode() == "ibkr")
+        behind the user's back, then tell them to run it locally.
+
+        V4.6.40 — UNLESS the user enabled 'Run IBKR bots on Oracle': then the
+        cloud bot legitimately trades IBKR via the server-side gateway, so we
+        re-attach to it like any Alpaca cloud bot."""
+        _ibkr = (self._broker_mode() == "ibkr"
+                 and not self._ibkr_cloud_enabled())
         def _on(ok, body):
             if not ok:
                 return

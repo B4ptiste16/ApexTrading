@@ -768,6 +768,66 @@ class ToolsTab(QWidget):
 
         s.add(form)
 
+        # ── Cloud 24/7 on Oracle (paper login) ────────────────────────────
+        # V4.6.40 — let IBKR bots run 24/7 on the APEX server WITHOUT the
+        # user keeping TWS/Gateway open locally. APEX runs a per-user IB
+        # Gateway on Oracle, logged into the user's PAPER account. Live is
+        # not offered here because it needs IBKR Mobile 2FA, which can't be
+        # approved head-less.
+        s.add(SectionHeader("CLOUD 24/7  ·  RUN ON ORACLE (PAPER)", C["green"]))
+        cloud_info = QLabel(
+            "Run your IBKR bots 24/7 on the APEX cloud server — no need to keep "
+            "TWS / IB Gateway open on this computer. APEX launches a private "
+            "IB Gateway on the server, logged into your <b>paper</b> account. "
+            "Your login is stored <b>encrypted</b> on the server and used only to "
+            "start your gateway.<br><br>"
+            "⚠ <b>Paper only.</b> Live accounts require IBKR Mobile 2FA approval "
+            "on every login, which can't be done on a head-less server.")
+        cloud_info.setStyleSheet(f"color:{C['muted']};font-size:11px;")
+        cloud_info.setWordWrap(True)
+        s.add(cloud_info)
+
+        cloud_form = QFrame()
+        cloud_form.setStyleSheet(
+            f"background:{C['panel']};border:none;border-radius:8px;")
+        cfl = QGridLayout(cloud_form)
+        cfl.setContentsMargins(16, 14, 16, 14)
+        cfl.setHorizontalSpacing(12)
+        cfl.setVerticalSpacing(10)
+
+        cfl.addWidget(lbl("Paper username"), 0, 0)
+        self._ibkr_cloud_user = QLineEdit()
+        self._ibkr_cloud_user.setPlaceholderText("IBKR paper username")
+        self._ibkr_cloud_user.setText(str(cur.get("cloud_username", "")))
+        cfl.addWidget(self._ibkr_cloud_user, 0, 1)
+
+        cfl.addWidget(lbl("Paper password"), 1, 0)
+        self._ibkr_cloud_pw = QLineEdit()
+        self._ibkr_cloud_pw.setEchoMode(QLineEdit.EchoMode.Password)
+        self._ibkr_cloud_pw.setPlaceholderText("IBKR paper password")
+        self._ibkr_cloud_pw.setText(str(cur.get("cloud_password", "")))
+        cfl.addWidget(self._ibkr_cloud_pw, 1, 1)
+
+        self._ibkr_run_on_oracle = QCheckBox(
+            "Run IBKR bots on Oracle (24/7, this computer can be closed)")
+        self._ibkr_run_on_oracle.setChecked(bool(cur.get("run_on_oracle", False)))
+        self._ibkr_run_on_oracle.setStyleSheet(f"color:{C['text']};font-size:11px;")
+        cfl.addWidget(self._ibkr_run_on_oracle, 2, 0, 1, 2)
+
+        cloud_save_row = QHBoxLayout()
+        cloud_save_btn = QPushButton("☁  Save & sync cloud login")
+        cloud_save_btn.setObjectName("addBotBtn")
+        cloud_save_btn.clicked.connect(self._save_ibkr_cloud_login)
+        self._ibkr_cloud_msg = QLabel("")
+        self._ibkr_cloud_msg.setStyleSheet(f"color:{C['green']};font-size:10px;")
+        cloud_save_row.addWidget(cloud_save_btn)
+        cloud_save_row.addWidget(self._ibkr_cloud_msg)
+        cloud_save_row.addStretch()
+        cloud_save_w = QWidget(); cloud_save_w.setLayout(cloud_save_row)
+        cfl.addWidget(cloud_save_w, 3, 0, 1, 2)
+
+        s.add(cloud_form)
+
         # ── Bot client IDs & % allocation (combined table) ────────────────
         s.add(SectionHeader("BOT  ·  CLIENT IDs & FUND ALLOCATION (%)", C["purple"]))
         bot_info = QLabel(
@@ -1266,6 +1326,141 @@ class ToolsTab(QWidget):
             self._ibkr_msg.setText(f"Save failed: {e}")
             self._ibkr_msg.setStyleSheet(f"color:{C['red']};font-size:10px;")
         QTimer.singleShot(3000, lambda: self._ibkr_msg.setText(""))
+
+    def _ibkr_cloud_credentials(self, settings: dict | None = None) -> dict:
+        """V4.6.40 — return the IBKR cloud-login fields to include in any
+        /credentials sync, read from local settings (ibkr_<mode>). Empty
+        dict when no paper login is stored. APEX_CLOUD_BROKER is only set to
+        'ibkr' when the user enabled 'Run IBKR bots on Oracle'."""
+        try:
+            s = settings if settings is not None else D.load_settings()
+            mode = s.get("alpaca_mode", "paper")
+            cur  = s.get(f"ibkr_{mode}", {}) or {}
+            user = str(cur.get("cloud_username", "")).strip()
+            pw   = str(cur.get("cloud_password", ""))
+            if not (user and pw):
+                return {}
+            run_oracle = bool(cur.get("run_on_oracle", False))
+            return {
+                "IBKR_USERNAME":     user,
+                "IBKR_PASSWORD":     pw,
+                "IBKR_TRADING_MODE": mode,
+                "APEX_CLOUD_BROKER": "ibkr" if run_oracle else "alpaca",
+            }
+        except Exception:
+            return {}
+
+    def _save_ibkr_cloud_login(self):
+        """V4.6.40 — persist the IBKR paper login + 'run on Oracle' toggle
+        locally, then push them (encrypted server-side) to /credentials so
+        the cloud bot_runner can launch this user's IB Gateway 24/7."""
+        try:
+            import json
+            s = D.load_settings()
+            key = getattr(self, "_ibkr_mode_key", "ibkr")
+            cur = dict(s.get(key, {}))
+            cur["cloud_username"] = self._ibkr_cloud_user.text().strip()
+            cur["cloud_password"] = self._ibkr_cloud_pw.text()
+            cur["run_on_oracle"]  = bool(self._ibkr_run_on_oracle.isChecked())
+            s[key] = cur
+            with open(D.SETTINGS_FILE, "w", encoding="utf-8") as f:
+                json.dump(s, f, indent=2)
+        except Exception as e:
+            self._ibkr_cloud_msg.setText(f"Save failed: {e}")
+            self._ibkr_cloud_msg.setStyleSheet(f"color:{C['red']};font-size:10px;")
+            QTimer.singleShot(4000, lambda: self._ibkr_cloud_msg.setText(""))
+            return
+
+        run_oracle = bool(self._ibkr_run_on_oracle.isChecked())
+        user = self._ibkr_cloud_user.text().strip()
+        pw   = self._ibkr_cloud_pw.text()
+        if run_oracle and not (user and pw):
+            self._ibkr_cloud_msg.setText(
+                "✗ Enter your paper username & password to run on Oracle")
+            self._ibkr_cloud_msg.setStyleSheet(f"color:{C['red']};font-size:10px;")
+            QTimer.singleShot(6000, lambda: self._ibkr_cloud_msg.setText(""))
+            return
+
+        # Push to the APEX server credential blob (encrypted at rest).
+        try:
+            from ui.login import load_auth, load_server_url
+        except Exception:
+            self._ibkr_cloud_msg.setText("✓ Saved locally (login module unavailable)")
+            self._ibkr_cloud_msg.setStyleSheet(f"color:{C['orange']};font-size:10px;")
+            QTimer.singleShot(6000, lambda: self._ibkr_cloud_msg.setText(""))
+            return
+
+        stored = load_auth() or {}
+        token  = stored.get("token")
+        if not token:
+            self._ibkr_cloud_msg.setText(
+                "✓ Saved locally — sign in, then save again to sync to cloud")
+            self._ibkr_cloud_msg.setStyleSheet(f"color:{C['orange']};font-size:10px;")
+            QTimer.singleShot(7000, lambda: self._ibkr_cloud_msg.setText(""))
+            return
+
+        ibkr_mode = D.load_settings().get("alpaca_mode", "paper")
+        fields = {
+            "IBKR_USERNAME":     user,
+            "IBKR_PASSWORD":     pw,
+            "IBKR_TRADING_MODE": ibkr_mode,
+            # Tells the cloud bot_runner to trade this user's bots on IBKR
+            # (vs. Alpaca) and launch their gateway. 'alpaca' = run on Alpaca.
+            "APEX_CLOUD_BROKER": "ibkr" if run_oracle else "alpaca",
+        }
+        server_url = load_server_url()
+
+        from PyQt6.QtCore import QThread, pyqtSignal
+
+        class _CloudLoginWorker(QThread):
+            done = pyqtSignal(bool, str)
+
+            def __init__(self, url, tok, new_fields):
+                super().__init__()
+                self.url, self.tok, self.new_fields = url, tok, new_fields
+
+            def run(self):
+                import requests
+                hdr = {"Authorization": f"Bearer {self.tok}"}
+                try:
+                    # PUT /credentials REPLACES the whole blob, so merge the
+                    # new IBKR fields into the user's existing credentials
+                    # (Alpaca keys, AI keys, mode, schedule flags) first.
+                    blob = {}
+                    try:
+                        g = requests.get(f"{self.url}/credentials",
+                                         headers=hdr, timeout=20)
+                        if g.ok and isinstance(g.json(), dict):
+                            blob = g.json()
+                    except Exception:
+                        blob = {}
+                    blob.update(self.new_fields)
+                    r = requests.put(f"{self.url}/credentials",
+                                     json=blob, headers=hdr, timeout=20)
+                    if r.ok:
+                        self.done.emit(True, "")
+                    else:
+                        self.done.emit(False, f"HTTP {r.status_code}: {r.text[:120]}")
+                except Exception as ex:
+                    self.done.emit(False, str(ex))
+
+        def _on_done(ok, err):
+            if ok:
+                msg = ("☁ Cloud login synced — IBKR bots will run on Oracle 24/7"
+                       if run_oracle else
+                       "✓ Synced — IBKR bots will run locally (Oracle run off)")
+                self._ibkr_cloud_msg.setText(msg)
+                self._ibkr_cloud_msg.setStyleSheet(f"color:{C['green']};font-size:10px;")
+            else:
+                self._ibkr_cloud_msg.setText(f"✗ Cloud sync failed: {err}")
+                self._ibkr_cloud_msg.setStyleSheet(f"color:{C['red']};font-size:10px;")
+            QTimer.singleShot(9000, lambda: self._ibkr_cloud_msg.setText(""))
+
+        self._ibkr_cloud_msg.setText("☁ Syncing cloud login…")
+        self._ibkr_cloud_msg.setStyleSheet(f"color:{C['muted']};font-size:10px;")
+        self._cloud_login_worker = _CloudLoginWorker(server_url, token, fields)
+        self._cloud_login_worker.done.connect(_on_done)
+        self._cloud_login_worker.start()
 
     def _test_ibkr_connection(self):
         self._ibkr_msg.setText("Testing…")
@@ -1841,6 +2036,10 @@ class ToolsTab(QWidget):
                     side = k[len("auto_schedule_"):].upper()
                     payload[f"APEX_AUTO_SCHEDULE_{side}"] = (
                         "1" if _s.get(k) else "0")
+            # V4.6.40 — PUT /credentials REPLACES the whole server blob, so
+            # carry the IBKR cloud-login fields (stored under ibkr_<mode>)
+            # along with every Alpaca sync or they'd be wiped server-side.
+            payload.update(self._ibkr_cloud_credentials(_s))
         except Exception:
             payload["APEX_ALPACA_MODE"] = "paper"
         if not payload:
