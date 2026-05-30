@@ -233,13 +233,25 @@ def _position_for(client, alpaca_symbol: str) -> dict:
 def _account_snapshot(client) -> dict:
     try:
         a = client.get_account()
-        return {
+        snap = {
             "cash":          float(a.cash),
             "equity":        float(a.equity),
             "buying_power":  float(a.buying_power),
         }
+        # V4.6.43 — Alpaca's non_marginable_buying_power is the free cash
+        # actually spendable on crypto (it already deducts open-order
+        # reservations + held positions), which is what 'available' in the
+        # broker's reject refers to. The IBKR shim doesn't expose it →
+        # fall back to cash (its ledger/TotalCash already means free funds).
+        nm = getattr(a, "non_marginable_buying_power", None)
+        try:
+            snap["available_cash"] = float(nm) if nm is not None else snap["cash"]
+        except (TypeError, ValueError):
+            snap["available_cash"] = snap["cash"]
+        return snap
     except Exception:
-        return {"cash": 0.0, "equity": 0.0, "buying_power": 0.0}
+        return {"cash": 0.0, "equity": 0.0, "buying_power": 0.0,
+                "available_cash": 0.0}
 
 
 # ── Order execution ─────────────────────────────────────────────
@@ -456,6 +468,46 @@ class BotRunner:
                 print(f"[{self.name}] sleeping  ·  cycle {cycle}  ·  "
                       f"next tick in {remaining}s", flush=True)
 
+    def _cap_to_funds(self, client, symbol: str, action: str,
+                      qty: float, bars):
+        """V4.6.43 — clamp a BUY/COVER qty to the funds actually spendable
+        right now, so an over-sized order shrinks instead of being rejected.
+
+        Re-reads the account live (cash changes as the bot fills earlier
+        symbols in the same cycle). For crypto we use free cash (no margin);
+        for equities we allow the broker's buying power. Leaves a small
+        headroom for fees/slippage and respects whole-share rounding."""
+        try:
+            qty = float(qty or 0)
+        except (TypeError, ValueError):
+            return 0.0
+        if qty <= 0:
+            return qty
+        try:
+            price = float(bars["Close"].squeeze().iloc[-1])
+        except Exception:
+            price = 0.0
+        if price <= 0:
+            return qty   # can't price → don't interfere
+        live = _account_snapshot(client)
+        if self.asset_type == "crypto":
+            # free cash for crypto (no margin) — deducts open orders/positions
+            avail = live.get("available_cash", live.get("cash", 0.0))
+        else:
+            avail = max(live.get("buying_power", 0.0), live.get("cash", 0.0))
+        if avail <= 0:
+            return 0.0
+        max_qty = (avail * 0.97) / price          # 3% headroom for fees/slippage
+        if self.asset_type != "crypto":
+            max_qty = float(int(max_qty))          # whole shares
+        if max_qty <= 0:
+            return 0.0
+        if qty > max_qty:
+            print(f"  CAP    {symbol:<10}  {action} qty {qty:g}→{max_qty:g} "
+                  f"(only ${avail:.2f} free @ ${price:.4f})", flush=True)
+            return max_qty
+        return qty
+
     def _step(self, client, symbol: str, decide, account):
         bars = _fetch_bars(symbol, self.bar_period, self.bar_interval)
         if bars.empty:
@@ -471,6 +523,19 @@ class BotRunner:
         if action == "HOLD":
             print(f"  HOLD   {symbol:<10}  {d['reason']}", flush=True)
             return
+        # V4.6.43 — cash-safety clamp. A strategy may size a BUY off equity
+        # (total account value) rather than free cash, so when most of the
+        # account is already invested it requests more than is available and
+        # the broker rejects it ("insufficient balance"). Cap the BUY to the
+        # funds actually spendable right now so the order succeeds (smaller)
+        # instead of failing outright. Applies to entries only — exits
+        # (SELL / closing) never need cash and are left untouched.
+        if action in ("BUY", "COVER"):
+            d["qty"] = self._cap_to_funds(client, symbol, action, d["qty"], bars)
+            if d["qty"] is None or float(d["qty"]) <= 0:
+                print(f"  SKIP   {symbol:<10}  no free cash to {action} "
+                      f"(already fully invested)", flush=True)
+                return
         try:
             order = _submit(client, alpaca_sym, action, d["qty"])
             print(f"  {action:<6} {symbol:<10}  qty={d['qty']}  "
