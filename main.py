@@ -2618,23 +2618,18 @@ class ApexWindow(QMainWindow):
         its current running state, and restore the UI accordingly.
         V4.6.33 — only resume bots flagged cloud in the CURRENT broker, so a
         cloud bot started under Alpaca doesn't show as running in the IBKR
-        view (cloud lifecycle is keyed by side only on the server).
-        V4.6.39 — in IBKR mode, check EVERY bot tab (not just the per-broker
-        cloud list): the cloud can't trade IBKR, so any Oracle-resident bot is
-        an orphan from an Alpaca session — possibly flagged under a different
-        broker — and cloud_resume_if_running() will stop it rather than resume."""
-        try:
-            ibkr = str(D.load_settings().get("broker_mode", "alpaca")).lower() == "ibkr"
-        except Exception:
-            ibkr = False
+        view.
+        V4.6.41 — cloud instances are keyed per broker on the server now, so
+        we just resume the current broker's cloud-flagged bots; each tab's
+        cloud_resume_if_running() attaches to that broker's instance. (A bot
+        also running on the other broker is independent and resumes when the
+        user switches to that broker.)"""
         try:
             cloud_here = {s.upper() for s in D.get_cloud_bots()}
         except Exception:
             cloud_here = set()
         for side, tab in self._bot_tabs.items():
-            # In IBKR mode we probe every bot so stray Alpaca cloud instances
-            # get stopped; otherwise only the current broker's cloud-flagged ones.
-            if not ibkr and str(side).upper() not in cloud_here:
+            if str(side).upper() not in cloud_here:
                 continue
             bc = getattr(tab, "bot_ctrl", None)
             if bc and hasattr(bc, "cloud_resume_if_running"):

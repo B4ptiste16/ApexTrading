@@ -828,6 +828,13 @@ class BotProcessWidget(QWidget):
             on_done(False, {"detail": "not signed in"})
             return
         url = f"{load_server_url()}{path}"
+        # V4.6.41 — tag bot lifecycle calls with the active broker so the
+        # SAME side can run on Alpaca and IBKR at the same time on the cloud
+        # (the server keys each instance by user+side+broker). The desktop's
+        # current broker mode is the broker for this start/stop/status/logs.
+        if "/bots/" in path:
+            sep = "&" if "?" in path else "?"
+            url = f"{url}{sep}broker={self._broker_mode()}"
 
         class _W(QThread):
             done = _Sig(bool, dict)
@@ -865,37 +872,23 @@ class BotProcessWidget(QWidget):
         the local flag has since been reset. If the server reports
         running:true, restore the UI and resume log-tail polling.
 
-        V4.6.39 — if the desktop is in IBKR mode, an Oracle-resident bot is an
-        orphan from a prior Alpaca session (the cloud can't trade IBKR). Don't
-        re-attach to it — STOP it so it can't keep trading the Alpaca account
-        behind the user's back, then tell them to run it locally.
-
-        V4.6.40 — UNLESS the user enabled 'Run IBKR bots on Oracle': then the
-        cloud bot legitimately trades IBKR via the server-side gateway, so we
-        re-attach to it like any Alpaca cloud bot."""
-        _ibkr = (self._broker_mode() == "ibkr"
-                 and not self._ibkr_cloud_enabled())
+        V4.6.41 — cloud instances are keyed per broker on the server, and
+        _cloud_call tags this query with the desktop's active broker. So we
+        simply attach to THIS broker's instance if it's running. A bot the
+        user is also running on the OTHER broker is independent and left
+        alone — that's the whole point of dual-broker support. (This replaces
+        the v4.6.39/40 'stop the stray Alpaca cloud bot' hack, which is no
+        longer needed now that Alpaca and IBKR cloud bots coexist.)"""
         def _on(ok, body):
             if not ok:
                 return
             if not body.get("running", False):
                 return
-            if _ibkr:
-                self._log(
-                    "☁  Found an Alpaca cloud instance still running on Oracle "
-                    "— stopping it (IBKR bots run locally only, the cloud can't "
-                    "reach your TWS)…", C["red"])
-                def _stopped(ok2, body2):
-                    self._cloud_running = False
-                    self._set_running(False)
-                    self._log("☁  Oracle instance stopped. Press ▶ to run this "
-                              "bot locally on IBKR.", C["muted"])
-                self._cloud_call("POST", f"/bots/{self.side}/stop", _stopped)
-                return
             self._cloud_running = True
             self._set_running(True)
+            brk = str(body.get("broker", self._broker_mode())).upper()
             self._log(
-                f"☁  Already running on Oracle (resumed) · pid "
+                f"☁  Already running on Oracle [{brk}] (resumed) · pid "
                 f"{body.get('pid','?')}",
                 C["green"])
             self._start_cloud_polling()

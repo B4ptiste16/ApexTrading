@@ -59,9 +59,15 @@ STATE_ROOT  = Path(os.environ.get("APEX_IBKR_GW_STATE", "/opt/apex_users"))
 _LAUNCH_TIMEOUT_S = 90
 # Range of ports we hand out (BASE_PORT .. BASE_PORT+_PORT_SPAN-1).
 _PORT_SPAN = 400
+# Virtual-display base. Oracle Linux has no `xvfb-run` (that's a Debian
+# script), so we drive the `Xvfb` binary directly and hand each user a
+# deterministic display number (:DISPLAY_BASE + user%span).
+_DISPLAY_BASE = int(os.environ.get("APEX_IBKR_GW_DISPLAY_BASE", "100"))
 
-# user_id -> Popen
+# user_id -> Popen  (the IB Gateway / IBC process)
 _PROCS: dict[int, subprocess.Popen] = {}
+# user_id -> Popen  (the per-user Xvfb backing the gateway's display)
+_XVFB: dict[int, subprocess.Popen] = {}
 _LOCK = threading.Lock()
 
 
@@ -153,14 +159,60 @@ def _ibcstart_script() -> Path:
 def _preflight() -> Optional[str]:
     """Return a human-readable reason the gateway can't be launched, or
     None when the host looks provisioned."""
-    if shutil.which("xvfb-run") is None:
-        return "xvfb-run not found (apt install xvfb)"
+    if shutil.which("Xvfb") is None:
+        return "Xvfb not found (dnf install xorg-x11-server-Xvfb)"
     sh = _ibcstart_script()
     if not sh.exists():
         return f"IBC not installed at {sh}"
     if not TWS_PATH.exists():
         return f"IB Gateway not installed at {TWS_PATH}"
     return None
+
+
+# ── Virtual display (Xvfb, managed directly — no xvfb-run on RHEL) ───────
+
+def _display_num(user_id: int) -> int:
+    """Deterministic X display number for this user."""
+    return _DISPLAY_BASE + (int(user_id) % _PORT_SPAN)
+
+
+def _ensure_xvfb(user_id: int) -> str:
+    """Make sure an Xvfb is backing this user's display; return ':N'.
+    Idempotent — reuses a live Xvfb (lock file present + pid alive)."""
+    n = _display_num(user_id)
+    disp = f":{n}"
+    with _LOCK:
+        proc = _XVFB.get(user_id)
+        if proc is not None and proc.poll() is None:
+            return disp
+        # A previous run (or another worker) may already own this display.
+        if Path(f"/tmp/.X{n}-lock").exists():
+            return disp
+        xlog = open(_user_dir(user_id) / "xvfb.log", "w",
+                    buffering=1, encoding="utf-8")
+        proc = subprocess.Popen(
+            ["Xvfb", disp, "-screen", "0", "1024x768x16", "-nolisten", "tcp"],
+            stdout=xlog, stderr=subprocess.STDOUT, start_new_session=True)
+        _XVFB[user_id] = proc
+    # Give Xvfb a moment to create the display socket.
+    for _ in range(20):
+        if Path(f"/tmp/.X{n}-lock").exists():
+            break
+        time.sleep(0.1)
+    return disp
+
+
+def _stop_xvfb(user_id: int) -> None:
+    with _LOCK:
+        proc = _XVFB.pop(user_id, None)
+    if proc and proc.poll() is None:
+        try:
+            os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+        except OSError:
+            try:
+                proc.terminate()
+            except OSError:
+                pass
 
 
 def _read_pid(user_id: int) -> int:
@@ -217,8 +269,10 @@ def ensure_gateway(user_id: int, username: str, password: str,
     settings_dir = _user_dir(user_id) / "tws_settings"
     settings_dir.mkdir(parents=True, exist_ok=True)
 
+    # Bring up this user's virtual display (Oracle Linux has no xvfb-run).
+    display = _ensure_xvfb(user_id)
+
     cmd = [
-        "xvfb-run", "-a",
         str(_ibcstart_script()), TWS_VERSION,
         "--gateway",
         f"--mode={mode}",
@@ -233,13 +287,17 @@ def ensure_gateway(user_id: int, username: str, password: str,
     if JAVA_PATH:
         cmd.append(f"--java-path={JAVA_PATH}")
 
+    launch_env = dict(os.environ)
+    launch_env["DISPLAY"] = display
+
     log_fh = open(_log_file(user_id), "w", buffering=1, encoding="utf-8")
     log_fh.write(f"=== ibgateway launch user={user_id} mode={mode} "
-                 f"port={port} {time.strftime('%Y-%m-%d %H:%M:%S')} ===\n")
+                 f"port={port} display={display} "
+                 f"{time.strftime('%Y-%m-%d %H:%M:%S')} ===\n")
     log_fh.flush()
     try:
         proc = subprocess.Popen(
-            cmd, cwd=str(IBC_PATH),
+            cmd, cwd=str(IBC_PATH), env=launch_env,
             stdout=log_fh, stderr=subprocess.STDOUT,
             start_new_session=True,   # detach: survives uvicorn reloads
         )
@@ -302,6 +360,8 @@ def stop_gateway(user_id: int) -> dict:
         _pid_file(user_id).unlink(missing_ok=True)
     except OSError:
         pass
+    # Tear down the backing virtual display too.
+    _stop_xvfb(user_id)
     return {"ok": True}
 
 

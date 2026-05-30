@@ -36,10 +36,16 @@ echo "    IB Gateway → $TWS_PATH  (channel: $IBGW_CHANNEL)"
 echo "    IBC        → $IBC_PATH  (v$IBC_VERSION)"
 echo ""
 
-# ── 1. Xvfb + unzip (IB Gateway is a Java GUI app even headless) ────────────────
-echo "▸ Installing Xvfb + tools..."
-sudo apt-get update -qq
-sudo apt-get install -y -qq xvfb unzip curl libxtst6 libxrender1 libxi6
+# ── 1. Xvfb + X libs (IB Gateway is a Java GUI app even headless) ───────────────
+# Oracle Linux 9 / RHEL — use dnf. There is NO `xvfb-run` here (that's a Debian
+# script); we install the Xvfb server binary and ibkr_gateway.py drives it
+# directly. The X libraries below are what the bundled Java AWT/Swing needs.
+echo "▸ Installing Xvfb + X libraries (dnf)..."
+sudo dnf install -y -q \
+    xorg-x11-server-Xvfb xorg-x11-xauth unzip curl \
+    libXtst libXrender libXi libXext libX11 libXScrnSaver \
+    libXrandr libXcursor libXcomposite libXdamage libXfixes \
+    freetype fontconfig dejavu-sans-fonts gtk3 2>&1 | tail -3 || true
 
 # ── 2. IB Gateway (bundled JRE — no separate Java install needed) ──────────────
 if [ -x "$TWS_PATH/ibgateway" ] || ls "$TWS_PATH"/*/ibgateway >/dev/null 2>&1; then
@@ -92,9 +98,9 @@ sudo chmod -R a+rX "$IBC_PATH" "$TWS_PATH" 2>/dev/null || true
 # ── 5. Verify the pieces ibkr_gateway.py checks in _preflight() ────────────────
 echo ""
 echo "▸ Preflight verification:"
-command -v xvfb-run >/dev/null 2>&1 \
-    && echo "  ✓ xvfb-run on PATH" \
-    || echo "  ✗ xvfb-run MISSING (apt install xvfb)"
+command -v Xvfb >/dev/null 2>&1 \
+    && echo "  ✓ Xvfb on PATH" \
+    || echo "  ✗ Xvfb MISSING (dnf install xorg-x11-server-Xvfb)"
 [ -f "$IBC_PATH/scripts/ibcstart.sh" ] \
     && echo "  ✓ IBC at $IBC_PATH/scripts/ibcstart.sh" \
     || echo "  ✗ IBC ibcstart.sh MISSING"

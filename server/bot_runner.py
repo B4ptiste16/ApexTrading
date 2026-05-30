@@ -68,13 +68,17 @@ class _RunningBot:
     user_id:    int
     side:       str
     pid:        int
+    broker:     str = "alpaca"
     started_at: float = field(default_factory=time.time)
     log_path:   Optional[Path] = None
     proc:       Optional[subprocess.Popen] = None
 
 
-# (user_id, side) → _RunningBot
-_RUNNING: dict[tuple[int, str], _RunningBot] = {}
+# (user_id, side, broker) → _RunningBot
+# V4.6.41 — the instance key includes the broker so the SAME bot can run on
+# Alpaca AND IBKR at the same time (e.g. crypto on both). Alpaca keeps the
+# legacy on-disk paths (no migration); other brokers get a nested namespace.
+_RUNNING: dict[tuple[int, str, str], _RunningBot] = {}
 _LOCK    = threading.Lock()
 
 
@@ -86,25 +90,41 @@ def _user_data_dir(user_id: int) -> Path:
     return p
 
 
-def _log_path(user_id: int, side: str) -> Path:
-    d = _user_data_dir(user_id) / "logs"
+def _instance_root(user_id: int, broker: str = "alpaca") -> Path:
+    """V4.6.41 — per-broker root for a bot's logs / pids / state.
+
+    Alpaca keeps the LEGACY layout (the user_<id> dir itself) so existing
+    cloud bots and their state are untouched — zero migration. Any other
+    broker (ibkr) gets its own nested sub-dir so the SAME side can run on
+    both brokers concurrently without their pid/log/state files colliding."""
+    base = _user_data_dir(user_id)
+    if broker and broker.lower() != "alpaca":
+        d = base / broker.lower()
+        d.mkdir(parents=True, exist_ok=True)
+        return d
+    return base
+
+
+def _log_path(user_id: int, side: str, broker: str = "alpaca") -> Path:
+    d = _instance_root(user_id, broker) / "logs"
     d.mkdir(exist_ok=True)
     return d / f"{side.lower()}.log"
 
 
-def _pid_file(user_id: int, side: str) -> Path:
+def _pid_file(user_id: int, side: str, broker: str = "alpaca") -> Path:
     """v1.2.1 — cross-worker dedup. uvicorn runs with --workers 2, so each
     worker has its own in-memory _RUNNING dict. Without a shared
     coordination point, two consecutive /bots/X/start calls hit different
     workers and spawn duplicate bot processes. We persist the spawned PID
-    to a file under /opt/apex_users/user_<id>/pids/ that all workers read."""
-    d = _user_data_dir(user_id) / "pids"
+    to a file under /opt/apex_users/user_<id>/[broker/]pids/ that all
+    workers read."""
+    d = _instance_root(user_id, broker) / "pids"
     d.mkdir(exist_ok=True)
     return d / f"{side.lower()}.pid"
 
 
-def _read_pid_file(user_id: int, side: str) -> int:
-    p = _pid_file(user_id, side)
+def _read_pid_file(user_id: int, side: str, broker: str = "alpaca") -> int:
+    p = _pid_file(user_id, side, broker)
     if not p.exists():
         return 0
     try:
@@ -113,20 +133,33 @@ def _read_pid_file(user_id: int, side: str) -> int:
         return 0
 
 
-def _write_pid_file(user_id: int, side: str, pid: int) -> None:
+def _write_pid_file(user_id: int, side: str, pid: int,
+                    broker: str = "alpaca") -> None:
     try:
-        _pid_file(user_id, side).write_text(str(pid), encoding="utf-8")
+        _pid_file(user_id, side, broker).write_text(str(pid), encoding="utf-8")
     except Exception as e:
         print(f"[bot_runner] pid-file write failed: {e}", flush=True)
 
 
-def _clear_pid_file(user_id: int, side: str) -> None:
-    p = _pid_file(user_id, side)
+def _clear_pid_file(user_id: int, side: str, broker: str = "alpaca") -> None:
+    p = _pid_file(user_id, side, broker)
     try:
         if p.exists():
             p.unlink()
     except Exception:
         pass
+
+
+def _resolve_broker(user_id: int, side: str,
+                    broker: Optional[str] = None) -> str:
+    """V4.6.41 — the broker an instance belongs to. An explicit value (from
+    the desktop's ?broker= query param) wins; otherwise fall back to the
+    per-user/per-side default in the credential blob so old clients that
+    don't pass a broker keep their existing single-broker behavior."""
+    if broker:
+        return broker.lower()
+    blob = creds.load_credentials(user_id) or {}
+    return _cloud_broker(blob, side)
 
 
 def _pid_alive(pid: int) -> bool:
@@ -187,10 +220,14 @@ def _ibkr_client_id(blob: dict, side: str) -> int:
     return 1 + (zlib.crc32(side.upper().encode()) % 990)
 
 
-def _build_env(user_id: int, side: str) -> dict[str, str]:
+def _build_env(user_id: int, side: str,
+               broker: str = "alpaca") -> dict[str, str]:
     """Return os.environ-style dict for the spawned bot."""
     env = os.environ.copy()
-    env["APEX_DATA_DIR"]    = str(_user_data_dir(user_id))
+    # V4.6.41 — broker-scoped state dir so Alpaca and IBKR instances of the
+    # same side keep separate positions / ledger / caches. Alpaca keeps the
+    # legacy user_<id> dir (no migration for existing cloud bots).
+    env["APEX_DATA_DIR"]    = str(_instance_root(user_id, broker))
     env["APEX_BOT_SIDE"]    = side.upper()
     env["PYTHONIOENCODING"] = "utf-8"
     env["PYTHONPATH"]       = str(BOTS_DIR)
@@ -235,7 +272,7 @@ def _build_env(user_id: int, side: str) -> dict[str, str]:
     # core.broker_client reads APEX_BROKER=='ibkr' and builds the
     # ledger-backed IBKR shim instead of Alpaca. Each side connects with
     # its own clientId so they share one gateway without colliding.
-    if _cloud_broker(blob, side) == "ibkr":
+    if (broker or "alpaca").lower() == "ibkr":
         from . import ibkr_gateway
         env["APEX_BROKER"]          = "ibkr"
         env["APEX_ALPACA_MODE"]     = str(
@@ -258,39 +295,46 @@ def _build_env(user_id: int, side: str) -> dict[str, str]:
 
 # ── Public API ──────────────────────────────────────────────────────
 
-def is_running(user_id: int, side: str) -> bool:
+def is_running(user_id: int, side: str, broker: str = "alpaca") -> bool:
     """v1.2.1 — first consult the on-disk PID file so any uvicorn worker
     sees bots spawned by any other worker. Falls back to the in-memory
-    registry for completeness."""
+    registry for completeness.  V4.6.41 — scoped per broker."""
     s = side.upper()
+    b = (broker or "alpaca").lower()
     # 1. PID file — cross-worker source of truth
-    pid = _read_pid_file(user_id, s)
+    pid = _read_pid_file(user_id, s, b)
     if pid and _pid_alive(pid):
         return True
     if pid and not _pid_alive(pid):
-        _clear_pid_file(user_id, s)
+        _clear_pid_file(user_id, s, b)
     # 2. Worker-local registry (still useful for proc / log handles)
-    key = (user_id, s)
+    key = (user_id, s, b)
     bot = _RUNNING.get(key)
     if bot is None:
         return False
     if _pid_alive(bot.pid):
         # Restore the missing PID file (e.g. crashed before write)
-        _write_pid_file(user_id, s, bot.pid)
+        _write_pid_file(user_id, s, bot.pid, b)
         return True
     with _LOCK:
         _RUNNING.pop(key, None)
     return False
 
 
-def start_bot(user_id: int, side: str) -> dict:
-    """Spawn the bot. Returns a small status dict for the API caller."""
+def start_bot(user_id: int, side: str, broker: Optional[str] = None) -> dict:
+    """Spawn the bot. Returns a small status dict for the API caller.
+
+    V4.6.41 — `broker` (from the desktop's ?broker= param) selects which
+    broker this instance trades on, so the SAME side can run on Alpaca and
+    IBKR concurrently. When omitted, falls back to the per-user default."""
     s = side.upper()
-    key = (user_id, s)
-    if is_running(user_id, side):
+    b = _resolve_broker(user_id, s, broker)
+    key = (user_id, s, b)
+    if is_running(user_id, side, b):
         existing_pid = (_RUNNING[key].pid if key in _RUNNING
-                        else _read_pid_file(user_id, s))
-        return {"ok": True, "already_running": True, "pid": existing_pid}
+                        else _read_pid_file(user_id, s, b))
+        return {"ok": True, "already_running": True, "pid": existing_pid,
+                "broker": b}
 
     # V4.0.2 — try built-in first; fall back to a privately-uploaded
     # custom bot's .py file. Custom bots are run from an absolute path
@@ -304,10 +348,11 @@ def start_bot(user_id: int, side: str) -> dict:
                           f"For custom bots, upload the .py first via "
                           f"POST /bots/private/upload."}
 
-    # Validate that we have credentials for this bot — broker-aware.
+    # Validate that we have credentials for this bot — broker-aware. The
+    # explicit broker (not the per-user default) drives which creds we need.
     blob = creds.load_credentials(user_id) or {}
     s = side.upper()
-    cloud_broker = _cloud_broker(blob, s)
+    cloud_broker = b
     if cloud_broker == "ibkr":
         # V4.6.40 — IBKR cloud: need a synced paper login and a live
         # server-side IB Gateway BEFORE we spawn the bot, otherwise it
@@ -337,8 +382,8 @@ def start_bot(user_id: int, side: str) -> dict:
         return {"ok": False,
                 "detail": f"Python venv not found at {VENV_PYTHON}."}
 
-    log_path = _log_path(user_id, side)
-    env      = _build_env(user_id, side)
+    log_path = _log_path(user_id, side, b)
+    env      = _build_env(user_id, side, b)
 
     if module is not None:
         bot_file = BOTS_DIR / f"{module}.py"
@@ -424,27 +469,28 @@ def start_bot(user_id: int, side: str) -> dict:
 
     with _LOCK:
         _RUNNING[key] = _RunningBot(
-            user_id=user_id, side=side.upper(),
-            pid=proc.pid, log_path=log_path, proc=proc,
+            user_id=user_id, side=side.upper(), pid=proc.pid,
+            broker=b, log_path=log_path, proc=proc,
         )
-    _write_pid_file(user_id, side, proc.pid)
-    return {"ok": True, "pid": proc.pid,
+    _write_pid_file(user_id, side, proc.pid, b)
+    return {"ok": True, "pid": proc.pid, "broker": b,
             "log": str(log_path)}
 
 
-def stop_bot(user_id: int, side: str) -> dict:
+def stop_bot(user_id: int, side: str, broker: Optional[str] = None) -> dict:
     s = side.upper()
-    key = (user_id, s)
+    b = _resolve_broker(user_id, s, broker)
+    key = (user_id, s, b)
     # PID file is the cross-worker source of truth; fall back to the
     # worker-local registry only when the file is gone.
-    pid = _read_pid_file(user_id, s)
+    pid = _read_pid_file(user_id, s, b)
     if not pid:
         bot = _RUNNING.get(key)
         pid = bot.pid if bot else 0
     if not pid or not _pid_alive(pid):
         with _LOCK:
             _RUNNING.pop(key, None)
-        _clear_pid_file(user_id, s)
+        _clear_pid_file(user_id, s, b)
         return {"ok": True, "not_running": True}
     try:
         os.killpg(os.getpgid(pid), signal.SIGTERM)
@@ -463,63 +509,78 @@ def stop_bot(user_id: int, side: str) -> dict:
             pass
     with _LOCK:
         _RUNNING.pop(key, None)
-    _clear_pid_file(user_id, s)
-    return {"ok": True}
+    _clear_pid_file(user_id, s, b)
+    return {"ok": True, "broker": b}
 
 
-def status(user_id: int, side: str) -> dict:
+def status(user_id: int, side: str, broker: Optional[str] = None) -> dict:
     s = side.upper()
-    pid = _read_pid_file(user_id, s)
+    b = _resolve_broker(user_id, s, broker)
+    pid = _read_pid_file(user_id, s, b)
     if pid and _pid_alive(pid):
-        bot = _RUNNING.get((user_id, s))
-        return {"running": True, "pid": pid,
+        bot = _RUNNING.get((user_id, s, b))
+        return {"running": True, "pid": pid, "broker": b,
                 "uptime_s": (round(time.time() - bot.started_at, 1)
                              if bot else None)}
     if pid:
-        _clear_pid_file(user_id, s)
-    bot = _RUNNING.get((user_id, s))
+        _clear_pid_file(user_id, s, b)
+    bot = _RUNNING.get((user_id, s, b))
     if bot and _pid_alive(bot.pid):
-        _write_pid_file(user_id, s, bot.pid)
-        return {"running": True, "pid": bot.pid,
+        _write_pid_file(user_id, s, bot.pid, b)
+        return {"running": True, "pid": bot.pid, "broker": b,
                 "uptime_s": round(time.time() - bot.started_at, 1)}
-    return {"running": False}
+    return {"running": False, "broker": b}
 
 
 def list_running(user_id: int) -> list[dict]:
     out: list[dict] = []
-    seen: set[str] = set()
-    # Iterate PID files first (cross-worker truth)
+    seen: set[tuple[str, str]] = set()
+    base = _user_data_dir(user_id)
+    # V4.6.41 — scan the legacy Alpaca pid dir (user_<id>/pids) AND each
+    # per-broker nested dir (user_<id>/<broker>/pids), so a side running on
+    # both brokers shows up twice (once per broker).
+    pid_dirs = [("alpaca", base / "pids")]
     try:
-        pid_dir = _user_data_dir(user_id) / "pids"
-        if pid_dir.exists():
+        for child in base.iterdir():
+            sub = child / "pids"
+            if child.is_dir() and sub.exists():
+                pid_dirs.append((child.name.lower(), sub))
+    except Exception:
+        pass
+    try:
+        for brk, pid_dir in pid_dirs:
+            if not pid_dir.exists():
+                continue
             for pf in pid_dir.glob("*.pid"):
                 side = pf.stem.upper()
-                pid  = _read_pid_file(user_id, side)
+                pid  = _read_pid_file(user_id, side, brk)
                 if pid and _pid_alive(pid):
-                    bot = _RUNNING.get((user_id, side))
+                    bot = _RUNNING.get((user_id, side, brk))
                     out.append({
-                        "side": side, "pid": pid,
+                        "side": side, "broker": brk, "pid": pid,
                         "uptime_s": (round(time.time() - bot.started_at, 1)
                                      if bot else None),
                     })
-                    seen.add(side)
+                    seen.add((side, brk))
                 elif pid:
-                    _clear_pid_file(user_id, side)
+                    _clear_pid_file(user_id, side, brk)
     except Exception as e:
         print(f"[bot_runner] list_running pid scan: {e}", flush=True)
     # Fall through to in-memory entries this worker spawned
-    for (uid, side), bot in list(_RUNNING.items()):
-        if uid != user_id or side in seen:
+    for (uid, side, brk), bot in list(_RUNNING.items()):
+        if uid != user_id or (side, brk) in seen:
             continue
         if not _pid_alive(bot.pid):
             continue
-        out.append({"side": side, "pid": bot.pid,
+        out.append({"side": side, "broker": brk, "pid": bot.pid,
                     "uptime_s": round(time.time() - bot.started_at, 1)})
     return out
 
 
-def tail_log(user_id: int, side: str, n_chars: int = MAX_LOG_TAIL) -> str:
-    p = _log_path(user_id, side)
+def tail_log(user_id: int, side: str, n_chars: int = MAX_LOG_TAIL,
+             broker: Optional[str] = None) -> str:
+    b = _resolve_broker(user_id, side, broker)
+    p = _log_path(user_id, side, b)
     if not p.exists():
         return ""
     try:

@@ -1473,38 +1473,42 @@ def api_makebot_price(authorization: str | None = Header(default=None)):
 # ──────────────────────────────────────────────────────────────────────────────
 
 @app.post("/bots/{side}/start")
-def api_bot_start(side: str,
+def api_bot_start(side: str, broker: str | None = None,
                   authorization: str | None = Header(default=None)):
+    # V4.6.41 — optional ?broker= lets the same side run on Alpaca AND IBKR
+    # concurrently. Omitted → the user's per-side default (back-compat).
     user   = _current_user(authorization)
-    result = bot_runner.start_bot(user["id"], side)
+    result = bot_runner.start_bot(user["id"], side, broker)
     if not result.get("ok"):
         raise HTTPException(400, result.get("detail", "start failed"))
     return result
 
 
 @app.post("/bots/{side}/stop")
-def api_bot_stop(side: str,
+def api_bot_stop(side: str, broker: str | None = None,
                  authorization: str | None = Header(default=None)):
     user   = _current_user(authorization)
-    result = bot_runner.stop_bot(user["id"], side)
+    result = bot_runner.stop_bot(user["id"], side, broker)
     if not result.get("ok"):
         raise HTTPException(500, result.get("detail", "stop failed"))
     return result
 
 
 @app.get("/bots/{side}/status")
-def api_bot_status(side: str,
+def api_bot_status(side: str, broker: str | None = None,
                    authorization: str | None = Header(default=None)):
     user = _current_user(authorization)
-    return bot_runner.status(user["id"], side)
+    return bot_runner.status(user["id"], side, broker)
 
 
 @app.get("/bots/{side}/logs")
-def api_bot_logs(side: str, tail: int = 4000,
+def api_bot_logs(side: str, tail: int = 4000, broker: str | None = None,
                  authorization: str | None = Header(default=None)):
     user = _current_user(authorization)
     return {"side": side.upper(),
-            "log":  bot_runner.tail_log(user["id"], side, n_chars=min(tail, 50_000))}
+            "log":  bot_runner.tail_log(user["id"], side,
+                                        n_chars=min(tail, 50_000),
+                                        broker=broker)}
 
 
 @app.get("/bots/running")
