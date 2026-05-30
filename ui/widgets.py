@@ -421,19 +421,24 @@ class BotProcessWidget(QWidget):
 
         if _broker == "ibkr" and not self._is_non_trading_script():
             from PyQt6.QtWidgets import QMessageBox as _QMB
-            # V4.6.36 — LONG is now broker-aware (Phase 2A). SHORT and DAY
-            # still call alpaca-py directly and stay blocked in IBKR mode.
-            _blocked_builtins = ("SHORT", "DAY")
+            # V4.6.38 — LONG and SHORT are now broker-aware (route through
+            # core.broker_client.get_broker_client, ledger-backed on IBKR).
+            # DAY stays blocked: it places Alpaca bracket orders (OCO +
+            # stop-loss + take-profit legs) and the IBKR shim only supports
+            # market orders. Running DAY on IBKR would strip its protective
+            # legs, so we refuse rather than trade it unsafely.
+            _blocked_builtins = ("DAY",)
             if str(self.side).upper() in _blocked_builtins:
                 _QMB.information(
                     self.window(),
-                    "Built-in bot not yet wired to IBKR",
-                    f"<b>{self.side}</b> still uses Alpaca's order API "
-                    f"directly. Refactoring it to the broker abstraction is "
-                    f"the next release.<br><br>"
-                    f"LONG and any custom bot (Make Bot) DO execute through "
-                    f"IBKR in this release — try one of those, or switch to "
-                    f"Alpaca to run {self.side}.")
+                    "DAY bot not available on IBKR",
+                    f"<b>{self.side}</b> relies on <b>bracket orders</b> "
+                    f"(stop-loss + take-profit legs). IBKR support in this "
+                    f"release executes market orders only, so running "
+                    f"{self.side} here would drop its protective legs.<br><br>"
+                    f"LONG, SHORT and any custom bot (Make Bot) DO execute "
+                    f"through IBKR — try one of those, or switch to Alpaca to "
+                    f"run {self.side}.")
                 return
             # Custom/framework bot — verify IBKR readiness before launch.
             _amode = _settings.get("alpaca_mode", "paper")
@@ -521,7 +526,7 @@ class BotProcessWidget(QWidget):
         # V3.1.5 — if the user has locked their bot library, the file
         # on disk is .apex (encrypted). Find whatever's actually there,
         # decrypt to a short-lived temp .py, then run THAT.
-        run_path = self.script_path
+        run_path = self._broker_script_path()
         self._tmp_script: Optional[Path] = None
         if not frozen:
             if not run_path.exists() and self.script_path.suffix in (".py", ".apex"):
@@ -554,6 +559,10 @@ class BotProcessWidget(QWidget):
         # Pass DATA_DIR explicitly so bot scripts' load_dotenv() always
         # finds the right .env regardless of working directory.
         env.insert("APEX_DATA_DIR", str(DATA_DIR))
+        # V4.6.38 — the bot's registry slug. Bots key their per-broker trade
+        # log AND (on IBKR) their sub-portfolio ledger off this, so it must be
+        # set for local launches too (the cloud runner already sets it).
+        env.insert("APEX_BOT_SIDE", str(self.side).upper())
         # V4.6.5 — per-bot universe override.
         # V4.6.13 — resolve the chosen UNIVERSE BOT (script_id) to its
         # target .txt file at launch time. The bot reads that file as
@@ -628,7 +637,7 @@ class BotProcessWidget(QWidget):
             builtin = str(self.side).upper() in ("LONG", "SHORT", "DAY")
             if not builtin:
                 try:
-                    custom_path = str(self.script_path)
+                    custom_path = str(self._broker_script_path())
                     if custom_path and "universe_manager" not in custom_path.lower():
                         args.append(custom_path)
                 except Exception:
@@ -644,6 +653,35 @@ class BotProcessWidget(QWidget):
                       "This is normal — wait for its header.", C["muted"])
         else:
             self._log("Failed to start process", C["red"])
+
+    def _broker_script_path(self):
+        """V4.6.38 — IBKR custom bots run from a SEPARATE file
+        (bots/<broker>/<name>) so the copy trading on IBKR can diverge from the
+        Alpaca original (different sub-portfolio, possibly hand-edited later).
+        The file is created by copying the Alpaca source the first time it's
+        needed. Built-ins, the universe manager, encrypted (.apex) libraries
+        and the Alpaca broker all fall through to the original path unchanged."""
+        sp = self.script_path
+        try:
+            if str(self.side).upper() in ("LONG", "SHORT", "DAY", "UNIVERSE"):
+                return sp
+            import core.data as _D
+            broker = str(_D.load_settings().get("broker_mode", "alpaca")).lower()
+            if broker == "alpaca" or Path(sp).suffix != ".py":
+                return sp
+            dest_dir = DATA_DIR / "bots" / broker
+            dest_dir.mkdir(parents=True, exist_ok=True)
+            dest = dest_dir / Path(sp).name
+            if not dest.exists() and Path(sp).exists():
+                import shutil
+                shutil.copy2(sp, dest)
+                self._log(f"Created {broker} copy → bots/{broker}/{Path(sp).name} "
+                          f"(edits here won't affect the Alpaca version)",
+                          C["muted"])
+            return dest if dest.exists() else sp
+        except Exception as e:
+            print(f"[bot] broker script resolve failed: {e}")
+            return sp
 
     # Map pip-install names → importable module names for requirements
     # whose names diverge.  Add entries when AI-generated bots trip on a

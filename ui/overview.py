@@ -980,9 +980,50 @@ class ToolsTab(QWidget):
         self._ibkr_rows_layout.addWidget(row_w)
 
         def _remove(_e=entry):
+            from PyQt6.QtWidgets import QMessageBox, QApplication
+            from PyQt6.QtCore import Qt
+            side = _e["id"]
+            # V4.6.38 — removing a bot liquidates its entire sub-portfolio so
+            # the cash is freed for manual redistribution. Confirm first since
+            # this places real market orders.
+            try:
+                from core import ibkr_lifecycle
+                from core.ledger import ledger_path, Ledger
+                from core.paths import DATA_DIR
+                mode = D.load_settings().get("alpaca_mode", "paper")
+                led = Ledger.load(ledger_path(side, "ibkr", mode, DATA_DIR))
+            except Exception:
+                led, ibkr_lifecycle = None, None
+            holdings = (led.symbols() if led is not None else [])
+            if holdings:
+                resp = QMessageBox.question(
+                    self, "Remove bot & liquidate",
+                    f"Removing <b>{_e['label'].strip()}</b> will MARKET-SELL its "
+                    f"entire sub-portfolio ({len(holdings)} position(s): "
+                    f"{', '.join(holdings)}) and free the cash for manual "
+                    f"redistribution.<br><br>Proceed?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.No)
+                if resp != QMessageBox.StandardButton.Yes:
+                    return
+                QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+                try:
+                    ok, info = ibkr_lifecycle.liquidate_and_remove(side, mode)
+                finally:
+                    QApplication.restoreOverrideCursor()
+                if not ok:
+                    QMessageBox.warning(self, "Liquidation incomplete", info)
+                    return   # keep the row so positions aren't orphaned
+                if hasattr(self, "_ibkr_msg"):
+                    self._ibkr_msg.setText(f"✓ {info}")
+                    self._ibkr_msg.setStyleSheet(
+                        f"color:{C['green']};font-size:10px;")
+            elif led is not None:
+                led.delete()   # empty ledger — just drop it
             if _e in self._ibkr_bot_rows:
                 self._ibkr_bot_rows.remove(_e)
             _e["row_widget"].deleteLater()
+            self._save_ibkr_settings()
             self._ibkr_refresh_add_combo()
             self._update_ibkr_remaining()
 
@@ -1066,6 +1107,16 @@ class ToolsTab(QWidget):
         """Swap the bot in a table row, stop the old bot subprocess, save."""
         old_id = old_entry["id"]
         new_label, new_color = self._ibkr_bot_meta(new_id)
+
+        # V4.6.38 — hand the slot's sub-portfolio (cash + shares) to the new
+        # bot so it inherits the positions and decides what to keep/sell on
+        # its first cycle (off-asset-class holdings auto-liquidate there).
+        try:
+            from core import ibkr_lifecycle
+            mode = D.load_settings().get("alpaca_mode", "paper")
+            ibkr_lifecycle.transfer_ledger(old_id, new_id, mode)
+        except Exception as e:
+            print(f"[ibkr-replace] ledger transfer: {e}")
 
         # Update the row's display
         old_entry["id"] = new_id
@@ -1190,7 +1241,26 @@ class ToolsTab(QWidget):
                 ibkr_data.reset()
             except Exception:
                 pass
-            self._ibkr_msg.setText("✓ Saved")
+            # V4.6.38 — seed a sub-portfolio ledger for any newly-added bot,
+            # granting it allocation% of the account's available cash. Existing
+            # ledgers keep their running balance. Needs a live gateway to read
+            # cash; silently skips (bot falls back to whole-account) if offline.
+            seeded = 0
+            try:
+                from core import ibkr_data, ibkr_lifecycle
+                cash = ibkr_data.available_cash()
+                if cash > 0:
+                    seeded = ibkr_lifecycle.seed_all(
+                        [{"id": r["id"],
+                          "allocation": r["alloc_edit"].text()}
+                         for r in self._ibkr_bot_rows],
+                        cash)
+            except Exception as e:
+                print(f"[ibkr] ledger seed skipped: {e}")
+            msg = "✓ Saved"
+            if seeded:
+                msg = f"✓ Saved · seeded {seeded} sub-portfolio(s)"
+            self._ibkr_msg.setText(msg)
             self._ibkr_msg.setStyleSheet(f"color:{C['green']};font-size:10px;")
         except Exception as e:
             self._ibkr_msg.setText(f"Save failed: {e}")

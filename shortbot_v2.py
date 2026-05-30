@@ -53,9 +53,9 @@ import matplotlib.dates as mdates
 from dotenv import load_dotenv
 from core.ai_client import call_ai_vision, call_ai_text, load_ai_config
 
-from alpaca.trading.client import TradingClient
 from alpaca.trading.requests import MarketOrderRequest
 from alpaca.trading.enums import OrderSide, TimeInForce
+from core.broker_client import get_broker_client
 
 warnings.filterwarnings("ignore")
 
@@ -178,11 +178,12 @@ _AI_PROVIDER, _AI_MODEL, _AI_KEY, _AI_MODE = load_ai_config()
 print(f"[ai] provider={_AI_PROVIDER}  model={_AI_MODEL}  mode={_AI_MODE}")
 
 _ALPACA_IS_PAPER = (os.environ.get("APEX_ALPACA_MODE", "paper").lower() != "live")
-trading_client   = TradingClient(
-    os.getenv("ALPACA_API_KEY_SHORT"),
-    os.getenv("ALPACA_SECRET_KEY_SHORT"),
-    paper=_ALPACA_IS_PAPER
-)
+# V4.6.38 — broker-aware: get_broker_client returns the Alpaca TradingClient on
+# Alpaca, or the IBKR shim (ledger-backed) on IBKR. The shim mimics the alpaca-py
+# surface (get_clock/get_account/get_all_positions/get_open_position/
+# close_position/submit_order) and supports SELL-to-open / BUY-to-cover shorts via
+# the per-bot ledger, so the SAME strategy code runs on both brokers.
+trading_client, _, _ = get_broker_client("stocks")
 
 
 # =========================================================

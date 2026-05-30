@@ -19,9 +19,14 @@ the desktop pre-flight blocks built-ins in IBKR mode with a clear message.
 
 from __future__ import annotations
 
+import math
 import os
 import time
 from types import SimpleNamespace
+
+from core.ledger import get_ledger, normalize_symbol
+
+_EPS = 1e-9
 
 
 # ── PUBLIC API ─────────────────────────────────────────────────────────
@@ -29,12 +34,16 @@ from types import SimpleNamespace
 def get_broker_client(asset_type: str = "stocks"):
     """Return (client, key, sec) for the broker currently selected via the
     APEX_BROKER env var.  Falls back to Alpaca for any unknown broker so
-    nothing regresses.  key/sec are empty strings for non-Alpaca brokers."""
+    nothing regresses.  key/sec are empty strings for non-Alpaca brokers.
+
+    Raises a clear RuntimeError (never a bare KeyError) when credentials or a
+    gateway are missing, so the bot framework can surface a readable message
+    and retry rather than dying."""
     broker = (os.environ.get("APEX_BROKER") or "alpaca").lower()
     if broker == "ibkr":
         return _make_ibkr_client(asset_type), "", ""
-    return _make_alpaca_client(), os.environ.get("ALPACA_API_KEY", ""), \
-        os.environ.get("ALPACA_SECRET_KEY", "")
+    key, sec = _resolve_alpaca_keys()
+    return _make_alpaca_client(key, sec), key, sec
 
 
 def disconnect_broker_client(client) -> None:
@@ -48,10 +57,53 @@ def disconnect_broker_client(client) -> None:
 
 # ── ALPACA (unchanged behavior) ────────────────────────────────────────
 
-def _make_alpaca_client():
+def _resolve_alpaca_keys():
+    """Find this bot's Alpaca key + secret without ever raising KeyError.
+
+    Looks (in order) at the side-specific slot env vars APEX sets
+    (ALPACA_API_KEY_<SIDE>), the generic ALPACA_API_KEY, then re-reads the
+    data-dir .env in case it was populated after launch.  Returns (key, sec)
+    — either may be '' when truly unset, which the caller turns into a clear
+    actionable error."""
+    side = (os.environ.get("APEX_BOT_SIDE") or "").upper()
+    key = sec = ""
+    candidates_key = [f"ALPACA_API_KEY_{side}" if side else "",
+                      "ALPACA_API_KEY"]
+    candidates_sec = [f"ALPACA_SECRET_KEY_{side}" if side else "",
+                      "ALPACA_SECRET_KEY"]
+    for k in candidates_key:
+        if k and os.environ.get(k):
+            key = os.environ[k]
+            break
+    for k in candidates_sec:
+        if k and os.environ.get(k):
+            sec = os.environ[k]
+            break
+    if not key or not sec:
+        # Last resort: the user may have added keys to the data-dir .env after
+        # the process started — reload it and retry the generic names.
+        try:
+            from dotenv import load_dotenv
+            data_dir = os.environ.get("APEX_DATA_DIR")
+            load_dotenv(os.path.join(data_dir, ".env") if data_dir else None,
+                        override=False)
+        except Exception:
+            pass
+        key = key or os.environ.get("ALPACA_API_KEY", "")
+        sec = sec or os.environ.get("ALPACA_SECRET_KEY", "")
+    return key, sec
+
+
+def _make_alpaca_client(key: str = "", sec: str = ""):
     from alpaca.trading.client import TradingClient
-    key = os.environ["ALPACA_API_KEY"]
-    sec = os.environ["ALPACA_SECRET_KEY"]
+    if not key or not sec:
+        key, sec = _resolve_alpaca_keys()
+    if not key or not sec:
+        raise RuntimeError(
+            "Alpaca API keys not found. Open APEX → settings and paste your "
+            "key + secret into a slot assigned to this bot (or add "
+            "ALPACA_API_KEY / ALPACA_SECRET_KEY to the .env in your data "
+            "folder), then start the bot again.")
     mode = (os.environ.get("APEX_ALPACA_MODE") or "paper").lower()
     is_paper = (mode != "live")
     print(f"[broker] Alpaca {'PAPER' if is_paper else 'LIVE'}", flush=True)
@@ -125,10 +177,37 @@ class _IBKRShim:
             self.account = accts[0] if accts else ""
         except Exception:
             self.account = ""
+        # V4.6.38 — per-bot sub-portfolio ledger.  When present, this bot
+        # sees and trades ONLY its allocated cash + shares (the shared IBKR
+        # account is partitioned in software).  None ⇒ whole-account
+        # behavior (no ledger created yet, or non-IBKR), so nothing changes.
+        self.ledger = get_ledger()
+        if self.ledger is not None:
+            print(f"[broker] IBKR sub-portfolio ledger active for "
+                  f"'{self.ledger.bot_id}' — cash=${self.ledger.cash:.2f}  "
+                  f"holdings={self.ledger.holdings}", flush=True)
 
     # ── account ────────────────────────────────────────────────────────
 
     def get_account(self):
+        # V4.6.38 — ledger-scoped account: the bot only ever sees its own
+        # slice's free cash + the market value of the shares it holds.
+        if self.ledger is not None:
+            led = self.ledger
+            holdings_val = 0.0
+            for sym, qty in led.holdings.items():
+                if abs(qty) <= _EPS:
+                    continue
+                holdings_val += qty * self._price(sym)
+            eq = led.cash + holdings_val
+            return SimpleNamespace(
+                portfolio_value=eq,
+                equity=eq,
+                cash=led.cash,
+                buying_power=led.cash,   # a slice can only spend its own cash
+                last_equity=eq,
+            )
+
         vals = self.ib.accountValues()
 
         def pick(tag: str, default: float = 0.0) -> float:
@@ -160,6 +239,29 @@ class _IBKRShim:
     # ── positions ──────────────────────────────────────────────────────
 
     def get_all_positions(self):
+        # V4.6.38 — ledger-scoped: report ONLY the shares in this bot's
+        # slice (priced live), never the whole shared IBKR account.
+        if self.ledger is not None:
+            asset_class = "crypto" if self.asset_type == "crypto" else "us_equity"
+            out = []
+            for sym, qty in self.ledger.holdings.items():
+                if abs(qty) <= _EPS:
+                    continue
+                px = self._price(sym)
+                mv = qty * px
+                out.append(SimpleNamespace(
+                    symbol=sym,
+                    qty=qty,
+                    market_value=mv,
+                    avg_entry_price=0.0,
+                    unrealized_pl=0.0,
+                    unrealized_plpc=0.0,
+                    current_price=px,
+                    side=("short" if qty < 0 else "long"),
+                    asset_class=asset_class,
+                ))
+            return out
+
         out = []
         for it in self.ib.portfolio():
             qty = float(it.position)
@@ -212,6 +314,17 @@ class _IBKRShim:
     # ── close one symbol ───────────────────────────────────────────────
 
     def close_position(self, symbol: str):
+        sym = normalize_symbol(symbol)
+        # V4.6.38 — ledger-scoped: close exactly this slice's holding,
+        # never the whole shared account's position in the symbol.
+        if self.ledger is not None:
+            held = self.ledger.holding(sym)
+            if abs(held) <= _EPS:
+                return None
+            action = "SELL" if held > 0 else "BUY"
+            trade = self._market_order(sym, action, abs(held))
+            self._settle(trade, sym, action, abs(held), self._price(sym))
+            return self._order_result(trade)
         for p in self.get_all_positions():
             if p.symbol != symbol:
                 continue
@@ -219,48 +332,177 @@ class _IBKRShim:
             if qty == 0:
                 return None
             action = "SELL" if p.qty > 0 else "BUY"
-            return self._market_order(symbol, action, qty)
-        return None
+            return self._order_result(self._market_order(symbol, action, qty))
 
     # ── submit (market orders) ─────────────────────────────────────────
 
     def submit_order(self, req):
-        """Accepts alpaca-py MarketOrderRequest.  Anything else raises so
-        the bug surfaces loudly rather than silently mis-trading."""
+        """Accepts alpaca-py MarketOrderRequest (qty- or notional-sized).
+        Anything else raises so the bug surfaces loudly rather than silently
+        mis-trading.  When a ledger is active the order is constrained to —
+        and recorded against — this bot's sub-portfolio."""
         side_str = str(getattr(req, "side", "")).split(".")[-1].upper()
         if side_str not in ("BUY", "SELL"):
             raise ValueError(f"Unsupported order side for IBKR shim: {req.side}")
-        sym = str(req.symbol)
-        # Alpaca crypto pairs come through as BTC/USD — translate to plain BTC.
-        if "/" in sym:
-            sym = sym.split("/", 1)[0]
-        qty = float(getattr(req, "qty", 0) or 0)
-        if qty <= 0:
-            raise ValueError(f"submit_order: non-positive qty {qty}")
-        # Only market orders are wired today — limit / bracket / stop come
-        # with the built-in refactor.
         order_type = type(req).__name__
         if "Market" not in order_type:
             raise NotImplementedError(
                 f"IBKR shim only handles MarketOrderRequest right now, "
-                f"got {order_type}.  Built-in bot refactor will add the rest.")
-        return self._market_order(sym, side_str, qty)
+                f"got {order_type}.")
+        sym = normalize_symbol(req.symbol)
+        qty = float(getattr(req, "qty", 0) or 0)
+        notional = float(getattr(req, "notional", 0) or 0)
+
+        # Resolve a price up-front for notional sizing and/or ledger checks.
+        price = 0.0
+        if notional > 0 and qty <= 0:
+            price = self._price(sym)
+            if price <= 0:
+                raise RuntimeError(f"could not price {sym} for notional order")
+            qty = notional / price
+        if qty <= 0:
+            raise ValueError(f"submit_order: non-positive qty {qty}")
+
+        if self.ledger is not None:
+            if price <= 0:
+                price = self._price(sym)
+            if price <= 0:
+                raise RuntimeError(f"could not price {sym} to size against ledger")
+            qty = self._enforce(side_str, sym, qty, price)
+            qty = self._round_qty(qty)
+            if qty <= _EPS:
+                raise RuntimeError(
+                    f"sub-portfolio can't {side_str} {sym}: "
+                    f"cash=${self.ledger.cash:.2f}  held={self.ledger.holding(sym)}")
+        else:
+            qty = self._round_qty(qty)
+            if qty <= _EPS:
+                raise ValueError(f"submit_order: qty rounds to 0 for {sym}")
+
+        trade = self._market_order(sym, side_str, qty)
+        self._settle(trade, sym, side_str, qty, price)
+        return self._order_result(trade)
+
+    # ── ledger enforcement ──────────────────────────────────────────────
+
+    def _enforce(self, side: str, sym: str, qty: float, price: float) -> float:
+        """Cap `qty` so a buy never spends more than the slice's cash and a
+        short never exceeds the slice's cash as crude margin.  Reducing
+        existing exposure (selling a long, covering a short) is never
+        capped — a bot must always be able to exit."""
+        led = self.ledger
+        held = led.holding(sym)
+        if side == "BUY":
+            if held < -_EPS:
+                # Covering a short is always allowed; only the part that
+                # would flip into a new long needs cash.
+                cover = min(qty, -held)
+                long_extra = qty - cover
+                if long_extra > _EPS and not led.can_buy(long_extra * price):
+                    long_extra = min(long_extra, led.affordable_qty(price))
+                return cover + long_extra
+            # Pure long add — must fit the slice's cash.
+            if not led.can_buy(qty * price):
+                return min(qty, led.affordable_qty(price))
+            return qty
+        # SELL
+        long_part = min(qty, max(held, 0.0))      # closing a long: free
+        short_part = qty - long_part               # opening/adding a short
+        if short_part > _EPS:
+            already_short = max(0.0, -held)
+            room = max(0.0, led.affordable_qty(price) - already_short)
+            short_part = min(short_part, room)
+        return long_part + short_part
+
+    def _settle(self, trade, sym: str, side: str,
+                req_qty: float, est_price: float) -> None:
+        """Read the fill and write it back to the ledger.  No-op without a
+        ledger.  Falls back to the requested qty / estimated price if the
+        gateway hasn't reported a fill yet (e.g. market closed)."""
+        if self.ledger is None:
+            return
+        filled, avg = self._fill_info(trade)
+        if filled <= _EPS:
+            filled = req_qty            # assume it will fill (market order)
+        px = avg if avg > 0 else est_price
+        if px <= 0:
+            px = self._price(sym)
+        if side == "BUY":
+            self.ledger.record_buy(sym, filled, px)
+        else:
+            self.ledger.record_sell(sym, filled, px)
+        print(f"  [ledger] {side} {sym} {filled:g} @ ${px:.4f}  "
+              f"→ cash=${self.ledger.cash:.2f}  "
+              f"held={self.ledger.holding(sym):g}", flush=True)
+
+    # ── pricing / contracts / fills ─────────────────────────────────────
+
+    def _contract(self, symbol: str):
+        from ib_async import Stock, Crypto
+        if self.asset_type == "crypto":
+            return Crypto(symbol, "PAXOS", "USD")
+        return Stock(symbol, "SMART", "USD")
+
+    def _round_qty(self, qty: float) -> float:
+        """Equities trade in whole shares; crypto is fractional."""
+        if self.asset_type == "crypto":
+            return max(0.0, float(qty))
+        return float(math.floor(max(0.0, qty)))
+
+    def _price(self, symbol: str) -> float:
+        sym = normalize_symbol(symbol)
+        # 1) reuse the live portfolio mark if we already hold it
+        try:
+            for it in self.ib.portfolio():
+                if (it.contract.symbol or "").upper() == sym:
+                    mp = float(it.marketPrice or 0)
+                    if mp > 0:
+                        return mp
+        except Exception:
+            pass
+        # 2) request a fresh snapshot
+        try:
+            c = self._contract(sym)
+            self.ib.qualifyContracts(c)
+            tks = self.ib.reqTickers(c)
+            if tks:
+                t = tks[0]
+                for cand in (t.marketPrice(), t.last, t.close, t.bid, t.ask):
+                    try:
+                        v = float(cand)
+                        if v == v and v > 0:    # not NaN, positive
+                            return v
+                    except (TypeError, ValueError):
+                        continue
+        except Exception as e:
+            print(f"  [ibkr] price lookup {sym} failed: {e}", flush=True)
+        return 0.0
+
+    def _fill_info(self, trade) -> tuple:
+        """(filled_qty, avg_fill_price) from an ib_async Trade, best-effort."""
+        try:
+            st = trade.orderStatus
+            return float(st.filled or 0), float(st.avgFillPrice or 0)
+        except Exception:
+            return 0.0, 0.0
+
+    def _order_result(self, trade):
+        try:
+            return SimpleNamespace(id=str(trade.order.orderId))
+        except Exception:
+            return SimpleNamespace(id="")
 
     # ── internal: market order placement ───────────────────────────────
 
     def _market_order(self, symbol: str, action: str, qty: float):
-        from ib_async import Stock, Crypto, MarketOrder
-        if self.asset_type == "crypto":
-            contract = Crypto(symbol, "PAXOS", "USD")
-        else:
-            contract = Stock(symbol, "SMART", "USD")
+        from ib_async import MarketOrder
+        contract = self._contract(normalize_symbol(symbol))
         try:
             self.ib.qualifyContracts(contract)
         except Exception as e:
             raise RuntimeError(f"IBKR could not qualify {symbol}: {e}")
         order = MarketOrder(action, qty)
         trade = self.ib.placeOrder(contract, order)
-        # Give the gateway a moment to assign an orderId so the caller gets
-        # a meaningful return value for logging.
+        # Give the gateway a moment to assign an orderId / report a fill.
         self.ib.sleep(1)
-        return SimpleNamespace(id=str(trade.order.orderId))
+        return trade

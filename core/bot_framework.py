@@ -374,28 +374,40 @@ class BotRunner:
         self.name           = name
 
     def run(self, decide: Callable[..., dict]):
-        print(f"[{self.name}] APEX bot framework v4.6.27  ·  "
+        print(f"[{self.name}] APEX bot framework v4.6.38  ·  "
               f"asset_type={self.asset_type}  ·  "
               f"tick={self.tick_seconds}s", flush=True)
-        client, _, _ = _alpaca_clients(self.asset_type)
-        # V4.6.26 — Initial portfolio cleanup. Liquidate any positions
-        # whose asset_class doesn't match this bot's strategy (crypto
-        # bot finding stocks, stocks bot finding options, etc.). Runs
-        # ONCE at startup. The v4.6.2 AI transition cleanup runs after
-        # this to handle the subtler long-vs-short cases.
-        try:
-            liquidate_off_strategy_positions(client, self.asset_type)
-        except Exception as e:
-            print(f"[{self.name}] startup cleanup error: {e}", flush=True)
-        # V4.6.27 — outer loop wrapped in try/except + heartbeat prints
-        # during the inter-tick sleep so users can SEE the bot is alive.
-        # Previously a transient error in _account_snapshot or
-        # _load_universe could kill the whole bot silently, and the
-        # 300s sleep looked indistinguishable from a crash.
+        # V4.6.38 — BULLETPROOF startup. The broker client (Alpaca keys or an
+        # IBKR gateway) might not be ready when the bot launches. Instead of
+        # crashing with a KeyError / connection error, keep retrying every
+        # tick with a clear message so the user can fix it live and the bot
+        # picks up on its own — there is no failure mode that kills the bot.
+        client = None
+        did_startup_cleanup = False
         cycle = 0
         while True:
             cycle += 1
             try:
+                if client is None:
+                    try:
+                        client, _, _ = _alpaca_clients(self.asset_type)
+                    except Exception as e:
+                        print(f"[{self.name}] broker not ready: {e}", flush=True)
+                        print(f"[{self.name}] will retry in {self.tick_seconds}s "
+                              f"— fix the above and the bot resumes "
+                              f"automatically (no restart needed).", flush=True)
+                        self._heartbeat_sleep(self.tick_seconds, cycle)
+                        continue
+                if not did_startup_cleanup:
+                    # Initial portfolio cleanup runs ONCE, after the client is
+                    # live: liquidate positions whose asset_class doesn't match
+                    # this bot's strategy. Failure here must never kill the bot.
+                    try:
+                        liquidate_off_strategy_positions(client, self.asset_type)
+                    except Exception as e:
+                        print(f"[{self.name}] startup cleanup error: {e}",
+                              flush=True)
+                    did_startup_cleanup = True
                 symbols = _load_universe(self.universe_path,
                                          self.default_symbols)
                 if not symbols:

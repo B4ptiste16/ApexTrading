@@ -207,6 +207,35 @@ def reset() -> None:
         _snap_cache.clear()
 
 
+def available_cash(mode: str | None = None) -> float:
+    """Whole-account free cash (TotalCashValue), used by the Tools tab to
+    size new sub-portfolio allocations.  0.0 when the gateway is offline."""
+    snap = _snapshot(mode or _mode())
+    return float(snap.get("cash", 0.0)) if snap.get("connected") else 0.0
+
+
+# ── ledger-aware scoping (v4.6.38) ──────────────────────────────────────
+
+def _ledger_for(mode: str, side: str):
+    """This bot's sub-portfolio ledger, or None when isolation isn't in use."""
+    try:
+        from core.ledger import ledger_path, Ledger
+        from core.paths import DATA_DIR
+        return Ledger.load(ledger_path(side, "ibkr", mode, DATA_DIR))
+    except Exception:
+        return None
+
+
+def _price_map(snap: dict) -> dict:
+    out = {}
+    for p in snap.get("positions", []):
+        try:
+            out[str(p["symbol"]).upper()] = float(p.get("current_price", 0) or 0)
+        except Exception:
+            continue
+    return out
+
+
 # ── public API (mirrors core.data) ──────────────────────────────────────
 
 def get_account(side: str) -> dict:
@@ -214,6 +243,23 @@ def get_account(side: str) -> dict:
     snap = _snapshot(mode)
     if not snap.get("connected"):
         return {"connected": False}
+    # V4.6.38 — prefer the bot's ledger so the overview shows its ACTUAL
+    # sub-portfolio (free cash + held shares), not an allocation-% estimate.
+    led = _ledger_for(mode, side)
+    if led is not None:
+        pm = _price_map(snap)
+        holdings_val = sum(
+            qty * pm.get(sym.upper(), 0.0)
+            for sym, qty in led.holdings.items())
+        equity = led.cash + holdings_val
+        return {
+            "portfolio_value": equity,
+            "equity":          equity,
+            "cash":            led.cash,
+            "buying_power":    led.cash,
+            "last_equity":     equity,
+            "connected":       True,
+        }
     frac = _alloc_fraction(mode, side)
     equity = snap["net_liq"] * frac
     return {
@@ -232,6 +278,27 @@ def get_positions(side: str) -> list:
     if not snap.get("connected"):
         return []
     all_pos = snap.get("positions", [])
+    # V4.6.38 — ledger-scoped positions: show exactly the shares in this
+    # bot's slice, priced from the live account snapshot.
+    led = _ledger_for(mode, side)
+    if led is not None:
+        pm = _price_map(snap)
+        out = []
+        for sym, qty in led.holdings.items():
+            if abs(qty) <= 1e-9:
+                continue
+            px = pm.get(sym.upper(), 0.0)
+            mv = qty * px
+            out.append({
+                "symbol":          sym,
+                "qty":             qty,
+                "market_value":    mv,
+                "avg_entry_price": 0.0,
+                "unrealized_pl":   0.0,
+                "unrealized_plpc": 0.0,
+                "current_price":   px,
+            })
+        return out
     universe = _bot_universe(side)
     if universe:
         return [p for p in all_pos if p["symbol"] in universe]
