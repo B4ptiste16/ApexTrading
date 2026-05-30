@@ -310,6 +310,16 @@ def position_meta(positions: list, side: str,
 
 
 def get_positions(side: str) -> list:
+    # V4.6.43 — route to the IBKR data path in IBKR mode (get_client() returns
+    # None there by design, which previously left the IBKR page with no
+    # positions at all).
+    if load_settings().get("broker_mode", "alpaca") == "ibkr":
+        try:
+            from core import ibkr_data
+            return ibkr_data.get_positions(side)
+        except Exception as e:
+            print(f"[positions] IBKR {side}: {e}")
+            return []
     c = get_client(side)
     if not c:
         return []
@@ -378,6 +388,14 @@ def get_history(side: str, period: str) -> pd.DataFrame:
          dropped. The plot now shows a flat line overnight rather
          than auto-shrinking the X-axis to the market session.
     """
+    # V4.6.43 — IBKR mode has its own equity-history source.
+    if load_settings().get("broker_mode", "alpaca") == "ibkr":
+        try:
+            from core import ibkr_data
+            return ibkr_data.get_history(side, period)
+        except Exception as e:
+            print(f"[history] IBKR {side}: {e}")
+            return pd.DataFrame()
     c = get_client(side)
     if not c:
         return pd.DataFrame()

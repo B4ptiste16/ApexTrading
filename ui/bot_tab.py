@@ -773,6 +773,11 @@ class BotTab(QWidget):
         period = getattr(self, "period_combo",
                          type("",(),{"currentText":lambda s:"1D"})()).currentText()
         self._worker = RefreshWorker(self.side, period)
+        # V4.6.43 — paint fast local history the instant it's ready (phase 1),
+        # then refresh with live broker data (phase 2). Both go through the
+        # same applier, so a slow/unreachable broker never delays the
+        # historical charts and a stopped bot still shows all its data.
+        self._worker.partial.connect(self._on_data)
         self._worker.done.connect(self._on_data)
         self._worker.error.connect(
             lambda e: print(f"[{self.side}] refresh error: {e}"))
