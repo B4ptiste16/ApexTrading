@@ -349,6 +349,14 @@ class _IBKRShim:
             raise NotImplementedError(
                 f"IBKR shim only handles MarketOrderRequest right now, "
                 f"got {order_type}.")
+        # V4.6.42 — bracket / OCO support so the DAY bot (and any bracket
+        # strategy) runs on IBKR with native protective legs. Alpaca-py sends
+        # MarketOrderRequest(order_class=BRACKET|OCO, take_profit=..., stop_loss=...).
+        order_class = str(getattr(req, "order_class", "") or "").split(".")[-1].lower()
+        tp_req = getattr(req, "take_profit", None)
+        sl_req = getattr(req, "stop_loss", None)
+        tp_price = float(getattr(tp_req, "limit_price", 0) or 0) if tp_req else 0.0
+        sl_price = float(getattr(sl_req, "stop_price", 0) or 0) if sl_req else 0.0
         sym = normalize_symbol(req.symbol)
         qty = float(getattr(req, "qty", 0) or 0)
         notional = float(getattr(req, "notional", 0) or 0)
@@ -378,6 +386,22 @@ class _IBKRShim:
             qty = self._round_qty(qty)
             if qty <= _EPS:
                 raise ValueError(f"submit_order: qty rounds to 0 for {sym}")
+
+        # ── bracket entry (market entry + OCA take-profit / stop-loss) ──────
+        if order_class == "bracket" and tp_price > 0 and sl_price > 0:
+            trade = self._market_bracket(sym, side_str, qty, tp_price, sl_price)
+            # The market entry fills now; settle it into the ledger. The TP/SL
+            # legs rest on IBKR (they execute even with the user's PC off) and
+            # are reconciled on the next position sync.
+            self._settle(trade, sym, side_str, qty, price)
+            return self._order_result(trade)
+
+        # ── OCO exit re-arm (resting take-profit / stop-loss, no entry) ─────
+        if order_class == "oco" and tp_price > 0 and sl_price > 0:
+            trade = self._oco_exit(sym, side_str, qty, tp_price, sl_price)
+            # Resting protective orders — no immediate fill, so no ledger write
+            # here; the eventual TP/SL fill is picked up on position sync.
+            return self._order_result(trade)
 
         trade = self._market_order(sym, side_str, qty)
         self._settle(trade, sym, side_str, qty, price)
@@ -506,3 +530,74 @@ class _IBKRShim:
         # Give the gateway a moment to assign an orderId / report a fill.
         self.ib.sleep(1)
         return trade
+
+    # ── internal: bracket / OCO placement (V4.6.42) ─────────────────────
+
+    def _exit_action(self, entry_action: str) -> str:
+        return "SELL" if entry_action == "BUY" else "BUY"
+
+    def _round_px(self, px: float) -> float:
+        """Equity prices are penny-ticked; keep crypto at full precision."""
+        return float(px) if self.asset_type == "crypto" else round(float(px), 2)
+
+    def _market_bracket(self, symbol: str, action: str, qty: float,
+                        tp_price: float, sl_price: float):
+        """Market entry with attached take-profit (limit) + stop-loss (stop)
+        legs in a one-cancels-all group. The protective legs live on IBKR's
+        servers, so they execute even when the user's computer is off."""
+        from ib_async import MarketOrder, LimitOrder, StopOrder
+        contract = self._contract(normalize_symbol(symbol))
+        try:
+            self.ib.qualifyContracts(contract)
+        except Exception as e:
+            raise RuntimeError(f"IBKR could not qualify {symbol}: {e}")
+        exit_action = self._exit_action(action)
+        oca = f"apex_{symbol}_{int(time.time()*1000)}"
+
+        parent = MarketOrder(action, qty)
+        parent.orderId  = self.ib.client.getReqId()
+        parent.transmit = False
+
+        tp = LimitOrder(exit_action, qty, self._round_px(tp_price))
+        tp.orderId  = self.ib.client.getReqId()
+        tp.parentId = parent.orderId
+        tp.ocaGroup = oca; tp.ocaType = 1
+        tp.transmit = False
+
+        sl = StopOrder(exit_action, qty, self._round_px(sl_price))
+        sl.orderId  = self.ib.client.getReqId()
+        sl.parentId = parent.orderId
+        sl.ocaGroup = oca; sl.ocaType = 1
+        sl.transmit = True          # transmits the whole chain
+
+        parent_trade = self.ib.placeOrder(contract, parent)
+        self.ib.placeOrder(contract, tp)
+        self.ib.placeOrder(contract, sl)
+        self.ib.sleep(1)
+        print(f"  [ibkr] bracket {action} {qty:g} {symbol} "
+              f"tp=${tp_price:g} sl=${sl_price:g} oca={oca}", flush=True)
+        return parent_trade
+
+    def _oco_exit(self, symbol: str, action: str, qty: float,
+                  tp_price: float, sl_price: float):
+        """Resting take-profit + stop-loss on an EXISTING position (no entry),
+        one-cancels-all. `action` is the exit side (SELL to protect a long)."""
+        from ib_async import LimitOrder, StopOrder
+        contract = self._contract(normalize_symbol(symbol))
+        try:
+            self.ib.qualifyContracts(contract)
+        except Exception as e:
+            raise RuntimeError(f"IBKR could not qualify {symbol}: {e}")
+        oca = f"apex_{symbol}_{int(time.time()*1000)}"
+
+        tp = LimitOrder(action, qty, self._round_px(tp_price))
+        tp.ocaGroup = oca; tp.ocaType = 1; tp.transmit = False
+        sl = StopOrder(action, qty, self._round_px(sl_price))
+        sl.ocaGroup = oca; sl.ocaType = 1; sl.transmit = True
+
+        self.ib.placeOrder(contract, tp)
+        sl_trade = self.ib.placeOrder(contract, sl)
+        self.ib.sleep(1)
+        print(f"  [ibkr] OCO exit {action} {qty:g} {symbol} "
+              f"tp=${tp_price:g} sl=${sl_price:g} oca={oca}", flush=True)
+        return sl_trade

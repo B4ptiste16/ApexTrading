@@ -455,25 +455,11 @@ class BotProcessWidget(QWidget):
 
         if _broker == "ibkr" and not self._is_non_trading_script():
             from PyQt6.QtWidgets import QMessageBox as _QMB
-            # V4.6.38 — LONG and SHORT are now broker-aware (route through
-            # core.broker_client.get_broker_client, ledger-backed on IBKR).
-            # DAY stays blocked: it places Alpaca bracket orders (OCO +
-            # stop-loss + take-profit legs) and the IBKR shim only supports
-            # market orders. Running DAY on IBKR would strip its protective
-            # legs, so we refuse rather than trade it unsafely.
-            _blocked_builtins = ("DAY",)
-            if str(self.side).upper() in _blocked_builtins:
-                _QMB.information(
-                    self.window(),
-                    "DAY bot not available on IBKR",
-                    f"<b>{self.side}</b> relies on <b>bracket orders</b> "
-                    f"(stop-loss + take-profit legs). IBKR support in this "
-                    f"release executes market orders only, so running "
-                    f"{self.side} here would drop its protective legs.<br><br>"
-                    f"LONG, SHORT and any custom bot (Make Bot) DO execute "
-                    f"through IBKR — try one of those, or switch to Alpaca to "
-                    f"run {self.side}.")
-                return
+            # V4.6.42 — LONG, SHORT and DAY are ALL broker-aware now. DAY's
+            # bracket orders (entry + take-profit + stop-loss) are translated
+            # by the IBKR shim into native OCA bracket legs that rest on IBKR's
+            # servers, so its protective legs survive even with the PC off.
+            # Nothing is blocked on IBKR anymore.
             # Custom/framework bot — verify IBKR readiness before launch.
             _amode = _settings.get("alpaca_mode", "paper")
             _ibkr_cfg = _settings.get(f"ibkr_{_amode}", _settings.get("ibkr", {})) or {}

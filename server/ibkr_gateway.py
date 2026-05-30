@@ -63,6 +63,11 @@ _PORT_SPAN = 400
 # script), so we drive the `Xvfb` binary directly and hand each user a
 # deterministic display number (:DISPLAY_BASE + user%span).
 _DISPLAY_BASE = int(os.environ.get("APEX_IBKR_GW_DISPLAY_BASE", "100"))
+# IB Gateway's built-in API socket defaults (per trading mode). IBC's
+# OverrideTwsApiPort is meant to relocate it to user_port(), but some
+# Gateway builds ignore the override on first launch and keep the default —
+# so ensure_gateway accepts EITHER and persists whichever actually opened.
+_DEFAULT_PORTS = {"paper": 4002, "live": 4001}
 
 # user_id -> Popen  (the IB Gateway / IBC process)
 _PROCS: dict[int, subprocess.Popen] = {}
@@ -136,6 +141,12 @@ def _write_ibc_ini(user_id: int, username: str, password: str,
         # IBKR forces a daily restart; let IBC restart rather than exit.
         "AutoRestartTime=11:45 PM",
         "IbAutoClosedown=no",
+        # IBKR allows only ONE session per login. When the user also has TWS
+        # open (or a stale session lingers), IBKR pops 'Existing session
+        # detected' and blocks. For a 24/7 cloud gateway we must take over so
+        # the API port opens — otherwise login hangs forever. 'primaryoverride'
+        # makes this session win; the other session is ended.
+        "ExistingSessionDetectedAction=primaryoverride",
         # Paper has no 2FA, but be explicit so a stray prompt times out
         # instead of hanging the launch forever.
         "ExitAfterSecondFactorAuthenticationTimeout=yes",
@@ -233,10 +244,51 @@ def _pid_alive(pid: int) -> bool:
         return False
 
 
-def is_running(user_id: int) -> bool:
-    """A gateway counts as running only if its API port is actually up —
+def _port_file(user_id: int) -> Path:
+    return _user_dir(user_id) / "api_port"
+
+
+def _save_active_port(user_id: int, port: int) -> None:
+    try:
+        _port_file(user_id).write_text(str(port), encoding="utf-8")
+    except OSError:
+        pass
+
+
+def active_port(user_id: int, mode: str = "paper") -> int:
+    """The API port this user's gateway is ACTUALLY serving on. Reads the
+    port ensure_gateway persisted; falls back to the deterministic
+    user_port(), then to whichever candidate is currently listening. The
+    cloud bot runner uses this so it connects to the real port even when the
+    Gateway ignored OverrideTwsApiPort and kept its default."""
+    p = _port_file(user_id)
+    try:
+        if p.exists():
+            v = int(p.read_text(encoding="utf-8").strip() or 0)
+            if v > 0:
+                return v
+    except (OSError, ValueError):
+        pass
+    for cand in _candidate_ports(user_id, mode):
+        if port_is_up(cand):
+            return cand
+    return user_port(user_id)
+
+
+def _candidate_ports(user_id: int, mode: str = "paper") -> list[int]:
+    """Ports a freshly-launched gateway might bind: the override target
+    first, then the Gateway's built-in default for this mode."""
+    out = [user_port(user_id)]
+    d = _DEFAULT_PORTS.get((mode or "paper").lower(), 4002)
+    if d not in out:
+        out.append(d)
+    return out
+
+
+def is_running(user_id: int, mode: str = "paper") -> bool:
+    """A gateway counts as running only if an API port is actually up —
     a live PID whose port isn't listening yet is 'still starting'."""
-    return port_is_up(user_port(user_id))
+    return any(port_is_up(p) for p in _candidate_ports(user_id, mode))
 
 
 def ensure_gateway(user_id: int, username: str, password: str,
@@ -258,8 +310,12 @@ def ensure_gateway(user_id: int, username: str, password: str,
                            f"{user_id} (sync them from Tools → IBKR).")
 
     port = user_port(user_id)
-    if port_is_up(port):
-        return port
+    candidates = _candidate_ports(user_id, mode)
+    # Idempotent: if a port is already serving, persist + return it.
+    for cand in candidates:
+        if port_is_up(cand):
+            _save_active_port(user_id, cand)
+            return cand
 
     reason = _preflight()
     if reason:
@@ -312,19 +368,23 @@ def ensure_gateway(user_id: int, username: str, password: str,
     except OSError:
         pass
 
-    # Wait for the API port to come up (login + API init can take a while).
+    # Wait for an API port to come up (login + API init can take a while).
+    # The gateway may bind the override port OR its built-in default — accept
+    # whichever opens and remember it so the bot connects to the real port.
     deadline = time.time() + _LAUNCH_TIMEOUT_S
     while time.time() < deadline:
-        if port_is_up(port):
-            return port
+        for cand in candidates:
+            if port_is_up(cand):
+                _save_active_port(user_id, cand)
+                return cand
         if proc.poll() is not None:
             raise RuntimeError(
                 f"IB Gateway exited early (code {proc.returncode}) — see "
                 f"{_log_file(user_id)}")
         time.sleep(2)
     raise RuntimeError(
-        f"IB Gateway didn't open API port {port} within {_LAUNCH_TIMEOUT_S}s "
-        f"— see {_log_file(user_id)}")
+        f"IB Gateway didn't open an API port ({candidates}) within "
+        f"{_LAUNCH_TIMEOUT_S}s — see {_log_file(user_id)}")
 
 
 def stop_gateway(user_id: int) -> dict:
@@ -365,8 +425,8 @@ def stop_gateway(user_id: int) -> dict:
     return {"ok": True}
 
 
-def status(user_id: int) -> dict:
-    port = user_port(user_id)
+def status(user_id: int, mode: str = "paper") -> dict:
+    port = active_port(user_id, mode)
     return {
         "running": port_is_up(port),
         "port": port,

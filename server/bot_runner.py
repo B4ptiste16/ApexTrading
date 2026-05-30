@@ -274,11 +274,14 @@ def _build_env(user_id: int, side: str,
     # its own clientId so they share one gateway without colliding.
     if (broker or "alpaca").lower() == "ibkr":
         from . import ibkr_gateway
+        _ibkr_mode = str(blob.get("IBKR_TRADING_MODE", "paper")).lower()
         env["APEX_BROKER"]          = "ibkr"
         env["APEX_ALPACA_MODE"]     = str(
             blob.get("IBKR_TRADING_MODE", "paper")).lower()
         env["APEX_IBKR_HOST"]       = "127.0.0.1"
-        env["APEX_IBKR_PORT"]       = str(ibkr_gateway.user_port(user_id))
+        # Use the port the gateway ACTUALLY opened (it may keep its built-in
+        # default if it ignored OverrideTwsApiPort), not just the target.
+        env["APEX_IBKR_PORT"]       = str(ibkr_gateway.active_port(user_id, _ibkr_mode))
         env["APEX_IBKR_CLIENT_ID"]  = str(_ibkr_client_id(blob, side))
 
     # Per-bot AI config: AI_PROVIDER_<SIDE>, AI_MODEL_<SIDE>, AI_MODE_<SIDE>

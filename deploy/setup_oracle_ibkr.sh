@@ -65,12 +65,20 @@ else
     rm -f "$INSTALLER"
 fi
 
-# Detect the installed major version (e.g. 10.30) for the operator to set
-# APEX_TWS_VERSION if it differs from the ibkr_gateway.py default.
-DETECTED_VER="$(ls "$TWS_PATH" 2>/dev/null | grep -E '^[0-9]+$' | head -1 || true)"
-if [ -n "$DETECTED_VER" ]; then
-    echo "  detected IB Gateway version dir: $DETECTED_VER"
-fi
+# The standalone installer lays files FLAT in $TWS_PATH (jars at
+# $TWS_PATH/jars). Detect the version from the desktop launcher / vmoptions.
+DETECTED_VER="$(ls "$TWS_PATH" 2>/dev/null | grep -oE '[0-9]+\.[0-9]+' | head -1 || true)"
+[ -z "$DETECTED_VER" ] && DETECTED_VER="$(ls "$TWS_PATH"/'IB Gateway '*.desktop 2>/dev/null | grep -oE '[0-9]+\.[0-9]+' | head -1 || true)"
+[ -z "$DETECTED_VER" ] && DETECTED_VER="10.45"
+echo "  detected IB Gateway version: $DETECTED_VER"
+
+# IBC (gateway mode) looks for jars at  <launch-root>/ibgateway/<version>/jars
+# but the installer put them flat at $TWS_PATH/jars. Build the layout IBC
+# expects in a clean launch root via symlink (no file moves / no reinstall).
+LAUNCH_ROOT="${APEX_IBKR_LAUNCH_ROOT:-/opt/ibkr_tws}"
+echo "▸ Creating IBC launch layout: $LAUNCH_ROOT/ibgateway/$DETECTED_VER -> $TWS_PATH"
+sudo mkdir -p "$LAUNCH_ROOT/ibgateway"
+sudo ln -sfn "$TWS_PATH" "$LAUNCH_ROOT/ibgateway/$DETECTED_VER"
 
 # ── 3. IBC (IBController) — automates the Gateway login ────────────────────────
 if [ -f "$IBC_PATH/scripts/ibcstart.sh" ]; then
@@ -104,17 +112,30 @@ command -v Xvfb >/dev/null 2>&1 \
 [ -f "$IBC_PATH/scripts/ibcstart.sh" ] \
     && echo "  ✓ IBC at $IBC_PATH/scripts/ibcstart.sh" \
     || echo "  ✗ IBC ibcstart.sh MISSING"
-[ -d "$TWS_PATH" ] \
-    && echo "  ✓ IB Gateway dir $TWS_PATH" \
-    || echo "  ✗ IB Gateway dir MISSING"
+[ -e "$LAUNCH_ROOT/ibgateway/$DETECTED_VER/jars" ] \
+    && echo "  ✓ jars reachable at $LAUNCH_ROOT/ibgateway/$DETECTED_VER/jars" \
+    || echo "  ✗ jars NOT reachable via launch root"
+
+# ── 6. Persist the env the service needs (idempotent) ──────────────────────────
+ENV_FILE="${APEX_SERVER_ENV:-/opt/apex_data/.env}"
+echo "▸ Writing APEX_TWS_PATH / APEX_TWS_VERSION into $ENV_FILE"
+set_env() {  # key value
+    if sudo grep -q "^$1=" "$ENV_FILE" 2>/dev/null; then
+        sudo sed -i "s#^$1=.*#$1=$2#" "$ENV_FILE"
+    else
+        echo "$1=$2" | sudo tee -a "$ENV_FILE" >/dev/null
+    fi
+}
+set_env APEX_TWS_PATH    "$LAUNCH_ROOT"
+set_env APEX_TWS_VERSION "$DETECTED_VER"
 
 echo ""
 echo "  ╔══════════════════════════════════════════════╗"
 echo "  ║   IB Gateway provisioning complete           ║"
 echo "  ╚══════════════════════════════════════════════╝"
 echo ""
-echo "  If the detected version above is NOT 10.30, set it in the service env:"
-echo "     APEX_TWS_VERSION=<major.minor>   (e.g. ${DETECTED_VER:-1030})"
+echo "  APEX_TWS_PATH=$LAUNCH_ROOT  APEX_TWS_VERSION=$DETECTED_VER  (written to $ENV_FILE)"
+echo "  Restart the service to apply:  sudo systemctl restart apex_server.service"
 echo ""
 echo "  The auth service spawns one gateway per user on first IBKR bot start;"
 echo "  watch a launch with:"
