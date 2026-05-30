@@ -369,9 +369,26 @@ class BotProcessWidget(QWidget):
         return (self.process is not None
                 and self.process.state() == QProcess.ProcessState.Running)
 
-    def _is_cloud_mode(self) -> bool:
-        """True if the user has flagged this bot for cloud execution."""
+    def _broker_mode(self) -> str:
+        """Current global broker ('alpaca' or 'ibkr'). Never raises."""
         try:
+            from core import data as _D
+            return str(_D.load_settings().get("broker_mode", "alpaca")).lower()
+        except Exception:
+            return "alpaca"
+
+    def _is_cloud_mode(self) -> bool:
+        """True if the user has flagged this bot for cloud execution.
+
+        V4.6.39 — IBKR bots can NEVER run on Oracle: the cloud server has no
+        network route to the user's local TWS/Gateway, and the cloud runner is
+        Alpaca-only (it never sets APEX_BROKER). So in IBKR mode we force LOCAL
+        execution regardless of the 'Run on Oracle' toggle — otherwise a bot the
+        user believes is on IBKR would silently keep trading Alpaca on the
+        cloud."""
+        try:
+            if self._broker_mode() == "ibkr":
+                return False
             from core import data as _D
             return _D.is_cloud_bot(self.side)
         except Exception:
@@ -829,11 +846,29 @@ class BotProcessWidget(QWidget):
         regardless of the local 'cloud mode' toggle, because the bot
         might have been started on the cloud in a previous session and
         the local flag has since been reset. If the server reports
-        running:true, restore the UI and resume log-tail polling."""
+        running:true, restore the UI and resume log-tail polling.
+
+        V4.6.39 — if the desktop is in IBKR mode, an Oracle-resident bot is an
+        orphan from a prior Alpaca session (the cloud can't trade IBKR). Don't
+        re-attach to it — STOP it so it can't keep trading the Alpaca account
+        behind the user's back, then tell them to run it locally."""
+        _ibkr = (self._broker_mode() == "ibkr")
         def _on(ok, body):
             if not ok:
                 return
             if not body.get("running", False):
+                return
+            if _ibkr:
+                self._log(
+                    "☁  Found an Alpaca cloud instance still running on Oracle "
+                    "— stopping it (IBKR bots run locally only, the cloud can't "
+                    "reach your TWS)…", C["red"])
+                def _stopped(ok2, body2):
+                    self._cloud_running = False
+                    self._set_running(False)
+                    self._log("☁  Oracle instance stopped. Press ▶ to run this "
+                              "bot locally on IBKR.", C["muted"])
+                self._cloud_call("POST", f"/bots/{self.side}/stop", _stopped)
                 return
             self._cloud_running = True
             self._set_running(True)
