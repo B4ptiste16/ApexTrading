@@ -425,6 +425,16 @@ class BotProcessWidget(QWidget):
             return True  # don't false-positive — let the underlying error surface
 
     def start_bot(self):
+        # V4.6.47 — CLOUD bots run on the Oracle server and connect to the
+        # SERVER-side gateway, so they must NOT be gated by any local-machine
+        # readiness check (local TWS socket probe, local Alpaca-key check,
+        # bundled-package check — all of which inspect THIS computer). Route
+        # straight to the cloud path so the bot starts with TWS closed / the
+        # laptop off. The server validates its own creds + gateway and returns
+        # a clear error if something's missing.
+        if self._is_cloud_mode():
+            return self._cloud_start()
+
         # V4.0.2 — pre-flight: refuse to start without an Alpaca key
         # assigned to this bot. Surfaces 'MUST ASSIGN API KEY IN TOOLS'
         # instead of letting the bot die opaquely on its first Alpaca
