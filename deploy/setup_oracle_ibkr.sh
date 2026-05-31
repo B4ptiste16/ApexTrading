@@ -22,7 +22,7 @@ set -euo pipefail
 
 # ── Versions (override via env) ────────────────────────────────────────────────
 IBGW_CHANNEL="${APEX_IBGW_CHANNEL:-stable}"      # stable | latest
-IBC_VERSION="${APEX_IBC_VERSION:-3.20.0}"
+IBC_VERSION="${APEX_IBC_VERSION:-3.23.0}"
 TWS_PATH="${APEX_TWS_PATH:-/opt/ibgateway}"
 IBC_PATH="${APEX_IBC_PATH:-/opt/ibc}"
 APEX_USER="${APEX_SERVICE_USER:-apex}"

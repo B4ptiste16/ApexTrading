@@ -141,12 +141,12 @@ def _write_ibc_ini(user_id: int, username: str, password: str,
         # IBKR forces a daily restart; let IBC restart rather than exit.
         "AutoRestartTime=11:45 PM",
         "IbAutoClosedown=no",
-        # IBKR allows only ONE session per login. When the user also has TWS
-        # open (or a stale session lingers), IBKR pops 'Existing session
-        # detected' and blocks. For a 24/7 cloud gateway we must take over so
-        # the API port opens — otherwise login hangs forever. 'primaryoverride'
-        # makes this session win; the other session is ended.
-        "ExistingSessionDetectedAction=primaryoverride",
+        # IBKR allows only ONE session per login. IBKR forbids a new session
+        # from overriding the user's PRIMARY desktop TWS, so 'secondary' is
+        # the correct choice for a cloud gateway: it runs whenever the user's
+        # TWS is closed (laptop off — the 24/7 case) and quietly yields if the
+        # user opens TWS, instead of hanging or fighting for the session.
+        "ExistingSessionDetectedAction=secondary",
         # Paper has no 2FA, but be explicit so a stray prompt times out
         # instead of hanging the launch forever.
         "ExitAfterSecondFactorAuthenticationTimeout=yes",
