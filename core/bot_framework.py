@@ -431,6 +431,26 @@ class BotRunner:
                     did_startup_cleanup = True
                 symbols = _load_universe(self.universe_path,
                                          self.default_symbols)
+                # V4.6.48 — read the FULL universe but skip symbols the active
+                # broker can't trade (e.g. IBKR lists only major cryptos). The
+                # broker client exposes tradeable_symbols() when it filters;
+                # Alpaca trades everything so it has no such method.
+                if symbols and hasattr(client, "tradeable_symbols"):
+                    try:
+                        _full = list(symbols)
+                        symbols = client.tradeable_symbols(_full)
+                        _skipped = [s for s in _full if s not in symbols]
+                        if _skipped and _skipped != getattr(self, "_last_skipped", None):
+                            print(f"[{self.name}] universe: {len(symbols)} "
+                                  f"tradeable on this broker, skipping "
+                                  f"{len(_skipped)} not supported: "
+                                  f"{', '.join(_skipped[:12])}"
+                                  f"{'…' if len(_skipped) > 12 else ''}",
+                                  flush=True)
+                            self._last_skipped = _skipped
+                    except Exception as e:
+                        print(f"[{self.name}] universe filter skipped: {e}",
+                              flush=True)
                 if not symbols:
                     print(f"[{self.name}] no symbols configured — "
                           f"sleeping {self.tick_seconds}s",

@@ -496,6 +496,33 @@ class _IBKRShim:
             return Crypto(symbol, "PAXOS", "USD")
         return Stock(symbol, "SMART", "USD")
 
+    def tradeable_symbols(self, symbols):
+        """V4.6.48 — given the bot's full universe, return only the symbols
+        IBKR can actually trade. Lets a bot READ its whole universe (incl.
+        coins IBKR doesn't list, like ONDO) but trade just the supported
+        subset. Each symbol is qualified once and cached, so this is cheap
+        after the first cycle. On a transient error we KEEP the symbol (don't
+        drop it on a hiccup)."""
+        if not hasattr(self, "_supported_cache"):
+            self._supported_cache = set()
+        out = []
+        for s in symbols:
+            sym = normalize_symbol(s)
+            if sym in self._unsupported:
+                continue
+            if sym in self._supported_cache:
+                out.append(s)
+                continue
+            try:
+                self._require_contract(sym)
+                self._supported_cache.add(sym)
+                out.append(s)
+            except UnsupportedSymbol:
+                continue
+            except Exception:
+                out.append(s)   # transient — don't drop the symbol
+        return out
+
     def _require_contract(self, symbol: str):
         """Qualify the contract; raise UnsupportedSymbol (cached) if IBKR has
         no security definition for it, so the bot skips it cleanly instead of
