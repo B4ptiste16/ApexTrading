@@ -293,6 +293,12 @@ def _build_env(user_id: int, side: str,
     if model:
         env["AI_MODEL"] = model
     env["AI_MODE"] = mode
+
+    # V4.6.48 — per-bot minimum confidence (synced from the desktop slider) so
+    # the framework's confidence gate honors the user's setting on the cloud.
+    mc = blob.get(f"APEX_MIN_CONFIDENCE_{s}") or blob.get("APEX_MIN_CONFIDENCE")
+    if mc not in (None, ""):
+        env[f"APEX_MIN_CONFIDENCE_{s}"] = str(mc)
     return env
 
 

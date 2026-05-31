@@ -233,6 +233,7 @@ method:             {{plain-english strategy summary}}
 ai_used:            {{provider}}
 compatible_models:  {{provider, others}}
 asset_type:         {{stocks|crypto|etfs|futures|options}}
+brokers:            {{alpaca, ibkr}}
 universe:           {{universe_file.txt}}
 requirements:       {{pip pkgs beyond APEX bundle, comma-sep, or empty}}
 """
@@ -268,6 +269,12 @@ def decide(symbol: str,
       {"action": "SHORT", "qty": int|float, "reason": str}  # open/add short
       {"action": "COVER", "qty": int|float, "reason": str}  # close short
       {"action": "HOLD",                    "reason": str}
+
+    OPTIONAL — add "confidence": <0.0..1.0> to any BUY/SELL/SHORT/COVER. When
+    present, the framework SKIPS the trade if confidence is below the user's
+    "Minimum confidence to trade" setting. This makes the confidence slider
+    work for your bot. Base it on how strong your signal is (e.g. how far
+    price is from a moving average, regression R², etc.).
 
     Risk notes:
       • account["buying_power"] caps how big BUY/SHORT can be.
@@ -484,46 +491,46 @@ _SYSTEM_PROMPT_UNIVERSE = (
 )
 
 
-_IBKR_BROKER_RULES = (
-    "\n\n═══ BROKER: INTERACTIVE BROKERS (IBKR) ═══\n\n"
-    "This bot targets IBKR, NOT Alpaca. Generate accordingly:\n"
-    "• Use `ib_insync` (declare it in requirements: ib_insync). Connect\n"
-    "  with `from ib_insync import IB, Stock, MarketOrder` then\n"
-    "  `ib = IB(); ib.connect('127.0.0.1', 7497, clientId=<unique>)`.\n"
-    "  Port 7497 = TWS paper, 7496 = TWS live, 4002 = Gateway paper,\n"
-    "  4001 = Gateway live. Read the port from os.environ.get(\n"
-    "  'APEX_IBKR_PORT', '7497').\n"
-    "• Set META broker: ibkr  AND a unique clientId per bot (read\n"
-    "  from os.environ.get('APEX_IBKR_CLIENT_ID', '<n>')) so multiple\n"
-    "  IBKR bots can share one TWS/Gateway connection.\n"
-    "• Do NOT import alpaca — this is an IBKR bot. Do NOT read\n"
-    "  ALPACA_API_KEY.\n"
-    "• Place orders with `ib.placeOrder(contract, MarketOrder('BUY', qty))`.\n"
-    "• Wrap the connect() in try/except — if TWS/Gateway isn't running,\n"
-    "  print a clear 'IBKR not reachable on port X — is TWS/Gateway "
-    "running?' message and exit cleanly.\n"
-)
+def _brokers_rule(brokers: list[str]) -> str:
+    """V4.6.48 — broker-AGNOSTIC generation. Instead of emitting Alpaca- or
+    IBKR-specific SDK code (which locked a bot to one broker), every bot is
+    generated against the APEX framework's decide() contract and runs on
+    WHICHEVER broker is active. The checkboxes only stamp META.brokers so the
+    app knows where the bot is meant to run."""
+    bl = [b for b in (brokers or []) if b in ("alpaca", "ibkr")] or ["alpaca", "ibkr"]
+    blist = ", ".join(bl)
+    ibkr_note = (
+        "• This bot targets IBKR too. IBKR lists only major cryptos "
+        "(BTC/ETH/LTC/BCH); the framework auto-skips coins IBKR can't trade, "
+        "so for asset_type=crypto keep the universe to majors.\n"
+        if "ibkr" in bl else "")
+    return (
+        "\n\n═══ BROKER COMPATIBILITY — KEEP IT BROKER-AGNOSTIC ═══\n\n"
+        f"This bot must run on BOTH brokers it targets ({blist}) through the "
+        "APEX framework. It MUST be broker-agnostic:\n"
+        "• Do NOT import alpaca / alpaca-py / ib_insync / ib_async. Do NOT read "
+        "ALPACA_API_KEY and do NOT connect to TWS/Gateway. The BotRunner "
+        "framework owns ALL broker connection, auth and order routing.\n"
+        "• Your ONLY output is the decide() decision dict; the framework "
+        "executes it on whichever broker (Alpaca or IBKR) is active.\n"
+        f"• Add this exact line to the APEX-BOT-META block: 'brokers: {blist}'.\n"
+        f"{ibkr_note}"
+        "• OPTIONAL: include 'confidence': <0..1 float> in the decision dict. "
+        "When present, the framework skips the trade if it's below the user's "
+        "Minimum-confidence setting — so the confidence slider works for your "
+        "bot. Omit it only for purely mechanical strategies.\n"
+    )
 
-_ALPACA_BROKER_RULES = (
-    "\n\n═══ BROKER: ALPACA ═══\n\n"
-    "This bot targets Alpaca. It MUST:\n"
-    "• load_dotenv(APEX_DATA_DIR/.env, override=True) at module top.\n"
-    "• Read ALPACA_API_KEY + ALPACA_SECRET_KEY from os.environ.\n"
-    "• Construct TradingClient(key, secret, paper=(APEX_ALPACA_MODE "
-    "!= 'live')).\n"
-    "• Set META broker: alpaca.\n"
-    "• Never connect to TWS / ib_insync — that's the IBKR path.\n"
-)
 
+def _make_system_prompt(mode: str = "trade",
+                        brokers: list[str] | None = None) -> str:
+    """Return the system prompt for the requested mode + target brokers.
 
-def _make_system_prompt(mode: str = "trade", broker: str = "alpaca") -> str:
-    """Return the system prompt for the requested mode + broker.
-
-    mode:   "trade" for a trading bot, "universe" for a universe-file
-            generator.
-    broker: "alpaca" (default) or "ibkr" — appends broker-specific
-            rules so the AI generates the right SDK + key handling.
-            v4.6.29."""
+    mode:    "trade" for a trading bot, "universe" for a universe-file
+             generator.
+    brokers: list of target brokers (any of "alpaca", "ibkr"). The bot is
+             generated broker-AGNOSTIC and stamps META.brokers; v4.6.48
+             (was a single broker + SDK-specific code pre-v4.6.48)."""
     guide = _load_skeleton_guide() or (
         "(Bot skeleton guide unavailable.)")
     if mode == "universe":
@@ -532,9 +539,7 @@ def _make_system_prompt(mode: str = "trade", broker: str = "alpaca") -> str:
         return _SYSTEM_PROMPT_UNIVERSE.format(guide=guide)
     base = _SYSTEM_PROMPT_TRADE.format(
         guide=guide, template=_TRADE_TEMPLATE)
-    broker_rules = (_IBKR_BROKER_RULES if broker == "ibkr"
-                    else _ALPACA_BROKER_RULES)
-    return base + broker_rules
+    return base + _brokers_rule(brokers or ["alpaca", "ibkr"])
 
 
 # ── Worker thread for the API call ───────────────────────────────────
@@ -545,14 +550,14 @@ class _GenerateWorker(QThread):
 
     def __init__(self, *, provider: str, model: str, key: str,
                  prompt: str, mode: str = "trade",
-                 broker: str = "alpaca"):
+                 brokers: list[str] | None = None):
         super().__init__()
         self.provider = provider
         self.model    = model
         self.key      = key
         self.prompt   = prompt
         self.mode     = mode   # "trade" or "universe" (v4.6.4)
-        self.broker   = broker # "alpaca" or "ibkr" (v4.6.29)
+        self.brokers  = brokers or ["alpaca", "ibkr"]  # v4.6.48 (multi-broker)
 
     def run(self):
         # V4.6.23 — wrap the whole worker body so any future bug
@@ -580,7 +585,7 @@ class _GenerateWorker(QThread):
         # ai_used = the actual provider used to generate this bot.
         headers, body = cfg["build"](
             self.prompt,
-            _make_system_prompt(self.mode, self.broker),
+            _make_system_prompt(self.mode, self.brokers),
             self.key, self.model)
         url = cfg["url"]
         # Free-via-APEX: the build hook stuffs the real endpoint into a
@@ -792,35 +797,35 @@ class MakeBotTab(QWidget):
         kind_hint.setWordWrap(True)
         s.add(kind_hint)
 
-        # ── V4.6.29 — Broker selector ───────────────────────────
-        # Determines which broker SDK + key style the generated bot
-        # uses, and stamps META.broker so the broker-mode switch can
-        # show/hide the bot. Alpaca = alpaca-py + ALPACA_API_KEY;
-        # IBKR = ib_insync + a running TWS/Gateway connection.
+        # ── V4.6.48 — Compatible brokers (checkboxes, multi-select) ──
+        # The bot is generated broker-AGNOSTIC (it uses the APEX framework's
+        # decide() contract, never a broker SDK directly), so a single bot
+        # runs on whichever broker is active. These checkboxes just declare
+        # which brokers it's MEANT for (stamped in META.brokers). Both are
+        # ticked by default so every new bot works on Alpaca AND IBKR.
         broker_row = QHBoxLayout()
-        broker_lbl = QLabel("Broker:")
+        broker_lbl = QLabel("Compatible brokers:")
         broker_lbl.setStyleSheet(f"color:{C['text']};font-size:11px;")
-        self._broker_alpaca_radio = QRadioButton("Alpaca (stocks + crypto, API keys)")
-        self._broker_ibkr_radio   = QRadioButton("IBKR (Interactive Brokers, TWS/Gateway)")
-        self._broker_alpaca_radio.setChecked(True)
-        self._broker_alpaca_radio.setStyleSheet(f"color:{C['text']};font-size:11px;")
-        self._broker_ibkr_radio.setStyleSheet(f"color:{C['text']};font-size:11px;")
-        self._broker_group = QButtonGroup(self)
-        self._broker_group.addButton(self._broker_alpaca_radio)
-        self._broker_group.addButton(self._broker_ibkr_radio)
+        self._broker_alpaca_check = QCheckBox("Alpaca")
+        self._broker_ibkr_check   = QCheckBox("IBKR")
+        self._broker_alpaca_check.setChecked(True)
+        self._broker_ibkr_check.setChecked(True)
+        for _cb in (self._broker_alpaca_check, self._broker_ibkr_check):
+            _cb.setStyleSheet(f"color:{C['text']};font-size:11px;")
         broker_row.addWidget(broker_lbl)
         broker_row.addSpacing(8)
-        broker_row.addWidget(self._broker_alpaca_radio)
+        broker_row.addWidget(self._broker_alpaca_check)
         broker_row.addSpacing(14)
-        broker_row.addWidget(self._broker_ibkr_radio)
+        broker_row.addWidget(self._broker_ibkr_check)
         broker_row.addStretch()
         bw = QWidget(); bw.setLayout(broker_row)
         s.add(bw)
         broker_hint = QLabel(
-            "Alpaca bots authenticate with API keys you paste in Tools "
-            "and run on the APEX cloud or locally. IBKR bots connect to "
-            "a running TWS or IB Gateway via ib_insync — IBKR bots only "
-            "appear when the app is in IBKR broker mode (switch top-right).")
+            "Tick the brokers this bot should run on — leave both ticked so it "
+            "works on Alpaca AND IBKR. The bot is built broker-agnostic; APEX "
+            "runs it on whichever broker you're in (and on the cloud). Note: on "
+            "IBKR, crypto is limited to major coins (BTC/ETH/LTC/BCH); APEX "
+            "auto-skips coins IBKR doesn't list.")
         broker_hint.setStyleSheet(f"color:{C['muted']};font-size:10px;")
         broker_hint.setWordWrap(True)
         s.add(broker_hint)
@@ -1219,14 +1224,18 @@ class MakeBotTab(QWidget):
                                      None) and \
                             self._mode_universe_radio.isChecked() \
                          else "trade"
-        # V4.6.29 — broker selection drives which SDK the generated bot
-        # uses + the META.broker stamp.
-        broker = "ibkr" if getattr(self, "_broker_ibkr_radio", None) \
-                          and self._broker_ibkr_radio.isChecked() \
-                       else "alpaca"
+        # V4.6.48 — compatible-broker checkboxes (multi-select). The bot is
+        # generated broker-agnostic and stamps META.brokers. Default: both.
+        brokers = []
+        if getattr(self, "_broker_alpaca_check", None) and self._broker_alpaca_check.isChecked():
+            brokers.append("alpaca")
+        if getattr(self, "_broker_ibkr_check", None) and self._broker_ibkr_check.isChecked():
+            brokers.append("ibkr")
+        if not brokers:
+            brokers = ["alpaca", "ibkr"]   # never generate a broker-less bot
         self._worker = _GenerateWorker(
             provider=prov, model=model, key=key, prompt=prompt,
-            mode=mode, broker=broker)
+            mode=mode, brokers=brokers)
         self._worker.progress.connect(
             lambda msg: self._status.setText(msg))
         self._worker.done.connect(self._on_generated)

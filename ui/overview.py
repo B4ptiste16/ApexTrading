@@ -2036,6 +2036,15 @@ class ToolsTab(QWidget):
                     side = k[len("auto_schedule_"):].upper()
                     payload[f"APEX_AUTO_SCHEDULE_{side}"] = (
                         "1" if _s.get(k) else "0")
+            # V4.6.48 — sync each bot's 'Minimum confidence to trade' so the
+            # cloud framework's confidence gate honors the slider. Stored as
+            # settings[<SIDE>]["min_confidence"]; exported APEX_MIN_CONFIDENCE_<SIDE>.
+            for k, v in list(_s.items()):
+                if isinstance(v, dict) and "min_confidence" in v:
+                    try:
+                        payload[f"APEX_MIN_CONFIDENCE_{k.upper()}"] = str(float(v["min_confidence"]))
+                    except (TypeError, ValueError):
+                        pass
             # V4.6.40 — PUT /credentials REPLACES the whole server blob, so
             # carry the IBKR cloud-login fields (stored under ibkr_<mode>)
             # along with every Alpaca sync or they'd be wiped server-side.

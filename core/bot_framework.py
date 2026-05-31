@@ -210,7 +210,16 @@ def _validate_decision(symbol: str, raw: object) -> Optional[dict]:
         print(f"  [decide] {symbol}: action={action} but qty<=0 — "
               f"treating as HOLD", flush=True)
         action = "HOLD"
-    return {"action": action, "qty": qty, "reason": reason}
+    out = {"action": action, "qty": qty, "reason": reason}
+    # V4.6.48 — preserve an optional confidence (0..1) so the framework can
+    # gate trades against the user's Minimum-confidence setting.
+    conf = raw.get("confidence")
+    if conf is not None:
+        try:
+            out["confidence"] = max(0.0, min(1.0, float(conf)))
+        except (TypeError, ValueError):
+            pass
+    return out
 
 
 # ── Position + account snapshot helpers ─────────────────────────
@@ -468,6 +477,24 @@ class BotRunner:
                 print(f"[{self.name}] sleeping  ·  cycle {cycle}  ·  "
                       f"next tick in {remaining}s", flush=True)
 
+    def _min_confidence(self) -> float:
+        """V4.6.48 — the user's 'Minimum confidence to trade' for this bot.
+        Prefers the env var the runner injects (works on the cloud, where the
+        settings file isn't present), then the local settings, then 0."""
+        import os
+        env = (os.environ.get(f"APEX_MIN_CONFIDENCE_{self.name.upper()}")
+               or os.environ.get("APEX_MIN_CONFIDENCE"))
+        if env:
+            try:
+                return float(env)
+            except ValueError:
+                pass
+        try:
+            import core.data as _D
+            return float(_D.get_bot_min_conf(self.name.upper()))
+        except Exception:
+            return 0.0
+
     def _cap_to_funds(self, client, symbol: str, action: str,
                       qty: float, bars):
         """V4.6.43 — clamp a BUY/COVER qty to the funds actually spendable
@@ -523,6 +550,17 @@ class BotRunner:
         if action == "HOLD":
             print(f"  HOLD   {symbol:<10}  {d['reason']}", flush=True)
             return
+        # V4.6.48 — universal minimum-confidence gate. If the strategy reports
+        # a confidence (0..1), skip the trade when it's below the user's
+        # "Minimum confidence to trade" setting. Bots that don't report a
+        # confidence are never gated (unchanged behavior).
+        conf = d.get("confidence")
+        if conf is not None and action in ("BUY", "SELL", "SHORT", "COVER"):
+            min_conf = self._min_confidence()
+            if conf < min_conf:
+                print(f"  SKIP   {symbol:<10}  confidence {conf:.0%} < "
+                      f"min {min_conf:.0%}", flush=True)
+                return
         # V4.6.43 — cash-safety clamp. A strategy may size a BUY off equity
         # (total account value) rather than free cash, so when most of the
         # account is already invested it requests more than is available and

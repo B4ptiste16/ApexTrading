@@ -130,7 +130,7 @@ def parse_meta(source: str) -> dict:
         k = k.strip().lower().replace("-", "_")
         v = v.strip()
         if k in ("requirements", "compatible_models",
-                 "compatible", "tags"):
+                 "compatible", "tags", "brokers"):
             out[k] = _split_csv(v)
         else:
             out[k] = v
