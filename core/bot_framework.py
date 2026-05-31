@@ -550,5 +550,10 @@ class BotRunner:
             _write_trade_log(self.name, symbol, action, d["qty"],
                              last_price, d.get("reason", ""))
         except Exception as e:
-            print(f"  {action:<6} {symbol:<10}  FAILED: {e}",
-                  flush=True)
+            # V4.6.46 — a symbol IBKR doesn't list (e.g. ONDO) is a clean SKIP,
+            # not an order failure: log it once-style and move on quietly.
+            if type(e).__name__ == "UnsupportedSymbol":
+                print(f"  SKIP   {symbol:<10}  {e}", flush=True)
+            else:
+                print(f"  {action:<6} {symbol:<10}  FAILED: {e}",
+                      flush=True)

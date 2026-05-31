@@ -155,6 +155,18 @@ def _make_ibkr_client(asset_type: str):
     return _IBKRShim(ib, asset_type)
 
 
+class UnsupportedSymbol(Exception):
+    """Raised when IBKR has no tradeable contract for a symbol (e.g. a crypto
+    coin IBKR doesn't list). The bot framework treats this as a clean SKIP,
+    not an order failure."""
+    def __init__(self, symbol: str):
+        self.symbol = symbol
+        super().__init__(
+            f"{symbol} isn't tradeable on IBKR — IBKR lists only a limited set "
+            f"of crypto (e.g. BTC/ETH/LTC/BCH). Run this crypto bot on Alpaca "
+            f"for full coin coverage.")
+
+
 class _IBKRShim:
     """alpaca-py TradingClient look-alike backed by ib_async.
 
@@ -186,6 +198,11 @@ class _IBKRShim:
             print(f"[broker] IBKR sub-portfolio ledger active for "
                   f"'{self.ledger.bot_id}' — cash=${self.ledger.cash:.2f}  "
                   f"holdings={self.ledger.holdings}", flush=True)
+        # V4.6.46 — symbols IBKR has no contract for (e.g. crypto coins IBKR
+        # doesn't list, like ONDO). Cached after the first rejection so we
+        # stop re-qualifying them every tick (which spammed Error 200 logs)
+        # and skip them cleanly instead of "FAILED" on every cycle.
+        self._unsupported: set = set()
 
     # ── account ────────────────────────────────────────────────────────
 
@@ -367,6 +384,9 @@ class _IBKRShim:
         tp_price = float(getattr(tp_req, "limit_price", 0) or 0) if tp_req else 0.0
         sl_price = float(getattr(sl_req, "stop_price", 0) or 0) if sl_req else 0.0
         sym = normalize_symbol(req.symbol)
+        # Bail out cleanly + early if IBKR has no contract for this symbol
+        # (raises UnsupportedSymbol, which the framework turns into a SKIP).
+        self._require_contract(sym)
         qty = float(getattr(req, "qty", 0) or 0)
         notional = float(getattr(req, "notional", 0) or 0)
 
@@ -475,6 +495,23 @@ class _IBKRShim:
         if self.asset_type == "crypto":
             return Crypto(symbol, "PAXOS", "USD")
         return Stock(symbol, "SMART", "USD")
+
+    def _require_contract(self, symbol: str):
+        """Qualify the contract; raise UnsupportedSymbol (cached) if IBKR has
+        no security definition for it, so the bot skips it cleanly instead of
+        spamming 'no security definition' / price-failure every tick."""
+        sym = normalize_symbol(symbol)
+        if sym in self._unsupported:
+            raise UnsupportedSymbol(sym)
+        c = self._contract(sym)
+        try:
+            self.ib.qualifyContracts(c)
+        except Exception:
+            c = None
+        if not c or not getattr(c, "conId", 0):
+            self._unsupported.add(sym)
+            raise UnsupportedSymbol(sym)
+        return c
 
     def _round_qty(self, qty: float) -> float:
         """Equities trade in whole shares; crypto is fractional."""
