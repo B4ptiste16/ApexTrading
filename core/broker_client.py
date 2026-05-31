@@ -194,6 +194,12 @@ class _IBKRShim:
         # account is partitioned in software).  None ⇒ whole-account
         # behavior (no ledger created yet, or non-IBKR), so nothing changes.
         self.ledger = get_ledger()
+        # V4.6.50 — when no ledger exists yet (e.g. first cloud run) we seed
+        # this bot's sub-portfolio slice from its allocation % LAZILY on the
+        # first get_account() call, where the account cash is reliably
+        # populated. (Seeding in __init__ is unsafe — account values stream in
+        # after connect.) _seed_checked guards against repeated attempts.
+        self._seed_checked = False
         if self.ledger is not None:
             print(f"[broker] IBKR sub-portfolio ledger active for "
                   f"'{self.ledger.bot_id}' — cash=${self.ledger.cash:.2f}  "
@@ -204,26 +210,48 @@ class _IBKRShim:
         # and skip them cleanly instead of "FAILED" on every cycle.
         self._unsupported: set = set()
 
+    def _maybe_seed_ledger(self, cash: float):
+        """V4.6.50 — create this bot's sub-portfolio ledger from its synced
+        allocation % (env APEX_IBKR_ALLOC) × the live account cash, so cloud
+        bots trade their slice instead of the whole account. Called lazily
+        from get_account() with the cash it already read. Never blocks."""
+        alloc = os.environ.get("APEX_IBKR_ALLOC")
+        side  = os.environ.get("APEX_BOT_SIDE", "")
+        if not alloc or not side or cash <= 0:
+            return None
+        try:
+            from core.ibkr_lifecycle import seed_ledger
+            led = seed_ledger(side, alloc, cash)
+            if led is not None:
+                print(f"[broker] seeded IBKR sub-portfolio '{side}' = {alloc}% "
+                      f"of ${cash:,.0f} → ${led.cash:,.2f}", flush=True)
+            return led
+        except Exception as e:
+            print(f"[broker] ledger auto-seed skipped: {e}", flush=True)
+            return None
+
     # ── account ────────────────────────────────────────────────────────
+
+    def _slice_account(self):
+        """SimpleNamespace account scoped to this bot's ledger slice."""
+        led = self.ledger
+        holdings_val = 0.0
+        for sym, qty in led.holdings.items():
+            if abs(qty) <= _EPS:
+                continue
+            holdings_val += qty * self._price(sym)
+        eq = led.cash + holdings_val
+        return SimpleNamespace(
+            portfolio_value=eq, equity=eq, cash=led.cash,
+            buying_power=led.cash,   # a slice can only spend its own cash
+            last_equity=eq,
+        )
 
     def get_account(self):
         # V4.6.38 — ledger-scoped account: the bot only ever sees its own
         # slice's free cash + the market value of the shares it holds.
         if self.ledger is not None:
-            led = self.ledger
-            holdings_val = 0.0
-            for sym, qty in led.holdings.items():
-                if abs(qty) <= _EPS:
-                    continue
-                holdings_val += qty * self._price(sym)
-            eq = led.cash + holdings_val
-            return SimpleNamespace(
-                portfolio_value=eq,
-                equity=eq,
-                cash=led.cash,
-                buying_power=led.cash,   # a slice can only spend its own cash
-                last_equity=eq,
-            )
+            return self._slice_account()
 
         vals = self.ib.accountValues()
 
@@ -244,13 +272,24 @@ class _IBKRShim:
             except (TypeError, ValueError):
                 return default
 
-        eq = pick("NetLiquidation")
+        eq   = pick("NetLiquidation")
+        cash = pick("TotalCashValue")
+        bp   = pick("BuyingPower")
+
+        # V4.6.50 — lazy sub-portfolio seed: the first time we know the account
+        # cash, create this bot's ledger slice from its allocation %. Uses the
+        # fallback-aware cash above (the account's base currency may not be
+        # tagged 'USD'). Once seeded, return the slice immediately.
+        if (not self._seed_checked and cash > 0
+                and os.environ.get("APEX_IBKR_ALLOC")):
+            self._seed_checked = True
+            self.ledger = self._maybe_seed_ledger(cash)
+            if self.ledger is not None:
+                return self._slice_account()
+
         return SimpleNamespace(
-            portfolio_value=eq,
-            equity=eq,
-            cash=pick("TotalCashValue"),
-            buying_power=pick("BuyingPower"),
-            last_equity=eq,
+            portfolio_value=eq, equity=eq, cash=cash,
+            buying_power=bp, last_equity=eq,
         )
 
     # ── positions ──────────────────────────────────────────────────────

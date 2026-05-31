@@ -2045,6 +2045,19 @@ class ToolsTab(QWidget):
                         payload[f"APEX_MIN_CONFIDENCE_{k.upper()}"] = str(float(v["min_confidence"]))
                     except (TypeError, ValueError):
                         pass
+            # V4.6.50 — sync each IBKR bot's allocation % (Tools → IBKR table)
+            # so cloud bots seed their sub-portfolio slice instead of trading
+            # the whole account. Stored in settings[ibkr_<mode>]["bots"].
+            _imode = _s.get("alpaca_mode", "paper")
+            _icfg = _s.get(f"ibkr_{_imode}", {}) or {}
+            for _b in (_icfg.get("bots") or []):
+                try:
+                    _bid = str(_b.get("id", "")).upper().strip()
+                    _alc = str(_b.get("allocation", "")).strip().rstrip("%")
+                    if _bid and _alc:
+                        payload[f"APEX_IBKR_ALLOC_{_bid}"] = _alc
+                except Exception:
+                    pass
             # V4.6.40 — PUT /credentials REPLACES the whole server blob, so
             # carry the IBKR cloud-login fields (stored under ibkr_<mode>)
             # along with every Alpaca sync or they'd be wiped server-side.

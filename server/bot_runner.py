@@ -283,6 +283,11 @@ def _build_env(user_id: int, side: str,
         # default if it ignored OverrideTwsApiPort), not just the target.
         env["APEX_IBKR_PORT"]       = str(ibkr_gateway.active_port(user_id, _ibkr_mode))
         env["APEX_IBKR_CLIENT_ID"]  = str(_ibkr_client_id(blob, side))
+        # V4.6.50 — this bot's allocation % (synced from Tools → IBKR) so the
+        # shim seeds its sub-portfolio slice instead of trading the whole acct.
+        _alloc = blob.get(f"APEX_IBKR_ALLOC_{s}")
+        if _alloc not in (None, ""):
+            env["APEX_IBKR_ALLOC"] = str(_alloc)
 
     # Per-bot AI config: AI_PROVIDER_<SIDE>, AI_MODEL_<SIDE>, AI_MODE_<SIDE>
     # take precedence over the global AI_PROVIDER / AI_MODEL / AI_MODE.
