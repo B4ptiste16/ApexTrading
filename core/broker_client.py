@@ -152,6 +152,15 @@ def _make_ibkr_client(asset_type: str):
             f"is enabled.")
     print(f"[broker] IBKR connected — managed accounts: {ib.managedAccounts()}",
           flush=True)
+    # V4.6.55 — paper accounts usually lack a LIVE US-stock market-data
+    # subscription (IBKR Error 10089), which made price lookups fail and
+    # blocked notional-sized orders. Request DELAYED data (free, ~15-min):
+    # IBKR uses live data when a subscription exists, else falls back to
+    # delayed — good enough to size orders (fills happen at the live market).
+    try:
+        ib.reqMarketDataType(3)   # 3 = delayed, 4 = delayed-frozen fallback
+    except Exception as e:
+        print(f"[broker] reqMarketDataType(delayed) failed: {e}", flush=True)
     return _IBKRShim(ib, asset_type)
 
 
@@ -734,7 +743,13 @@ class _IBKRShim:
             tks = self.ib.reqTickers(c)
             if tks:
                 t = tks[0]
-                for cand in (t.marketPrice(), t.last, t.close, t.bid, t.ask):
+                # Include delayed-data fields (V4.6.55) — paper accounts get
+                # delayed quotes, which ib_async exposes as delayed* attrs.
+                for cand in (t.marketPrice(), t.last, t.close, t.bid, t.ask,
+                             getattr(t, "delayedLast", None),
+                             getattr(t, "delayedClose", None),
+                             getattr(t, "delayedBid", None),
+                             getattr(t, "delayedAsk", None)):
                     try:
                         v = float(cand)
                         if v == v and v > 0:    # not NaN, positive
