@@ -81,6 +81,10 @@ class Ledger:
         }
         self.created = data.get("created", "")
         self.updated = data.get("updated", "")
+        # V4.6.51 — last priced total value of the slice (cash + holdings MV),
+        # written by the bot each cycle so the desktop can show a LIVE
+        # allocation % that grows/shrinks with the bot's performance.
+        self.last_value = float(data.get("last_value", 0.0))
 
     # ── persistence ─────────────────────────────────────────────────
 
@@ -127,6 +131,7 @@ class Ledger:
                 "holdings": self.holdings,
                 "created": self.created,
                 "updated": self.updated,
+                "last_value": self.last_value,
             }, indent=2), encoding="utf-8")
         except Exception as e:
             print(f"  [ledger] save failed: {e}", flush=True)
@@ -182,6 +187,68 @@ class Ledger:
         self.cash -= qty * price
         self.holdings[sym] = self.holdings.get(sym, 0.0) + qty
         self.save()
+
+    # ── valuation + rebalancing (V4.6.51) ───────────────────────────
+
+    def value(self, price_of) -> float:
+        """Total live value of this slice = free cash + market value of the
+        shares it holds. `price_of(symbol)` returns the current price."""
+        v = self.cash
+        for sym, qty in self.holdings.items():
+            if abs(qty) > _EPS:
+                try:
+                    v += qty * float(price_of(sym) or 0.0)
+                except Exception:
+                    pass
+        return v
+
+    def withdraw(self, amount: float, price_of, sell) -> float:
+        """Free up to `amount` of cash from this slice and hand it back to the
+        main (unallocated) account. Spends free cash first, then SELLS holdings
+        — largest market value first ("decides what to sell") — calling
+        sell(symbol, qty) to place each real order. The sale proceeds are
+        withdrawn (not re-added to the slice), so the slice's total value drops
+        by ~`amount`. Returns the amount actually freed."""
+        amount = max(0.0, float(amount or 0.0))
+        if amount <= _EPS:
+            return 0.0
+        freed = 0.0
+        # 1) hand back free cash first
+        take = min(max(0.0, self.cash), amount)
+        if take > _EPS:
+            self.cash -= take
+            freed += take
+        remaining = amount - freed
+        if remaining <= _EPS:
+            self.save()
+            return freed
+        # 2) sell holdings, largest market value first, until raised
+        longs = []
+        for s, q in self.holdings.items():
+            if q > _EPS:
+                px = float(price_of(s) or 0.0)
+                if px > 0:
+                    longs.append((s, q, px, q * px))
+        longs.sort(key=lambda t: t[3], reverse=True)
+        for sym, qty, px, mv in longs:
+            if remaining <= _EPS:
+                break
+            sell_qty = min(qty, remaining / px)
+            if sell_qty <= _EPS:
+                continue
+            try:
+                sell(sym, sell_qty)          # place the real market sell
+            except Exception as e:
+                print(f"[ledger] withdraw sell {sym} failed: {e}", flush=True)
+                continue
+            # holdings drop; proceeds are withdrawn (NOT added to slice cash)
+            self.holdings[sym] = self.holdings.get(sym, 0.0) - sell_qty
+            proceeds = sell_qty * px
+            freed += proceeds
+            remaining -= proceeds
+        self._prune()
+        self.save()
+        return freed
 
     def _prune(self) -> None:
         self.holdings = {

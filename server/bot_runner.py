@@ -150,6 +150,55 @@ def _clear_pid_file(user_id: int, side: str, broker: str = "alpaca") -> None:
         pass
 
 
+def _ibkr_ledger_dir(user_id: int) -> Path:
+    """Where this user's IBKR sub-portfolio ledgers live on the server.
+    Mirrors core.ledger.ledger_path(data_dir=<ibkr instance root>, broker=ibkr)."""
+    return _instance_root(user_id, "ibkr") / "ibkr" / "ledgers"
+
+
+def list_ibkr_ledgers(user_id: int) -> list[dict]:
+    """V4.6.51 — return each IBKR bot's sub-portfolio snapshot (bot_id, cash,
+    holdings, last_value) so the desktop can show a LIVE allocation %."""
+    import json as _json
+    out: list[dict] = []
+    d = _ibkr_ledger_dir(user_id)
+    if not d.exists():
+        return out
+    for f in d.glob("*.json"):
+        if f.name.endswith(".rebalance.json"):
+            continue
+        try:
+            j = _json.loads(f.read_text(encoding="utf-8"))
+            out.append({
+                "bot_id":     j.get("bot_id", f.stem),
+                "cash":       float(j.get("cash", 0.0)),
+                "allocated":  float(j.get("allocated_cash", 0.0)),
+                "value":      float(j.get("last_value", 0.0)),
+                "holdings":   j.get("holdings", {}),
+                "file":       f.stem,
+            })
+        except Exception:
+            continue
+    return out
+
+
+def request_ibkr_rebalance(user_id: int, side: str, target_pct: float,
+                           mode: str = "paper") -> dict:
+    """V4.6.51 — drop a rebalance request next to the bot's ledger. The
+    running bot reads it next cycle and sells down to `target_pct` of the
+    account, handing the freed cash back to the main account."""
+    import json as _json
+    d = _ibkr_ledger_dir(user_id)
+    d.mkdir(parents=True, exist_ok=True)
+    req = d / f"{side.lower()}_{mode.lower()}.rebalance.json"
+    try:
+        req.write_text(_json.dumps({"target_pct": float(target_pct)}),
+                       encoding="utf-8")
+        return {"ok": True, "request": str(req)}
+    except Exception as e:
+        return {"ok": False, "detail": str(e)}
+
+
 def _resolve_broker(user_id: int, side: str,
                     broker: Optional[str] = None) -> str:
     """V4.6.41 — the broker an instance belongs to. An explicit value (from

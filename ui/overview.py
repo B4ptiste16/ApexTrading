@@ -886,6 +886,13 @@ class ToolsTab(QWidget):
 
         s.add(self._ibkr_rows_frame)
 
+        # V4.6.51 — populate each row's live allocation (current value + share).
+        try:
+            from PyQt6.QtCore import QTimer as _QT
+            _QT.singleShot(300, self._refresh_ibkr_live_alloc)
+        except Exception:
+            pass
+
         # Add bot row
         add_frame = QFrame()
         add_frame.setStyleSheet(
@@ -1007,6 +1014,12 @@ class ToolsTab(QWidget):
         alloc_edit.setFixedWidth(70)
         alloc_edit.textChanged.connect(self._update_ibkr_remaining)
 
+        # V4.6.51 — live current allocation (value share that grows/shrinks
+        # with the bot's performance), filled in by _refresh_ibkr_live_alloc().
+        live_lbl = QLabel("")
+        live_lbl.setStyleSheet(f"color:{C['muted']};font-size:10px;")
+        live_lbl.setFixedWidth(150)
+
         # Replace button — opens picker to swap this slot to another bot
         repl_btn = QPushButton("↔ Replace")
         repl_btn.setFixedWidth(72)
@@ -1027,6 +1040,7 @@ class ToolsTab(QWidget):
         row_l.addWidget(lbl_w)
         row_l.addWidget(cid_edit)
         row_l.addWidget(alloc_edit)
+        row_l.addWidget(live_lbl)
         row_l.addWidget(repl_btn)
         row_l.addWidget(rm_btn)
         row_l.addStretch()
@@ -1034,6 +1048,7 @@ class ToolsTab(QWidget):
         entry = {
             "id": bot_id, "label": label, "color": color,
             "cid_edit": cid_edit, "alloc_edit": alloc_edit,
+            "live_lbl": live_lbl,
             "lbl_widget": lbl_w, "row_widget": row_w,
         }
         self._ibkr_bot_rows.append(entry)
@@ -1280,6 +1295,15 @@ class ToolsTab(QWidget):
             s = D.load_settings()
             # Save under the per-mode key (ibkr_paper / ibkr_live)
             key = getattr(self, "_ibkr_mode_key", "ibkr")
+            # V4.6.51 — remember the PREVIOUS allocations so we can detect a
+            # deliberate LOWERING and tell that bot to sell down to the new %.
+            _old_alloc = {}
+            for _b in (s.get(key, {}) or {}).get("bots", []):
+                try:
+                    _old_alloc[str(_b.get("id", "")).upper()] = float(
+                        str(_b.get("allocation", "")).rstrip("%") or 0)
+                except (TypeError, ValueError):
+                    pass
             s[key] = {
                 "host":    self._ibkr_host.text().strip() or "127.0.0.1",
                 "port":    self._ibkr_port.text().strip() or "7497",
@@ -1317,15 +1341,134 @@ class ToolsTab(QWidget):
                         cash)
             except Exception as e:
                 print(f"[ibkr] ledger seed skipped: {e}")
+            # V4.6.51 — if the user LOWERED a bot's allocation, ask that bot to
+            # sell down to the new % and hand the freed cash back to the main
+            # account (local + cloud). Growth is never auto-trimmed — only an
+            # explicit decrease triggers a sell-down.
+            rebalanced = 0
+            for r in self._ibkr_bot_rows:
+                sid = str(r["id"]).upper()
+                try:
+                    new_pct = float(r["alloc_edit"].text().strip().rstrip("%") or 0)
+                except ValueError:
+                    continue
+                old_pct = _old_alloc.get(sid)
+                if old_pct is not None and new_pct < old_pct - 1e-9:
+                    self._trigger_ibkr_rebalance(sid, new_pct)
+                    rebalanced += 1
             msg = "✓ Saved"
             if seeded:
                 msg = f"✓ Saved · seeded {seeded} sub-portfolio(s)"
+            if rebalanced:
+                msg += f" · {rebalanced} bot(s) selling down to new allocation"
             self._ibkr_msg.setText(msg)
             self._ibkr_msg.setStyleSheet(f"color:{C['green']};font-size:10px;")
         except Exception as e:
             self._ibkr_msg.setText(f"Save failed: {e}")
             self._ibkr_msg.setStyleSheet(f"color:{C['red']};font-size:10px;")
         QTimer.singleShot(3000, lambda: self._ibkr_msg.setText(""))
+
+    def _refresh_ibkr_live_alloc(self):
+        """V4.6.51 — show each bot's LIVE allocation (current sub-portfolio
+        value + its share of the total), so a bot that grows shows a bigger
+        share automatically. Merges local ledger files with cloud ledgers
+        (fetched in a background thread)."""
+        if not getattr(self, "_ibkr_bot_rows", None):
+            return
+        values: dict[str, float] = {}
+        try:
+            import json as _json
+            from core.paths import DATA_DIR
+            mode = D.load_settings().get("alpaca_mode", "paper")
+            ld = DATA_DIR / "ibkr" / "ledgers"
+            if ld.exists():
+                for f in ld.glob(f"*_{mode}.json"):
+                    if f.name.endswith(".rebalance.json"):
+                        continue
+                    try:
+                        j = _json.loads(f.read_text(encoding="utf-8"))
+                        values[str(j.get("bot_id", "")).upper()] = float(
+                            j.get("last_value", 0) or 0)
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
+        def _apply(cloud_ledgers):
+            for L in (cloud_ledgers or []):
+                v = float(L.get("value", 0) or 0)
+                if v > 0:
+                    values[str(L.get("bot_id", "")).upper()] = v
+            total = sum(values.values())
+            for r in getattr(self, "_ibkr_bot_rows", []):
+                lbl = r.get("live_lbl")
+                if lbl is None:
+                    continue
+                v = values.get(str(r["id"]).upper(), 0.0)
+                if v > 0 and total > 0:
+                    lbl.setText(f"now ${v:,.0f} · {v / total * 100:.1f}%")
+                    lbl.setStyleSheet(f"color:{C['green']};font-size:10px;")
+                else:
+                    lbl.setText("")
+
+        try:
+            from ui.login import load_auth, load_server_url
+            import threading, requests
+            from PyQt6.QtCore import QTimer as _QT
+            tok = (load_auth() or {}).get("token")
+            if not tok:
+                _apply([])
+                return
+
+            def _fetch():
+                try:
+                    rr = requests.get(f"{load_server_url()}/ibkr/ledgers",
+                                      headers={"Authorization": f"Bearer {tok}"},
+                                      timeout=12)
+                    led = rr.json().get("ledgers", []) if rr.ok else []
+                except Exception:
+                    led = []
+                _QT.singleShot(0, lambda: _apply(led))
+            threading.Thread(target=_fetch, daemon=True).start()
+        except Exception:
+            _apply([])
+
+    def _trigger_ibkr_rebalance(self, side: str, target_pct: float):
+        """V4.6.51 — request a sell-down for one bot to `target_pct` of the
+        account. Drops a local request file (for a locally-run bot) AND POSTs
+        to the server (for a cloud-run bot). The bot reads it next cycle and
+        sells holdings to hand the excess cash back to the main account."""
+        mode = D.load_settings().get("alpaca_mode", "paper")
+        # 1) local request file next to the ledger
+        try:
+            import json as _json
+            from core.paths import DATA_DIR
+            from core.ledger import ledger_path
+            lp = ledger_path(side, "ibkr", mode, DATA_DIR)
+            req = lp.with_name(lp.stem + ".rebalance.json")
+            req.parent.mkdir(parents=True, exist_ok=True)
+            req.write_text(_json.dumps({"target_pct": float(target_pct)}),
+                           encoding="utf-8")
+        except Exception as e:
+            print(f"[ibkr] local rebalance request failed: {e}")
+        # 2) cloud request (background thread so the UI never blocks)
+        try:
+            from ui.login import load_auth, load_server_url
+            import threading, requests
+            tok = (load_auth() or {}).get("token")
+            if tok:
+                url = f"{load_server_url()}/ibkr/{side}/rebalance"
+                def _post():
+                    try:
+                        requests.post(url, params={"target_pct": float(target_pct),
+                                                   "mode": mode},
+                                      headers={"Authorization": f"Bearer {tok}"},
+                                      timeout=15)
+                    except Exception as ex:
+                        print(f"[ibkr] cloud rebalance POST failed: {ex}")
+                threading.Thread(target=_post, daemon=True).start()
+        except Exception as e:
+            print(f"[ibkr] cloud rebalance request failed: {e}")
 
     def _ibkr_cloud_credentials(self, settings: dict | None = None) -> dict:
         """V4.6.40 — return the IBKR cloud-login fields to include in any

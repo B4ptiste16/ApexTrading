@@ -241,11 +241,77 @@ class _IBKRShim:
                 continue
             holdings_val += qty * self._price(sym)
         eq = led.cash + holdings_val
+        # V4.6.51 — snapshot the live slice value so the desktop can show an
+        # allocation % that tracks performance. Persist only when it moved.
+        try:
+            if abs(eq - getattr(led, "last_value", 0.0)) > 0.01:
+                led.last_value = eq
+                led.save()
+        except Exception:
+            pass
         return SimpleNamespace(
             portfolio_value=eq, equity=eq, cash=led.cash,
             buying_power=led.cash,   # a slice can only spend its own cash
             last_equity=eq,
         )
+
+    def _account_netliq(self) -> float:
+        """Whole-account NetLiquidation (the % base for rebalancing)."""
+        try:
+            vals = self.ib.accountValues()
+            for av in vals:
+                if av.tag == "NetLiquidation" and av.currency == "USD":
+                    return float(av.value)
+            for av in vals:
+                if av.tag == "NetLiquidation":
+                    return float(av.value)
+        except Exception:
+            pass
+        return 0.0
+
+    def maybe_rebalance(self):
+        """V4.6.51 — when the user LOWERS this bot's allocation in Tools, a
+        small request file is dropped next to the ledger ({"target_pct": X}).
+        Each cycle the bot reads it and, if its current value exceeds the new
+        target share of the whole account, SELLS holdings (largest first, via
+        Ledger.withdraw) to hand the excess cash back to the main account.
+        Only ever sells down — growth from performance is never auto-trimmed."""
+        if self.ledger is None:
+            return
+        req = self.ledger.path.with_name(self.ledger.path.stem + ".rebalance.json")
+        if not req.exists():
+            return
+        try:
+            import json as _json
+            data = _json.loads(req.read_text(encoding="utf-8"))
+            target_pct = float(data.get("target_pct"))
+            total = self._account_netliq()
+            cur = self.ledger.value(self._price)
+            if total > 0 and target_pct >= 0:
+                target_val = target_pct / 100.0 * total
+                excess = cur - target_val
+                if excess > 1.0:
+                    freed = self.ledger.withdraw(
+                        excess, self._price,
+                        lambda s, q: self._market_order(
+                            s, "SELL", self._round_qty(q)))
+                    # the slice's allocated_cash baseline tracks the new target
+                    self.ledger.allocated_cash = max(0.0, target_val)
+                    self.ledger.save()
+                    print(f"[broker] rebalance '{self.ledger.bot_id}' → "
+                          f"{target_pct:.1f}% (${target_val:,.0f}); sold "
+                          f"${freed:,.0f} back to the main account", flush=True)
+                else:
+                    print(f"[broker] rebalance '{self.ledger.bot_id}': already "
+                          f"at/under {target_pct:.1f}% — nothing to sell",
+                          flush=True)
+        except Exception as e:
+            print(f"[broker] rebalance failed: {e}", flush=True)
+        finally:
+            try:
+                req.unlink()
+            except OSError:
+                pass
 
     def get_account(self):
         # V4.6.38 — ledger-scoped account: the bot only ever sees its own

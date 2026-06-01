@@ -1511,6 +1511,23 @@ def api_bot_logs(side: str, tail: int = 4000, broker: str | None = None,
                                         broker=broker)}
 
 
+@app.get("/ibkr/ledgers")
+def api_ibkr_ledgers(authorization: str | None = Header(default=None)):
+    """V4.6.51 — each IBKR bot's sub-portfolio snapshot (cash, holdings, live
+    value) so the desktop can show an allocation % that tracks performance."""
+    user = _current_user(authorization)
+    return {"ledgers": bot_runner.list_ibkr_ledgers(user["id"])}
+
+
+@app.post("/ibkr/{side}/rebalance")
+def api_ibkr_rebalance(side: str, target_pct: float, mode: str = "paper",
+                       authorization: str | None = Header(default=None)):
+    """V4.6.51 — lower a bot's allocation: the running bot sells holdings next
+    cycle to hand the excess cash back to the main account."""
+    user = _current_user(authorization)
+    return bot_runner.request_ibkr_rebalance(user["id"], side, target_pct, mode)
+
+
 @app.get("/bots/running")
 def api_bots_running(authorization: str | None = Header(default=None)):
     user = _current_user(authorization)

@@ -457,6 +457,13 @@ class BotRunner:
                           flush=True)
                     self._heartbeat_sleep(self.tick_seconds, cycle)
                     continue
+                # V4.6.51 — honor a pending allocation cut: sell holdings to
+                # hand cash back to the main account before this cycle trades.
+                if hasattr(client, "maybe_rebalance"):
+                    try:
+                        client.maybe_rebalance()
+                    except Exception as e:
+                        print(f"[{self.name}] rebalance check: {e}", flush=True)
                 account = _account_snapshot(client)
                 print(f"[{datetime.now(timezone.utc).isoformat(timespec='seconds')}] "
                       f"=== cycle {cycle} === equity=${account['equity']:.2f}  "
