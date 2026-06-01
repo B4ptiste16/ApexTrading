@@ -1298,13 +1298,19 @@ class ToolsTab(QWidget):
             # V4.6.51 — remember the PREVIOUS allocations so we can detect a
             # deliberate LOWERING and tell that bot to sell down to the new %.
             _old_alloc = {}
-            for _b in (s.get(key, {}) or {}).get("bots", []):
+            _prev = dict(s.get(key, {}) or {})   # V4.6.52 — keep prior fields
+            for _b in _prev.get("bots", []):
                 try:
                     _old_alloc[str(_b.get("id", "")).upper()] = float(
                         str(_b.get("allocation", "")).rstrip("%") or 0)
                 except (TypeError, ValueError):
                     pass
-            s[key] = {
+            # V4.6.52 — MERGE into the prior dict so saving the bot table never
+            # wipes the cloud-login fields (cloud_username / cloud_password /
+            # run_on_oracle) written by the Cloud-24/7 section. Overwriting them
+            # silently disabled cloud mode → bots fell back to the local gateway
+            # and showed "IB Gateway not reachable".
+            _prev.update({
                 "host":    self._ibkr_host.text().strip() or "127.0.0.1",
                 "port":    self._ibkr_port.text().strip() or "7497",
                 "account": self._ibkr_account.text().strip(),
@@ -1316,7 +1322,8 @@ class ToolsTab(QWidget):
                     }
                     for i, r in enumerate(self._ibkr_bot_rows)
                 ],
-            }
+            })
+            s[key] = _prev
             with open(D.SETTINGS_FILE, "w", encoding="utf-8") as f:
                 json.dump(s, f, indent=2)
             # Drop the cached IBKR snapshot so new host/port/allocations apply
