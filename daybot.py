@@ -418,6 +418,34 @@ def sync_brackets_with_alpaca(state: dict) -> dict:
     if not state.get("open_brackets"):
         return state
 
+    # V4.6.54 — reconcile against ACTUAL held positions. Drop any open bracket
+    # whose ticker isn't currently held (e.g. stale brackets carried over from
+    # a broker switch — a bracket placed on Alpaca won't exist on the IBKR
+    # slice). Keep brackets younger than a grace period so a just-placed entry
+    # isn't dropped before its fill shows up as a position. Without this the
+    # bot keeps skipping a ticker ("already has an open bracket") it doesn't
+    # actually hold, and never re-enters.
+    try:
+        held = {str(p.symbol).upper()
+                for p in (trading_client.get_all_positions() or [])}
+        _now = datetime.now(timezone.utc)
+        for tk, br in list(state.get("open_brackets", {}).items()):
+            if tk.upper() in held:
+                continue
+            try:
+                age = (_now - datetime.fromisoformat(br.get("time"))).total_seconds()
+            except Exception:
+                age = 1e9
+            if age < 180:
+                continue          # just placed — give the fill time to land
+            state["open_brackets"].pop(tk, None)
+            print(f"  [bracket reconcile] {tk}: no live position on this "
+                  f"broker — clearing stale bracket", flush=True)
+    except Exception:
+        pass
+    if not state.get("open_brackets"):
+        return state
+
     try:
         orders = trading_client.get_orders(
             filter=GetOrdersRequest(
