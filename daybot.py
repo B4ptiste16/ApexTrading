@@ -262,12 +262,12 @@ os.makedirs(CHART_DIR, exist_ok=True)
 _AI_PROVIDER, _AI_MODEL, _AI_KEY, _AI_MODE = load_ai_config()
 print(f"[ai] provider={_AI_PROVIDER}  model={_AI_MODEL}  mode={_AI_MODE}")
 
-_ALPACA_IS_PAPER = (os.environ.get("APEX_ALPACA_MODE", "paper").lower() != "live")
-trading_client   = TradingClient(
-    os.getenv("ALPACA_API_KEY_DAY",   os.getenv("ALPACA_API_KEY")),
-    os.getenv("ALPACA_SECRET_KEY_DAY", os.getenv("ALPACA_SECRET_KEY")),
-    paper=_ALPACA_IS_PAPER
-)
+# V4.6.53 — broker-aware: route through core.broker_client so DAY trades the
+# active broker (IBKR sub-portfolio slice when APEX_BROKER=ibkr) instead of
+# always hitting the Alpaca account. Previously it built a raw Alpaca
+# TradingClient, so on the IBKR cloud it kept reading/trading Alpaca.
+from core.broker_client import get_broker_client
+trading_client, _, _ = get_broker_client("stocks")
 
 
 # =========================================================

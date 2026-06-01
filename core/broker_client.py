@@ -250,6 +250,7 @@ class _IBKRShim:
         except Exception:
             pass
         return SimpleNamespace(
+            id=self.account,         # V4.6.53 — bots read account.id
             portfolio_value=eq, equity=eq, cash=led.cash,
             buying_power=led.cash,   # a slice can only spend its own cash
             last_equity=eq,
@@ -354,6 +355,7 @@ class _IBKRShim:
                 return self._slice_account()
 
         return SimpleNamespace(
+            id=self.account,         # V4.6.53 — bots read account.id
             portfolio_value=eq, equity=eq, cash=cash,
             buying_power=bp, last_equity=eq,
         )
@@ -403,6 +405,50 @@ class _IBKRShim:
             ))
         return out
 
+    # ── orders (alpaca-py compat, V4.6.53 — needed by the DAY bracket bot) ──
+
+    def get_orders(self, filter=None):
+        """Map live IBKR orders to alpaca-py-style Order objects so the DAY
+        bracket bot can sync. Honors the GetOrdersRequest.status filter
+        (OPEN / CLOSED / ALL)."""
+        want = "ALL"
+        try:
+            want = str(getattr(filter, "status", "ALL")).split(".")[-1].upper()
+        except Exception:
+            pass
+        out = []
+        try:
+            for tr in self.ib.trades():
+                st = str(tr.orderStatus.status or "")
+                is_open = st in ("Submitted", "PreSubmitted", "PendingSubmit",
+                                 "ApiPending", "PendingCancel")
+                if want == "OPEN" and not is_open:
+                    continue
+                if want == "CLOSED" and is_open:
+                    continue
+                out.append(SimpleNamespace(
+                    id=str(tr.order.orderId),
+                    symbol=getattr(tr.contract, "symbol", ""),
+                    side=str(tr.order.action),       # BUY / SELL
+                    status=st,
+                    qty=float(tr.order.totalQuantity or 0),
+                    filled_qty=float(tr.orderStatus.filled or 0),
+                    filled_avg_price=float(tr.orderStatus.avgFillPrice or 0),
+                ))
+        except Exception as e:
+            print(f"  [ibkr] get_orders failed: {e}", flush=True)
+        return out
+
+    def cancel_order_by_id(self, order_id):
+        """Cancel a resting IBKR order by its orderId (best-effort)."""
+        try:
+            for tr in self.ib.openTrades():
+                if str(tr.order.orderId) == str(order_id):
+                    self.ib.cancelOrder(tr.order)
+                    return
+        except Exception as e:
+            print(f"  [ibkr] cancel_order_by_id failed: {e}", flush=True)
+
     # ── single-symbol position lookup (alpaca-py compat) ──────────────
 
     def get_open_position(self, symbol: str):
@@ -427,11 +473,30 @@ class _IBKRShim:
         # Cheap ET offset: -4 for EDT roughly Mar–Nov, -5 for EST otherwise.
         # Good enough for is_open; precise scheduling lives in the AI loop.
         now = datetime.now(timezone.utc)
-        et = now - timedelta(hours=5 if now.month in (12, 1, 2) else 4)
+        off = timedelta(hours=5 if now.month in (12, 1, 2) else 4)
+        et = now - off
         weekday_open = et.weekday() < 5
         minutes = et.hour * 60 + et.minute
         is_open = weekday_open and (9 * 60 + 30) <= minutes < (16 * 60)
-        return SimpleNamespace(is_open=is_open, timestamp=now)
+        # V4.6.53 — alpaca-py's Clock also exposes next_open / next_close
+        # (some bots read them, e.g. for time-stops). Provide sane UTC values.
+        open_et  = et.replace(hour=9,  minute=30, second=0, microsecond=0)
+        close_et = et.replace(hour=16, minute=0,  second=0, microsecond=0)
+        if minutes >= (16 * 60) or not weekday_open:
+            # after close (or weekend): next session is the following day(s)
+            nxt = et + timedelta(days=1)
+            while nxt.weekday() >= 5:
+                nxt += timedelta(days=1)
+            next_open  = nxt.replace(hour=9,  minute=30, second=0, microsecond=0) + off
+            next_close = nxt.replace(hour=16, minute=0,  second=0, microsecond=0) + off
+        elif minutes < (9 * 60 + 30):
+            next_open  = open_et + off
+            next_close = close_et + off
+        else:   # market open now
+            next_open  = (open_et + timedelta(days=1)) + off
+            next_close = close_et + off
+        return SimpleNamespace(is_open=is_open, timestamp=now,
+                               next_open=next_open, next_close=next_close)
 
     # ── close one symbol ───────────────────────────────────────────────
 

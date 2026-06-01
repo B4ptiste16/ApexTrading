@@ -72,7 +72,9 @@ def _load_state() -> dict:
 def _save_state(s: dict) -> None:
     try:
         STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
-        STATE_FILE.write_text(json.dumps(s, indent=2), encoding="utf-8")
+        # default=str so non-JSON types (e.g. an Alpaca account UUID) serialize
+        STATE_FILE.write_text(json.dumps(s, indent=2, default=str),
+                              encoding="utf-8")
     except Exception as e:
         print(f"[transition] save_state failed: {e}", flush=True)
 
