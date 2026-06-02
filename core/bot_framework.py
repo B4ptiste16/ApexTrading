@@ -101,6 +101,16 @@ def liquidate_off_strategy_positions(client, asset_type: str) -> list:
         print(f"[startup-cleanup] unknown asset_type='{asset_type}', "
               f"skipping cleanup", flush=True)
         return []
+    # V4.6.56 — SAFETY: never run account-wide cleanup on a shared IBKR
+    # account that has no sub-portfolio ledger. Without a ledger,
+    # get_all_positions() returns EVERY bot's positions, so we'd wrongly
+    # liquidate other bots' holdings. Only clean when a ledger isolates this
+    # bot's own slice. (Alpaca clients have no `ledger` attr → cleanup runs.)
+    if getattr(client, "ledger", "n/a") is None:
+        print("[startup-cleanup] no sub-portfolio ledger yet — skipping "
+              "account-wide cleanup to avoid touching other bots' positions",
+              flush=True)
+        return []
     try:
         positions = client.get_all_positions()
     except Exception as e:

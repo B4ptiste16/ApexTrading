@@ -758,6 +758,19 @@ class _IBKRShim:
                         continue
         except Exception as e:
             print(f"  [ibkr] price lookup {sym} failed: {e}", flush=True)
+        # 3) V4.6.56 — fall back to yfinance when IBKR has no market data for
+        # this symbol (common for crypto without an IBKR data subscription).
+        # Good enough to size an order; the fill still happens at the market.
+        try:
+            import yfinance as yf
+            yf_sym = (sym + "-USD") if self.asset_type == "crypto" else sym
+            h = yf.Ticker(yf_sym).history(period="1d")
+            if not h.empty:
+                v = float(h["Close"].iloc[-1])
+                if v == v and v > 0:
+                    return v
+        except Exception:
+            pass
         return 0.0
 
     def _fill_info(self, trade) -> tuple:
@@ -778,15 +791,27 @@ class _IBKRShim:
 
     def _market_order(self, symbol: str, action: str, qty: float):
         from ib_async import MarketOrder
-        contract = self._contract(normalize_symbol(symbol))
+        sym = normalize_symbol(symbol)
+        contract = self._contract(sym)
         try:
             self.ib.qualifyContracts(contract)
         except Exception as e:
             raise RuntimeError(f"IBKR could not qualify {symbol}: {e}")
         order = MarketOrder(action, qty)
+        # V4.6.56 — IBKR CRYPTO orders must be IOC, and a BUY must be sized by
+        # cash amount (cashQty in USD), not coin quantity — otherwise IBKR
+        # rejects it with 'Error 10289: You must set Cash Quantity'. SELLs are
+        # sized by quantity (the coins held) as normal.
+        if self.asset_type == "crypto":
+            order.tif = "IOC"
+            if action == "BUY":
+                px = self._price(sym)
+                if px > 0:
+                    order.totalQuantity = 0
+                    order.cashQty = round(qty * px, 2)
         trade = self.ib.placeOrder(contract, order)
         # Give the gateway a moment to assign an orderId / report a fill.
-        self.ib.sleep(1)
+        self.ib.sleep(2)
         return trade
 
     # ── internal: bracket / OCO placement (V4.6.42) ─────────────────────
