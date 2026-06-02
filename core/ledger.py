@@ -85,6 +85,15 @@ class Ledger:
         # written by the bot each cycle so the desktop can show a LIVE
         # allocation % that grows/shrinks with the bot's performance.
         self.last_value = float(data.get("last_value", 0.0))
+        # V4.6.61 — per-holding live marks captured from the IBKR account each
+        # cycle: {SYM: {"avg_entry": x, "price": y, "mv": z, "upl": p}}. Lets the
+        # desktop render EXACT entry price + unrealized P/L for cloud bots (the
+        # holdings dict alone has only quantity, no cost basis).
+        self.marks: dict[str, dict] = {
+            normalize_symbol(k): dict(v)
+            for k, v in (data.get("marks") or {}).items()
+            if isinstance(v, dict)
+        }
 
     # ── persistence ─────────────────────────────────────────────────
 
@@ -132,6 +141,7 @@ class Ledger:
                 "created": self.created,
                 "updated": self.updated,
                 "last_value": self.last_value,
+                "marks": self.marks,
             }, indent=2), encoding="utf-8")
         except Exception as e:
             print(f"  [ledger] save failed: {e}", flush=True)

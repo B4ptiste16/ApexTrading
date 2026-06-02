@@ -175,6 +175,7 @@ def list_ibkr_ledgers(user_id: int) -> list[dict]:
                 "allocated":  float(j.get("allocated_cash", 0.0)),
                 "value":      float(j.get("last_value", 0.0)),
                 "holdings":   j.get("holdings", {}),
+                "marks":      j.get("marks", {}),     # V4.6.61 — per-holding exact marks
                 "file":       f.stem,
             })
         except Exception:

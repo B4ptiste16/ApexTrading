@@ -97,8 +97,22 @@ class RefreshWorker(QThread):
         else:
             meta = S(lambda: D.position_meta(positions, self.side),
                      {}, "position_meta")
+        acct = S(lambda: D.get_account(self.side), {}, "account")
+        # V4.6.60 — record an equity snapshot from the detail page too (throttled
+        # to 1/5min in core.data). Previously only the Overview tab appended
+        # snapshots, so an IBKR bot's equity / lifetime curves stayed empty
+        # unless the user happened to visit Overview. This builds the curve
+        # from whichever tab is open.
+        try:
+            if acct and acct.get("connected"):
+                D.append_bot_snapshot(self.side,
+                                      equity=acct.get("equity", 0),
+                                      portfolio_value=acct.get("portfolio_value", 0),
+                                      positions_count=len(positions))
+        except Exception:
+            pass
         data.update({
-            "account":       S(lambda: D.get_account(self.side), {}, "account"),
+            "account":       acct,
             "positions":     positions,
             "position_meta": meta,
             "history":       S(lambda: D.get_history(self.side, self.period),

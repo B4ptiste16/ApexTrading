@@ -623,10 +623,20 @@ def position_gauge(positions: list, side: str,
 
     for i, p in enumerate(sorted(positions, key=lambda x: x["symbol"])):
         ticker  = p["symbol"]
-        entry   = float(p["avg_entry_price"])
-        current = float(p.get("current_price", entry))
-        unr     = float(p["unrealized_pl"])
-        unr_pct = float(p.get("unrealized_plpc", 0)) * 100
+        entry   = float(p.get("avg_entry_price", 0) or 0)
+        current = float(p.get("current_price", entry) or 0)
+        # V4.6.60 — some brokers (e.g. IBKR cloud sub-portfolios) don't expose
+        # an average entry price. The gauge is built as a % from entry, so a
+        # zero entry used to raise ZeroDivisionError — which the caller caught
+        # silently, leaving a stale "No open positions" while OTHER charts on
+        # the page rendered fine. Fall back to the current price (position
+        # shown at break-even) so the gauge always renders.
+        if entry <= 0:
+            entry = current
+        if entry <= 0:
+            continue  # no usable price at all — can't place this row
+        unr     = float(p.get("unrealized_pl", 0) or 0)
+        unr_pct = float(p.get("unrealized_plpc", 0) or 0) * 100
 
         per_tkr = meta.get(ticker)
         if per_tkr:

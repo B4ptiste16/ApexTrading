@@ -267,18 +267,52 @@ class _IBKRShim:
     def _slice_account(self):
         """SimpleNamespace account scoped to this bot's ledger slice."""
         led = self.ledger
+        # V4.6.61 — read the IBKR account's live portfolio so we can capture the
+        # EXACT per-holding average cost, market price and unrealized P/L. The
+        # ledger only stores quantity, so without this the desktop can't show a
+        # real entry price for cloud bots. averageCost is the account's blended
+        # per-share cost (shared symbols are one IBKR position); we attribute it
+        # to this bot's slice quantity.
+        port = {}
+        try:
+            for it in self.ib.portfolio():
+                psym = normalize_symbol(getattr(it.contract, "symbol", "") or "")
+                if psym:
+                    port[psym] = it
+        except Exception:
+            pass
         holdings_val = 0.0
+        marks: dict = {}
         for sym, qty in led.holdings.items():
             if abs(qty) <= _EPS:
                 continue
-            holdings_val += qty * self._price(sym)
+            nsym = normalize_symbol(sym)
+            it = port.get(nsym)
+            avg = float(getattr(it, "averageCost", 0) or 0) if it is not None else 0.0
+            px  = float(getattr(it, "marketPrice", 0) or 0) if it is not None else 0.0
+            if px <= 0:
+                px = self._price(sym)
+            if avg <= 0:
+                avg = px            # cost basis unknown — show at break-even
+            mv  = qty * px
+            holdings_val += mv
+            marks[nsym] = {
+                "avg_entry": round(avg, 6),
+                "price":     round(px, 6),
+                "mv":        round(mv, 2),
+                "upl":       round((px - avg) * qty, 2),
+            }
         eq = led.cash + holdings_val
-        # V4.6.51 — snapshot the live slice value so the desktop can show an
-        # allocation % that tracks performance. Persist only when it moved.
+        # V4.6.51/61 — snapshot the live slice value + per-holding marks so the
+        # desktop can show a performance-tracking allocation % AND exact P/L.
         try:
-            if abs(eq - getattr(led, "last_value", 0.0)) > 0.01:
+            if (abs(eq - getattr(led, "last_value", 0.0)) > 0.01
+                    or marks != getattr(led, "marks", {})):
                 led.last_value = eq
+                led.marks = marks
                 led.save()
+            else:
+                led.marks = marks
         except Exception:
             pass
         return SimpleNamespace(

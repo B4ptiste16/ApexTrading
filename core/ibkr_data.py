@@ -301,6 +301,7 @@ def _build_cloud_data(mode: str) -> dict:
             continue
         cash = float(led.get("cash", 0.0) or 0.0)
         holdings = led.get("holdings", {}) or {}
+        marks = led.get("marks", {}) or {}
         positions = []
         held_val = 0.0
         for sym, qty in holdings.items():
@@ -310,16 +311,24 @@ def _build_cloud_data(mode: str) -> dict:
                 continue
             if abs(q) <= 1e-9:
                 continue
-            px = _quick_price(sym)
-            mv = q * px
+            # V4.6.61 — prefer the EXACT marks the bot captured from the IBKR
+            # account (real average cost + price + unrealized P/L). Fall back to
+            # a local yfinance price (entry == price, i.e. break-even) only when
+            # the bot hasn't written marks yet.
+            mk = marks.get(sym) or marks.get(str(sym).upper()) or {}
+            px    = float(mk.get("price", 0) or 0) or _quick_price(sym)
+            entry = float(mk.get("avg_entry", 0) or 0) or px
+            mv    = float(mk.get("mv", 0) or 0) or (q * px)
+            upl   = float(mk.get("upl", 0) or 0)
+            plpc  = (upl / (entry * abs(q))) if (entry and q) else 0.0
             held_val += mv
             positions.append({
                 "symbol":          sym,
                 "qty":             q,
                 "market_value":    mv,
-                "avg_entry_price": 0.0,
-                "unrealized_pl":   0.0,
-                "unrealized_plpc": 0.0,
+                "avg_entry_price": entry,
+                "unrealized_pl":   upl,
+                "unrealized_plpc": plpc,
                 "current_price":   px,
             })
         # Headline equity: trust the server-computed slice value (the bot
@@ -454,19 +463,26 @@ def get_positions(side: str) -> list:
     led = _ledger_for(mode, side)
     if led is not None:
         pm = _price_map(snap)
+        marks = getattr(led, "marks", {}) or {}
         out = []
         for sym, qty in led.holdings.items():
             if abs(qty) <= 1e-9:
                 continue
-            px = pm.get(sym.upper(), 0.0)
-            mv = qty * px
+            # V4.6.61 — use the bot's exact captured marks (real average cost +
+            # unrealized P/L) when present; else fall back to the snapshot price.
+            mk = marks.get(str(sym).upper()) or {}
+            px    = float(mk.get("price", 0) or 0) or pm.get(str(sym).upper(), 0.0)
+            entry = float(mk.get("avg_entry", 0) or 0) or px
+            mv    = float(mk.get("mv", 0) or 0) or (qty * px)
+            upl   = float(mk.get("upl", 0) or 0)
+            plpc  = (upl / (entry * abs(qty))) if (entry and qty) else 0.0
             out.append({
                 "symbol":          sym,
                 "qty":             qty,
                 "market_value":    mv,
-                "avg_entry_price": 0.0,
-                "unrealized_pl":   0.0,
-                "unrealized_plpc": 0.0,
+                "avg_entry_price": entry,
+                "unrealized_pl":   upl,
+                "unrealized_plpc": plpc,
                 "current_price":   px,
             })
         return out
@@ -481,6 +497,32 @@ def get_positions(side: str) -> list:
 
 
 def get_history(side: str, period: str) -> pd.DataFrame:
-    """IBKR has no simple portfolio-equity-curve endpoint. Return empty so the
-    chart falls back to the per-bot lifetime snapshot files."""
-    return pd.DataFrame()
+    """IBKR has no portfolio-equity-curve endpoint, so build the curve from
+    this bot's locally-recorded equity snapshots (the same file the overview
+    appends to). Filtered to the requested period. Empty until at least one
+    snapshot exists. V4.6.60."""
+    try:
+        snaps = D.read_bot_snapshots(side)
+    except Exception:
+        snaps = []
+    if not snaps:
+        return pd.DataFrame()
+    from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+    days = {"1D": 1, "1W": 7, "1M": 30, "3M": 90,
+            "6M": 180, "1Y": 365}.get(period, 1)
+    cutoff = _dt.now(_tz.utc) - _td(days=days)
+    rows = []
+    for s in snaps:
+        try:
+            ts = _dt.fromisoformat(s["ts"])
+            if ts.tzinfo is None:
+                ts = ts.replace(tzinfo=_tz.utc)
+            if ts >= cutoff:
+                rows.append((ts, float(s.get("equity", 0) or 0)))
+        except Exception:
+            continue
+    if not rows:
+        return pd.DataFrame()
+    df = pd.DataFrame(rows, columns=["time", "equity"])
+    df["time"] = pd.to_datetime(df["time"], utc=True)
+    return df
