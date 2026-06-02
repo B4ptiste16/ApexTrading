@@ -560,29 +560,37 @@ class OverviewTab(QWidget):
         d_arrow = "▲" if day_pl >= 0 else "▼"
         d_color = C["green"] if day_pl >= 0 else C["red"]
 
-        # ── PERIOD P/L: scoped to BOT lifetime, filtered by user's
-        #    selected period (1D / 1W / 1M / 3M / 6M / 1Y) ──────
+        # ── PERIOD P/L: delta from the close `period` ago ───────
+        # V4.6.59 — the period selector now means "change since the close one
+        # PERIOD ago", matching how traders read it: 1D = since last close
+        # (so it equals DAY P/L), 1W = since the close 7 days ago, etc. The
+        # baseline is the equity AS OF that point (last snapshot at/before the
+        # cutoff), NOT a rolling-window first sample. Was previously mislabelled
+        # "bot lifetime" and used a different baseline than DAY P/L.
         period = self._current_period()
-        period_days = {"1D": 1, "1W": 7, "1M": 30, "3M": 90,
-                       "6M": 180, "1Y": 365}.get(period, 1)
         from datetime import timedelta as _td
-        period_start = now_utc - _td(days=period_days)
-        period_baseline_eq = None
-        for s in bot_hist:
-            try:
-                ts = _dt.fromisoformat(s["ts"])
-                if ts >= period_start:
-                    period_baseline_eq = float(s.get("equity", eq))
-                    break
-            except Exception:
-                continue
-        if period_baseline_eq is None:
-            # Bot's whole lifetime is shorter than the period — use the
-            # earliest snapshot ever (= bot's birth equity).
-            if bot_hist:
-                period_baseline_eq = float(bot_hist[0].get("equity", eq))
-            else:
-                period_baseline_eq = eq
+        if period == "1D":
+            # 1D delta-from-last-close is identical to DAY P/L by definition.
+            period_baseline_eq = today_baseline_eq
+        else:
+            period_days = {"1W": 7, "1M": 30, "3M": 90,
+                           "6M": 180, "1Y": 365}.get(period, 7)
+            cutoff = now_utc - _td(days=period_days)
+            period_baseline_eq = None
+            # Equity as of the close `period` ago = last snapshot at/before cutoff
+            for s in reversed(bot_hist):
+                try:
+                    ts = _dt.fromisoformat(s["ts"])
+                    if ts <= cutoff:
+                        period_baseline_eq = float(s.get("equity", eq))
+                        break
+                except Exception:
+                    continue
+            if period_baseline_eq is None:
+                # Bot's whole lifetime is shorter than the period — use the
+                # earliest snapshot ever (= bot's birth equity).
+                period_baseline_eq = (float(bot_hist[0].get("equity", eq))
+                                      if bot_hist else eq)
         p_pl  = eq - period_baseline_eq
         p_pct = (p_pl / period_baseline_eq * 100
                  if period_baseline_eq else 0)
@@ -595,7 +603,7 @@ class OverviewTab(QWidget):
             p_arrow = "▲" if p_pl >= 0 else "▼"
             p_color = C["green"] if p_pl >= 0 else C["red"]
             period_txt = (f"{p_arrow} ${abs(p_pl):,.2f} ({p_pct:+.1f}%) "
-                          f"· bot lifetime")
+                          f"· {period}")
 
         block._cards["PORTFOLIO"].update_value(f"${pv:,.2f}", block_color)
         if len(bot_hist) < 2:

@@ -205,6 +205,165 @@ def reset() -> None:
     """Drop the cached snapshot — call after IBKR settings change."""
     with _snap_lock:
         _snap_cache.clear()
+        _cloud_cache.clear()
+
+
+# ── cloud path (v4.6.59) ─────────────────────────────────────────────────
+# When the user's IBKR bots run 24/7 on the Oracle cloud (run_on_oracle), the
+# desktop has NO local gateway to read, so the overview used to show
+# "not connected". Instead we pull each bot's sub-portfolio ledger (cash +
+# holdings + server-computed slice value) from the APEX server and price the
+# holdings locally. The fetch happens on a BACKGROUND thread (the overview
+# refresh runs on the UI thread) and is cached, so the UI never blocks — the
+# data simply appears on the next refresh tick.
+
+_CLOUD_TTL = 12.0
+_cloud_cache: dict[str, tuple] = {}     # mode -> (ts, {SIDE: {account, positions}})
+_cloud_inflight: set = set()
+
+_PRICE_TTL = 60.0
+_price_cache: dict[str, tuple] = {}     # SYM -> (ts, price)
+
+
+def _cloud_enabled(mode: str) -> bool:
+    return bool(_cfg(mode).get("run_on_oracle"))
+
+
+def _cloud_creds() -> tuple:
+    """(token, server_url) from the desktop auth files, without importing ui."""
+    import json
+    from core.paths import DATA_DIR
+    tok = None
+    url = "http://localhost:8000"
+    try:
+        with open(DATA_DIR / "apex_auth.json", encoding="utf-8") as f:
+            tok = json.load(f).get("token")
+    except Exception:
+        pass
+    try:
+        with open(DATA_DIR / "apex_server.json", encoding="utf-8") as f:
+            url = json.load(f).get("url", url).rstrip("/")
+    except Exception:
+        pass
+    return tok, url
+
+
+def _quick_price(sym: str) -> float:
+    """Best-effort latest price for a holding symbol (cached 60s). Maps crypto
+    tickers to yfinance form (BTC -> BTC-USD). Returns 0.0 on failure."""
+    key = str(sym).upper()
+    now = time.time()
+    c = _price_cache.get(key)
+    if c and (now - c[0]) < _PRICE_TTL:
+        return c[1]
+    px = 0.0
+    try:
+        import yfinance as yf
+        s = key.replace("/", "")
+        # crypto: BTC / BTCUSD -> BTC-USD ; leave normal tickers alone
+        cryptoish = s.endswith("USD") and len(s) > 3
+        yf_sym = f"{s[:-3]}-USD" if cryptoish else key
+        h = yf.Ticker(yf_sym).history(period="1d")
+        if not h.empty:
+            px = float(h["Close"].iloc[-1])
+    except Exception:
+        px = 0.0
+    _price_cache[key] = (now, px)
+    return px
+
+
+def _build_cloud_data(mode: str) -> dict:
+    """Fetch /ibkr/ledgers and build {SIDE: {account, positions}} by pricing
+    each bot's holdings locally. Runs on a background thread."""
+    tok, url = _cloud_creds()
+    if not tok:
+        return {}
+    try:
+        import requests
+        rr = requests.get(f"{url}/ibkr/ledgers",
+                          headers={"Authorization": f"Bearer {tok}"},
+                          timeout=10)
+        if not rr.ok:
+            return {}
+        ledgers = rr.json().get("ledgers", []) or []
+    except Exception as e:
+        print(f"[ibkr] cloud ledgers fetch: {e}")
+        return {}
+
+    out: dict = {}
+    for led in ledgers:
+        bid = str(led.get("bot_id") or "").upper()
+        if not bid:
+            # derive from file stem like "day_paper" -> "DAY"
+            stem = str(led.get("file", ""))
+            bid = stem.split("_")[0].upper() if stem else ""
+        if not bid:
+            continue
+        cash = float(led.get("cash", 0.0) or 0.0)
+        holdings = led.get("holdings", {}) or {}
+        positions = []
+        held_val = 0.0
+        for sym, qty in holdings.items():
+            try:
+                q = float(qty)
+            except (TypeError, ValueError):
+                continue
+            if abs(q) <= 1e-9:
+                continue
+            px = _quick_price(sym)
+            mv = q * px
+            held_val += mv
+            positions.append({
+                "symbol":          sym,
+                "qty":             q,
+                "market_value":    mv,
+                "avg_entry_price": 0.0,
+                "unrealized_pl":   0.0,
+                "unrealized_plpc": 0.0,
+                "current_price":   px,
+            })
+        # Headline equity: trust the server-computed slice value (the bot
+        # priced it with its live feed). Fall back to locally-priced holdings
+        # only if the server hasn't snapshotted a value yet.
+        equity = float(led.get("value", 0.0) or 0.0)
+        if equity <= 0:
+            equity = cash + held_val
+        out[bid] = {
+            "account": {
+                "portfolio_value": equity,
+                "equity":          equity,
+                "cash":            cash,
+                "buying_power":    cash,
+                "last_equity":     equity,
+                "connected":       True,
+            },
+            "positions": positions,
+        }
+    return out
+
+
+def _cloud_data(mode: str):
+    """Non-blocking accessor: return the cached cloud per-side data and kick
+    off a background refresh when it's stale. None when cloud mode is off."""
+    if not _cloud_enabled(mode):
+        return None
+    now = time.time()
+    with _snap_lock:
+        c = _cloud_cache.get(mode)
+        fresh = c and (now - c[0]) < _CLOUD_TTL
+        if not fresh and mode not in _cloud_inflight:
+            _cloud_inflight.add(mode)
+
+            def _refresh():
+                try:
+                    data = _build_cloud_data(mode)
+                    with _snap_lock:
+                        _cloud_cache[mode] = (time.time(), data)
+                finally:
+                    with _snap_lock:
+                        _cloud_inflight.discard(mode)
+            threading.Thread(target=_refresh, daemon=True).start()
+        return c[1] if c else None
 
 
 def available_cash(mode: str | None = None) -> float:
@@ -240,6 +399,13 @@ def _price_map(snap: dict) -> dict:
 
 def get_account(side: str) -> dict:
     mode = _mode()
+    # Cloud bots (run on Oracle): read the per-bot ledger from the server
+    # instead of a local gateway that doesn't exist on this machine.
+    if _cloud_enabled(mode):
+        cd = _cloud_data(mode)
+        if cd and side.upper() in cd:
+            return cd[side.upper()]["account"]
+        return {"connected": False}
     snap = _snapshot(mode)
     if not snap.get("connected"):
         return {"connected": False}
@@ -274,6 +440,11 @@ def get_account(side: str) -> dict:
 
 def get_positions(side: str) -> list:
     mode = _mode()
+    if _cloud_enabled(mode):
+        cd = _cloud_data(mode)
+        if cd and side.upper() in cd:
+            return cd[side.upper()]["positions"]
+        return []
     snap = _snapshot(mode)
     if not snap.get("connected"):
         return []
