@@ -173,6 +173,13 @@ def get_client(side: str):
     fallback_secret = os.getenv("ALPACA_SECRET_KEY", "")
     api_key    = os.getenv(f"ALPACA_API_KEY_{side}",    fallback_key)
     api_secret = os.getenv(f"ALPACA_SECRET_KEY_{side}", fallback_secret)
+    # V4.6.58 — in LIVE mode prefer the live-namespaced keys (separate Alpaca
+    # account), falling back to the paper keys for single-account users.
+    if mode == "live":
+        api_key    = (os.getenv(f"ALPACA_API_KEY_LIVE_{side}")
+                      or os.getenv("ALPACA_API_KEY_LIVE") or api_key)
+        api_secret = (os.getenv(f"ALPACA_SECRET_KEY_LIVE_{side}")
+                      or os.getenv("ALPACA_SECRET_KEY_LIVE") or api_secret)
     if not api_key or not api_secret:
         return None
     try:

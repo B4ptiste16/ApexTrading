@@ -332,6 +332,15 @@ def _build_env(user_id: int, side: str,
         # default if it ignored OverrideTwsApiPort), not just the target.
         env["APEX_IBKR_PORT"]       = str(ibkr_gateway.active_port(user_id, _ibkr_mode))
         env["APEX_IBKR_CLIENT_ID"]  = str(_ibkr_client_id(blob, side))
+        # V4.6.58 — request LIVE real-time data on the cloud too. This requires
+        # the user's IBKR market-data subscription to be shared with the paper
+        # account (Client Portal → Settings → Paper Trading → "Share market
+        # data subscriptions with paper account"). If it isn't, pricing falls
+        # back to delayed quotes and then yfinance, so orders still size.
+        # Override with APEX_IBKR_DATA_TYPE_<SIDE> in the synced blob if needed.
+        env.setdefault("APEX_IBKR_DATA_TYPE",
+                       str(blob.get(f"APEX_IBKR_DATA_TYPE_{s}",
+                                    blob.get("APEX_IBKR_DATA_TYPE", "1"))))
         # V4.6.50 — this bot's allocation % (synced from Tools → IBKR) so the
         # shim seeds its sub-portfolio slice instead of trading the whole acct.
         _alloc = blob.get(f"APEX_IBKR_ALLOC_{s}")

@@ -1691,12 +1691,27 @@ class ToolsTab(QWidget):
         _refresh.clicked.connect(self.refresh_alpaca_slot_assignments)
         s.add(SectionHeader("ALPACA  ·  API KEYS", C["green"],
                             controls=_refresh))
+        # V4.6.58 — the slots are mode-aware. When the header Paper/Live toggle
+        # is in LIVE mode, the slots read/write LIVE-namespaced keys
+        # (ALPACA_API_KEY_LIVE_<SIDE>) so you enter your REAL Alpaca keys once
+        # and flipping the switch trades the live account. Paper mode is
+        # unchanged. (Alpaca paper & live are separate accounts with separate
+        # keys, so they're stored separately.)
+        _amode = D.load_settings().get("alpaca_mode", "paper")
+        self._alpaca_key_ns = "LIVE_" if _amode == "live" else ""
+        _ns = self._alpaca_key_ns
+        _live_mode = (_amode == "live")
         keys_info = QLabel(
-            "Enter up to 3 Alpaca paper API key / secret pairs and "
+            (("⚠ <b>LIVE mode</b> — enter your <b>real-money</b> Alpaca API "
+              "key / secret pairs below (these are different from your paper "
+              "keys). ") if _live_mode else
+             "Enter up to 3 Alpaca <b>paper</b> API key / secret pairs and ") +
             "assign each to a built-in bot (LONG / SHORT / DAY). Each "
-            "bot needs its own Alpaca paper account because Alpaca only "
-            "allows one set of open positions per account.")
-        keys_info.setStyleSheet(f"color:{C['muted']};font-size:11px;")
+            "bot needs its own Alpaca account because Alpaca only "
+            "allows one set of open positions per account. "
+            "Switch Paper / Live via the toggle in the app header.")
+        keys_info.setStyleSheet(
+            f"color:{C['red'] if _live_mode else C['muted']};font-size:11px;")
         keys_info.setWordWrap(True)
         s.add(keys_info)
 
@@ -1706,13 +1721,13 @@ class ToolsTab(QWidget):
         _saved_order = D.load_settings().get("alpaca_slot_order", [])
         if _saved_order:
             for side in _saved_order:
-                k  = cur.get(f"ALPACA_API_KEY_{side}", "")
-                sk = cur.get(f"ALPACA_SECRET_KEY_{side}", "")
+                k  = cur.get(f"ALPACA_API_KEY_{_ns}{side}", "")
+                sk = cur.get(f"ALPACA_SECRET_KEY_{_ns}{side}", "")
                 existing_pairs.append((side, k, sk))
         else:
             for side in ("LONG", "SHORT", "DAY"):
-                k  = cur.get(f"ALPACA_API_KEY_{side}", "")
-                sk = cur.get(f"ALPACA_SECRET_KEY_{side}", "")
+                k  = cur.get(f"ALPACA_API_KEY_{_ns}{side}", "")
+                sk = cur.get(f"ALPACA_SECRET_KEY_{_ns}{side}", "")
                 if k or sk:
                     existing_pairs.append((side, k, sk))
         # Pad with empty slots so the user always sees 3
@@ -2064,8 +2079,9 @@ class ToolsTab(QWidget):
                 if not key_val or not secret_val:
                     missing.append(side)
                     continue
-                new_writes[f"ALPACA_API_KEY_{side}"]    = key_val
-                new_writes[f"ALPACA_SECRET_KEY_{side}"] = secret_val
+                _ns = getattr(self, "_alpaca_key_ns", "")
+                new_writes[f"ALPACA_API_KEY_{_ns}{side}"]    = key_val
+                new_writes[f"ALPACA_SECRET_KEY_{_ns}{side}"] = secret_val
 
             if missing:
                 self.keys_msg.setText(
@@ -2084,7 +2100,10 @@ class ToolsTab(QWidget):
                                      for c in reg.get("custom", [])]
             except Exception:
                 pass
-            to_delete = [f"{p}{s}"
+            # Only wipe the keys for the CURRENT mode's namespace so saving
+            # live keys never clobbers paper keys (and vice-versa).
+            _ns = getattr(self, "_alpaca_key_ns", "")
+            to_delete = [f"{p}{_ns}{s}"
                          for s in candidate_sides
                          for p in ("ALPACA_API_KEY_", "ALPACA_SECRET_KEY_")]
             D.delete_env_keys(to_delete)
@@ -2104,8 +2123,8 @@ class ToolsTab(QWidget):
             # 4. Verify write succeeded by reading back
             saved = D.read_env_keys()
             saved_sides = [s for s in candidate_sides
-                           if saved.get(f"ALPACA_API_KEY_{s}", "").strip()
-                           and saved.get(f"ALPACA_SECRET_KEY_{s}", "").strip()]
+                           if saved.get(f"ALPACA_API_KEY_{_ns}{s}", "").strip()
+                           and saved.get(f"ALPACA_SECRET_KEY_{_ns}{s}", "").strip()]
 
             if saved_sides and not missing:
                 self.keys_msg.setText(

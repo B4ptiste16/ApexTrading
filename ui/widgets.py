@@ -404,9 +404,18 @@ class BotProcessWidget(QWidget):
         APEX_BROKER=ibkr. Without that toggle, IBKR bots stay LOCAL so a bot
         the user believes is on IBKR can't silently trade Alpaca on the cloud."""
         try:
-            if self._broker_mode() == "ibkr" and not self._ibkr_cloud_enabled():
-                return False
             from core import data as _D
+            if self._broker_mode() == "ibkr":
+                if not self._ibkr_cloud_enabled():
+                    return False
+                # V4.6.58 — LIVE / real-money IBKR cannot run on the head-less
+                # Oracle gateway: IBKR forces Mobile 2FA on every live login,
+                # which can't be approved server-side. So in LIVE mode, force
+                # LOCAL execution (against the user's live TWS) — flipping the
+                # Paper→Live switch must never silently trade the paper cloud
+                # account while the user believes it's live.
+                if _D.load_settings().get("alpaca_mode", "paper") == "live":
+                    return False
             return _D.is_cloud_bot(self.side)
         except Exception:
             return False
@@ -638,7 +647,16 @@ class BotProcessWidget(QWidget):
             # connect.  Reads from the per-mode IBKR config the user set up
             # in Tools → IBKR.
             if _broker_now == "ibkr":
-                _ibkr_cfg = _s.get(f"ibkr_{_amode}", _s.get("ibkr", {})) or {}
+                _ibkr_cfg = dict(_s.get(f"ibkr_{_amode}") or {})
+                # V4.6.58 — make flipping the Paper→Live switch "just work":
+                # if the LIVE config hasn't been set up separately, inherit the
+                # bot client-IDs / allocations (and host) configured under paper.
+                # Only the PORT differs (live TWS = 7496), so we never inherit it.
+                if _amode == "live" and not _ibkr_cfg.get("bots"):
+                    _paper = _s.get("ibkr_paper", _s.get("ibkr", {})) or {}
+                    for _k in ("bots", "host"):
+                        if _k not in _ibkr_cfg and _k in _paper:
+                            _ibkr_cfg[_k] = _paper[_k]
                 env.insert("APEX_IBKR_HOST", str(_ibkr_cfg.get("host", "127.0.0.1")))
                 env.insert("APEX_IBKR_PORT", str(_ibkr_cfg.get("port",
                     "7497" if _amode == "paper" else "7496")))

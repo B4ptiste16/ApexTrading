@@ -67,10 +67,23 @@ def _resolve_alpaca_keys():
     actionable error."""
     side = (os.environ.get("APEX_BOT_SIDE") or "").upper()
     key = sec = ""
-    candidates_key = [f"ALPACA_API_KEY_{side}" if side else "",
-                      "ALPACA_API_KEY"]
-    candidates_sec = [f"ALPACA_SECRET_KEY_{side}" if side else "",
-                      "ALPACA_SECRET_KEY"]
+    # V4.6.58 — Alpaca paper and live are SEPARATE accounts with SEPARATE keys.
+    # In LIVE mode, prefer the live-namespaced keys (ALPACA_API_KEY_LIVE_<SIDE>)
+    # so flipping the Paper/Live switch trades the real account. Fall back to
+    # the paper-named keys for single-account users who reuse one key set.
+    _live = (os.environ.get("APEX_ALPACA_MODE") or "paper").lower() == "live"
+    candidates_key = []
+    candidates_sec = []
+    if _live:
+        if side:
+            candidates_key.append(f"ALPACA_API_KEY_LIVE_{side}")
+            candidates_sec.append(f"ALPACA_SECRET_KEY_LIVE_{side}")
+        candidates_key.append("ALPACA_API_KEY_LIVE")
+        candidates_sec.append("ALPACA_SECRET_KEY_LIVE")
+    candidates_key += [f"ALPACA_API_KEY_{side}" if side else "",
+                       "ALPACA_API_KEY"]
+    candidates_sec += [f"ALPACA_SECRET_KEY_{side}" if side else "",
+                       "ALPACA_SECRET_KEY"]
     for k in candidates_key:
         if k and os.environ.get(k):
             key = os.environ[k]
@@ -152,15 +165,25 @@ def _make_ibkr_client(asset_type: str):
             f"is enabled.")
     print(f"[broker] IBKR connected — managed accounts: {ib.managedAccounts()}",
           flush=True)
-    # V4.6.55 — paper accounts usually lack a LIVE US-stock market-data
-    # subscription (IBKR Error 10089), which made price lookups fail and
-    # blocked notional-sized orders. Request DELAYED data (free, ~15-min):
-    # IBKR uses live data when a subscription exists, else falls back to
-    # delayed — good enough to size orders (fills happen at the live market).
+    # V4.6.58 — request REAL-TIME data now that the user can hold a live
+    # market-data subscription (US Securities Snapshot + US Equity/Options
+    # Streaming bundles). reqMarketDataType: 1=live, 2=frozen (last live value
+    # when market closed), 3=delayed (~15-min, free), 4=delayed-frozen.
+    # Default to LIVE (1); override with APEX_IBKR_DATA_TYPE for accounts
+    # without a subscription. Price lookups still fall back to delayed fields
+    # and finally yfinance, so a missing subscription never blocks sizing.
     try:
-        ib.reqMarketDataType(3)   # 3 = delayed, 4 = delayed-frozen fallback
+        _mdt = int(os.environ.get("APEX_IBKR_DATA_TYPE") or "1")
+    except Exception:
+        _mdt = 1
+    _mdt_name = {1: "live", 2: "frozen", 3: "delayed",
+                 4: "delayed-frozen"}.get(_mdt, str(_mdt))
+    try:
+        ib.reqMarketDataType(_mdt)
+        print(f"[broker] reqMarketDataType({_mdt}) — {_mdt_name} quotes",
+              flush=True)
     except Exception as e:
-        print(f"[broker] reqMarketDataType(delayed) failed: {e}", flush=True)
+        print(f"[broker] reqMarketDataType({_mdt}) failed: {e}", flush=True)
     return _IBKRShim(ib, asset_type)
 
 
