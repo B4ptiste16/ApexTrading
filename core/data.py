@@ -257,7 +257,12 @@ def _ticker_atr_pct(symbol: str) -> float:
         return cached[1]
     try:
         import yfinance as yf
-        hist = yf.Ticker(symbol).history(period="30d", auto_adjust=True)
+        # Map crypto tickers to yfinance form: BTCUSD / BTC/USD -> BTC-USD.
+        yf_sym = symbol
+        s = symbol.replace("/", "").upper()
+        if s.endswith("USD") and "-" not in symbol and len(s) > 3:
+            yf_sym = f"{s[:-3]}-USD"
+        hist = yf.Ticker(yf_sym).history(period="30d", auto_adjust=True)
         if hist.empty or len(hist) < 14:
             _ATR_CACHE[symbol] = (now, 0.025)
             return 0.025
@@ -287,12 +292,27 @@ def position_meta(positions: list, side: str,
     Returns {symbol: {atr_pct, stop_pct, tp_pct, stop_price, tp_price}}.
     """
     meta: dict = {}
+    # Pre-fetch every ticker's ATR concurrently. _ticker_atr_pct is cached for
+    # an hour, but on a cold cache a bot with N positions used to make N
+    # sequential yfinance calls (~1s each) — the main cause of slow chart
+    # loading. Run them in a small thread pool so it's one round-trip instead.
+    syms = [p.get("symbol") for p in positions
+            if p.get("symbol") and float(p.get("avg_entry_price", 0)) > 0]
+    atr_by_sym: dict = {}
+    if syms:
+        from concurrent.futures import ThreadPoolExecutor
+        try:
+            with ThreadPoolExecutor(max_workers=min(8, len(syms))) as ex:
+                for s, a in zip(syms, ex.map(_ticker_atr_pct, syms)):
+                    atr_by_sym[s] = a
+        except Exception:
+            atr_by_sym = {s: _ticker_atr_pct(s) for s in syms}
     for p in positions:
         sym = p.get("symbol")
         entry = float(p.get("avg_entry_price", 0))
         if not sym or entry <= 0:
             continue
-        atr_pct = _ticker_atr_pct(sym)
+        atr_pct = atr_by_sym.get(sym) or _ticker_atr_pct(sym)
         if side == "SHORT":
             stop_pct = +atr_pct * stop_mult
             tp_pct   = -atr_pct * tp_mult

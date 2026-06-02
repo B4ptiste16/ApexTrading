@@ -197,7 +197,7 @@ def equity_curve(equity_df: pd.DataFrame, side: str, period: str,
     line on the chart so the user can see at a glance when trades fired."""
     if equity_df.empty:
         return empty_chart(f"No equity data — {period}")
-    color = BOT_COLOR[side]
+    color = BOT_COLOR.get(side, G)
     has_pl = "profit_loss" in equity_df.columns
 
     # PERFORMANCE line: use Alpaca's deposit-adjusted profit_loss if we
@@ -385,7 +385,7 @@ def combined_history_chart(df: pd.DataFrame, period: str) -> str:
 def lifetime_chart(snaps: pd.DataFrame, side: str) -> str:
     if snaps.empty or "portfolio_value" not in snaps.columns:
         return empty_chart("No snapshot data yet")
-    color = BOT_COLOR[side]
+    color = BOT_COLOR.get(side, G)
     pv    = snaps["portfolio_value"].values
     peak  = pd.Series(pv).cummax().tolist()
     ret   = (pv[-1]/pv[0]-1)*100 if pv[0]>0 else 0
@@ -616,7 +616,7 @@ def position_gauge(positions: list, side: str,
     if not positions:
         return empty_chart("No open positions", 240)
 
-    color = BOT_COLOR[side]
+    color = BOT_COLOR.get(side, G)
     data  = []
     n     = len(positions)
     meta  = meta or {}
@@ -727,7 +727,7 @@ def position_gauge(positions: list, side: str,
 
 def pl_bar_chart(positions: list, orders_df, side: str) -> str:
     from core.data import realized_pl as rpl
-    color = BOT_COLOR[side]
+    color = BOT_COLOR.get(side, G)
     all_t = {p["symbol"] for p in positions}
     if not orders_df.empty:
         all_t |= set(orders_df["Ticker"].unique())
@@ -774,7 +774,7 @@ def trade_timeline_chart(orders_df: pd.DataFrame, side: str) -> str:
     if orders_df.empty:
         return empty_chart("No trades yet", 280)
 
-    color  = BOT_COLOR[side]
+    color  = BOT_COLOR.get(side, G)
     filled = orders_df[orders_df["Filled"].notna()].copy()
     now    = pd.Timestamp.now(tz="UTC")
     bars   = []
