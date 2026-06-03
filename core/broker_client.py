@@ -766,6 +766,29 @@ class _IBKRShim:
         print(f"  [ledger] {side} {sym} {filled:g} @ ${px:.4f}  "
               f"→ cash=${self.ledger.cash:.2f}  "
               f"held={self.ledger.holding(sym):g}", flush=True)
+        self._record_fill(sym, side, filled, px)
+
+    def _record_fill(self, sym: str, side: str, qty: float, px: float) -> None:
+        """V4.6.63 — append every real fill to a per-bot fills log next to the
+        ledger. The desktop reads this (via the server) to show Trade History,
+        Recent Closed Trades and the Trade Summary for cloud IBKR bots, which
+        otherwise had no order source (Alpaca's order API is empty for IBKR)."""
+        if self.ledger is None:
+            return
+        try:
+            import json as _json
+            from datetime import datetime as _dt, timezone as _tz
+            f = self.ledger.path.with_name(self.ledger.path.stem + ".fills.jsonl")
+            with open(f, "a", encoding="utf-8") as fh:
+                fh.write(_json.dumps({
+                    "ts":     _dt.now(_tz.utc).isoformat(timespec="seconds"),
+                    "symbol": sym,
+                    "side":   side,
+                    "qty":    round(float(qty), 6),
+                    "price":  round(float(px), 6),
+                }) + "\n")
+        except Exception as e:
+            print(f"  [fills] write failed: {e}", flush=True)
 
     # ── pricing / contracts / fills ─────────────────────────────────────
 

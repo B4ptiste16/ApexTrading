@@ -366,7 +366,57 @@ def get_positions(side: str) -> list:
         return []
 
 
+def _ibkr_cloud_orders(side: str) -> pd.DataFrame:
+    """V4.6.63 — build an orders/fills DataFrame for a cloud IBKR bot from the
+    server's recorded fills (the desktop has no IBKR order API). Same columns
+    as the Alpaca path so trade history / closed trades / summary work."""
+    try:
+        s = load_settings()
+        mode = s.get("alpaca_mode", "paper")
+        cfg = s.get(f"ibkr_{mode}", s.get("ibkr", {})) or {}
+        if not cfg.get("run_on_oracle"):
+            return pd.DataFrame()
+        from core import ibkr_data as _ix
+        tok, url = _ix._cloud_creds()
+        if not tok:
+            return pd.DataFrame()
+        import requests
+        r = requests.get(f"{url}/ibkr/{side}/fills", params={"mode": mode},
+                         headers={"Authorization": f"Bearer {tok}"}, timeout=8)
+        fills = r.json().get("fills", []) if r.ok else []
+    except Exception as e:
+        print(f"[orders] IBKR cloud {side}: {e}")
+        return pd.DataFrame()
+    rows = []
+    for f in fills:
+        try:
+            q = float(f.get("qty", 0)); p = float(f.get("price", 0))
+        except (TypeError, ValueError):
+            continue
+        rows.append({
+            "Ticker":    f.get("symbol", ""),
+            "Side":      str(f.get("side", "")).upper(),
+            "Qty":       round(q, 6),
+            "Notional":  round(q * p, 2),
+            "Status":    "filled",
+            "Submitted": f.get("ts"),
+            "Filled":    f.get("ts"),
+            "Avg Fill":  p,
+            "Type":      "market",
+        })
+    df = pd.DataFrame(rows)
+    if not df.empty:
+        df["Submitted"] = pd.to_datetime(df["Submitted"], utc=True, errors="coerce")
+        df["Filled"]    = pd.to_datetime(df["Filled"],    utc=True, errors="coerce")
+        df = df.sort_values("Submitted", ascending=False)
+    return df
+
+
 def get_orders(side: str) -> pd.DataFrame:
+    # V4.6.63 — cloud IBKR bots have no Alpaca order API; read recorded fills
+    # from the server instead.
+    if load_settings().get("broker_mode", "alpaca") == "ibkr":
+        return _ibkr_cloud_orders(side)
     c = get_client(side)
     if not c:
         return pd.DataFrame()
@@ -1374,7 +1424,64 @@ def load_snapshots(side: str) -> pd.DataFrame:
     return df
 
 
+def _ibkr_cloud_log(side: str) -> pd.DataFrame:
+    """V4.6.63 — for a cloud IBKR bot, fetch its server log and extract recent
+    AI calls (decision / confidence / analysis / action) so the LAST AI SIGNAL
+    card populates. Best-effort text parse; returns empty on any failure."""
+    try:
+        s = load_settings()
+        mode = s.get("alpaca_mode", "paper")
+        cfg = s.get(f"ibkr_{mode}", s.get("ibkr", {})) or {}
+        if not cfg.get("run_on_oracle"):
+            return pd.DataFrame()
+        from core import ibkr_data as _ix
+        tok, url = _ix._cloud_creds()
+        if not tok:
+            return pd.DataFrame()
+        import requests
+        r = requests.get(f"{url}/bots/{side}/logs",
+                         params={"tail": 4000, "broker": "ibkr"},
+                         headers={"Authorization": f"Bearer {tok}"}, timeout=8)
+        text = r.json().get("log", "") if r.ok else ""
+        if not text:
+            return pd.DataFrame()
+    except Exception:
+        return pd.DataFrame()
+    import re as _re
+    from datetime import datetime as _dt, timezone as _tz
+    rows = []
+    cur = {"decision": "", "confidence": None, "analysis": "", "action": ""}
+    for line in text.splitlines():
+        try:
+            m = _re.search(r'"confidence"\s*:\s*([0-9.]+)', line)
+            if m:
+                cur["confidence"] = float(m.group(1))
+            m = _re.search(r'"(?:reason|short_analysis)"\s*:\s*"([^"]+)"', line)
+            if m:
+                cur["analysis"] = m.group(1)
+            m = _re.search(r'Decision:\s*([A-Za-z ]+)', line)
+            if m:
+                cur["decision"] = m.group(1).strip()
+            mc = _re.search(r'Confidence:\s*([0-9.]+)%', line)
+            if mc:
+                cur["confidence"] = float(mc.group(1)) / 100.0
+            if "ACTION:" in line or line.strip().startswith("ACTION"):
+                cur["action"] = line.split("ACTION:", 1)[-1].strip()[:160]
+                rows.append(dict(cur))
+        except Exception:
+            continue
+    if not rows and (cur["decision"] or cur["analysis"] or cur["confidence"]):
+        rows.append(dict(cur))
+    if not rows:
+        return pd.DataFrame()
+    df = pd.DataFrame(rows)
+    df["time"] = _dt.now(_tz.utc)
+    return df
+
+
 def load_bot_log(side: str) -> pd.DataFrame:
+    if load_settings().get("broker_mode", "alpaca") == "ibkr":
+        return _ibkr_cloud_log(side)
     rows = load_jsonl(log_files_for(side))
     if not rows:
         return pd.DataFrame()

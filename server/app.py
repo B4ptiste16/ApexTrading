@@ -1519,6 +1519,15 @@ def api_ibkr_ledgers(authorization: str | None = Header(default=None)):
     return {"ledgers": bot_runner.list_ibkr_ledgers(user["id"])}
 
 
+@app.get("/ibkr/{side}/fills")
+def api_ibkr_fills(side: str, mode: str = "paper", limit: int = 500,
+                   authorization: str | None = Header(default=None)):
+    """V4.6.63 — a cloud IBKR bot's recorded fills, for the desktop's Trade
+    History / Recent Closed Trades / Trade Summary."""
+    user = _current_user(authorization)
+    return {"fills": bot_runner.list_ibkr_fills(user["id"], side, mode, limit)}
+
+
 @app.post("/ibkr/{side}/rebalance")
 def api_ibkr_rebalance(side: str, target_pct: float, mode: str = "paper",
                        authorization: str | None = Header(default=None)):

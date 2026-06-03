@@ -246,6 +246,30 @@ def list_ibkr_ledgers(user_id: int) -> list[dict]:
     return out
 
 
+def list_ibkr_fills(user_id: int, side: str, mode: str = "paper",
+                    limit: int = 500) -> list[dict]:
+    """V4.6.63 — return a cloud IBKR bot's recorded fills (newest first) so the
+    desktop can show Trade History / Recent Closed Trades / Trade Summary."""
+    import json as _json
+    f = _ibkr_ledger_dir(user_id) / f"{side.lower()}_{mode.lower()}.fills.jsonl"
+    out: list[dict] = []
+    if not f.exists():
+        return out
+    try:
+        for line in f.read_text(encoding="utf-8").splitlines()[-limit:]:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                out.append(_json.loads(line))
+            except Exception:
+                continue
+    except Exception:
+        return []
+    out.reverse()
+    return out
+
+
 def request_ibkr_rebalance(user_id: int, side: str, target_pct: float,
                            mode: str = "paper") -> dict:
     """V4.6.51 — drop a rebalance request next to the bot's ledger. The
