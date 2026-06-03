@@ -187,6 +187,17 @@ def _display_num(user_id: int) -> int:
     return _DISPLAY_BASE + (int(user_id) % _PORT_SPAN)
 
 
+def _xvfb_alive(n: int) -> bool:
+    """V4.6.62 — True iff a real Xvfb process is serving display :n. Used to
+    distinguish a live display from a stale lock/socket left by a -9 kill."""
+    try:
+        r = subprocess.run(["pgrep", "-f", f"Xvfb :{n}"],
+                           capture_output=True, text=True, timeout=5)
+        return r.returncode == 0 and r.stdout.strip() != ""
+    except Exception:
+        return False
+
+
 def _ensure_xvfb(user_id: int) -> str:
     """Make sure an Xvfb is backing this user's display; return ':N'.
     Idempotent — reuses a live Xvfb (lock file present + pid alive)."""
@@ -197,8 +208,18 @@ def _ensure_xvfb(user_id: int) -> str:
         if proc is not None and proc.poll() is None:
             return disp
         # A previous run (or another worker) may already own this display.
+        # V4.6.62 — but only trust the lock if a REAL Xvfb is actually backing
+        # it. A -9 kill leaves a stale /tmp/.X{n}-lock + socket; trusting it
+        # routed the Gateway to a dead display and it exited instantly (code
+        # 1100/76). If the lock is stale, clear it + the socket and relaunch.
         if Path(f"/tmp/.X{n}-lock").exists():
-            return disp
+            if _xvfb_alive(n):
+                return disp
+            for stale in (f"/tmp/.X{n}-lock", f"/tmp/.X11-unix/X{n}"):
+                try:
+                    os.remove(stale)
+                except Exception:
+                    pass
         xlog = open(_user_dir(user_id) / "xvfb.log", "w",
                     buffering=1, encoding="utf-8")
         proc = subprocess.Popen(

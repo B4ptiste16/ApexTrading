@@ -32,6 +32,7 @@ Environment variables set per bot:
 from __future__ import annotations
 
 import os
+import fcntl
 import shlex
 import signal
 import subprocess
@@ -150,6 +151,68 @@ def _clear_pid_file(user_id: int, side: str, broker: str = "alpaca") -> None:
         pass
 
 
+# ── Desired-bots registry (V4.6.63) ─────────────────────────────────────
+# A persisted list of the (side, broker) a user wants running 24/7 on the
+# cloud. start_bot() records into it; stop_bot() removes from it. The
+# auto-scheduler watchdog ensures every desired bot is running every cycle —
+# so bots survive crashes, the desktop being closed, AND server restarts,
+# instead of only being started once at the market-open edge.
+
+def _desired_path(user_id: int) -> Path:
+    return _user_data_dir(user_id) / "desired_bots.json"
+
+
+def list_desired(user_id: int) -> list[dict]:
+    import json as _j
+    p = _desired_path(user_id)
+    try:
+        return _j.loads(p.read_text(encoding="utf-8")) if p.exists() else []
+    except Exception:
+        return []
+
+
+def _save_desired(user_id: int, items: list) -> None:
+    import json as _j
+    try:
+        p = _desired_path(user_id)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(_j.dumps(items, indent=2), encoding="utf-8")
+    except Exception as e:
+        print(f"[desired] save failed: {e}", flush=True)
+
+
+def add_desired(user_id: int, side: str, broker: str) -> None:
+    s = side.upper(); b = (broker or "alpaca").lower()
+    items = list_desired(user_id)
+    if not any(i.get("side") == s and i.get("broker") == b for i in items):
+        items.append({"side": s, "broker": b})
+        _save_desired(user_id, items)
+
+
+def remove_desired(user_id: int, side: str, broker: str) -> None:
+    s = side.upper(); b = (broker or "alpaca").lower()
+    items = [i for i in list_desired(user_id)
+             if not (i.get("side") == s and i.get("broker") == b)]
+    _save_desired(user_id, items)
+
+
+def list_all_desired() -> list[tuple]:
+    """(user_id, side, broker) for every desired bot across all users."""
+    out: list[tuple] = []
+    try:
+        for d in USERS_DIR.glob("user_*"):
+            try:
+                uid = int(d.name.split("_")[1])
+            except Exception:
+                continue
+            for it in list_desired(uid):
+                if it.get("side"):
+                    out.append((uid, it["side"], it.get("broker", "alpaca")))
+    except Exception:
+        pass
+    return out
+
+
 def _ibkr_ledger_dir(user_id: int) -> Path:
     """Where this user's IBKR sub-portfolio ledgers live on the server.
     Mirrors core.ledger.ledger_path(data_dir=<ibkr instance root>, broker=ibkr)."""
@@ -213,14 +276,27 @@ def _resolve_broker(user_id: int, side: str,
 
 
 def _pid_alive(pid: int) -> bool:
-    """True if a process with this PID exists. POSIX-only."""
+    """True if a LIVE process with this PID exists. POSIX-only.
+
+    V4.6.62 — treat ZOMBIE (defunct) processes as dead. A bot killed with -9
+    whose parent (uvicorn worker) hasn't reaped it stays as a zombie; os.kill(0)
+    succeeds for zombies, which made the runner think a crashed bot was still
+    'already_running' and refuse to restart it. Reading /proc state fixes that."""
     if pid <= 0:
         return False
     try:
         os.kill(pid, 0)
-        return True
     except (OSError, ProcessLookupError):
         return False
+    # Alive per kill(0) — but a zombie also passes that. Confirm it's not defunct.
+    try:
+        with open(f"/proc/{pid}/stat", "r") as f:
+            state = f.read().split(") ", 1)[1].split(" ", 1)[0]
+        if state == "Z":
+            return False
+    except Exception:
+        pass
+    return True
 
 
 def _bot_module(side: str) -> Optional[str]:
@@ -395,6 +471,37 @@ def is_running(user_id: int, side: str, broker: str = "alpaca") -> bool:
 
 
 def start_bot(user_id: int, side: str, broker: Optional[str] = None) -> dict:
+    """V4.6.62 — cross-worker SPAWN LOCK. uvicorn runs --workers 2, and the
+    desktop can fire a start at the same moment as the auto-scheduler or a
+    manual call. The pid-file dedup has a check-then-spawn race window, so two
+    workers both passed is_running()==False and double-spawned the bot — two
+    processes then fought over the SAME IBKR clientId (Error 326) and crash-
+    looped. We serialise the whole check+spawn under an exclusive file lock so
+    only one spawn can win per (user, side, broker)."""
+    s = side.upper()
+    b = _resolve_broker(user_id, s, broker)
+    lock_path = _pid_file(user_id, s, b).with_suffix(".startlock")
+    lf = open(lock_path, "w")
+    try:
+        fcntl.flock(lf, fcntl.LOCK_EX)
+        res = _start_bot_impl(user_id, side, b)
+        # V4.6.63 — record into the desired-bots registry so the watchdog keeps
+        # it running 24/7 (survives crash / desktop-close / server restart).
+        if isinstance(res, dict) and res.get("ok"):
+            try:
+                add_desired(user_id, s, b)
+            except Exception:
+                pass
+        return res
+    finally:
+        try:
+            fcntl.flock(lf, fcntl.LOCK_UN)
+        except Exception:
+            pass
+        lf.close()
+
+
+def _start_bot_impl(user_id: int, side: str, broker: Optional[str] = None) -> dict:
     """Spawn the bot. Returns a small status dict for the API caller.
 
     V4.6.41 — `broker` (from the desktop's ?broker= param) selects which
@@ -554,6 +661,12 @@ def stop_bot(user_id: int, side: str, broker: Optional[str] = None) -> dict:
     s = side.upper()
     b = _resolve_broker(user_id, s, broker)
     key = (user_id, s, b)
+    # V4.6.63 — a deliberate stop removes it from the desired registry so the
+    # watchdog does NOT resurrect it.
+    try:
+        remove_desired(user_id, s, b)
+    except Exception:
+        pass
     # PID file is the cross-worker source of truth; fall back to the
     # worker-local registry only when the file is gone.
     pid = _read_pid_file(user_id, s, b)

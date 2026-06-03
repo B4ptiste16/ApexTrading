@@ -1,0 +1,208 @@
+"""
+APEX server-side bot auto-start scheduler  (v4.6.27)
+─────────────────────────────────────────────────────────────────
+Auto-starts cloud bots at the US market open WITHOUT requiring the
+user's desktop APEX to be running. Replaces the v7.1.10 client-side
+QTimer scheduler for the cloud-bot case.
+
+Reads each user's `APEX_AUTO_SCHEDULE_<SIDE>` flag from their
+encrypted credentials blob (synced from desktop). On the market-open
+EDGE (closed → open), starts every bot whose flag is "1" for that
+user — provided the bot was uploaded to /opt/apex_users/user_X/private_bots/
+(custom) or is a built-in (LONG/SHORT/DAY).
+
+Runs as a daemon thread inside the uvicorn process. Polls Alpaca's
+clock every 60 seconds. Idempotent — if start_bot reports
+'already_running', the scheduler silently moves on.
+"""
+
+from __future__ import annotations
+
+import os
+import threading
+import time
+import sqlite3
+from typing import Optional
+
+
+# ── Track previous market state to detect the closed → open edge ──
+
+_PREV_OPEN: Optional[bool] = None
+_PREV_OPEN_LOCK = threading.Lock()
+
+
+def _market_is_open() -> Optional[bool]:
+    """Returns True/False from Alpaca's market clock, or None if it
+    can't be reached. Uses the server admin's pooled Alpaca key if set,
+    else falls back to public market hours (US session 09:30–16:00 ET,
+    Mon–Fri)."""
+    server_key    = os.environ.get("APEX_ALPACA_PUBLIC_KEY")
+    server_secret = os.environ.get("APEX_ALPACA_PUBLIC_SECRET")
+    if server_key and server_secret:
+        try:
+            from alpaca.trading.client import TradingClient
+            tc = TradingClient(server_key, server_secret, paper=True)
+            return bool(tc.get_clock().is_open)
+        except Exception as e:
+            print(f"[auto-scheduler] alpaca clock failed: {e}", flush=True)
+            # Fall through to time-based fallback
+    # Time-based fallback: NYSE hours, ignoring half-days / holidays.
+    # Good enough to avoid spurious starts before 09:30 ET or after
+    # 16:00 ET. Half-days will trigger an extra start that the bot
+    # itself can handle.
+    from datetime import datetime, timezone, timedelta
+    u = datetime.now(timezone.utc)
+    # EDT (Mar–Nov) = UTC-4; EST otherwise = UTC-5
+    off = -4 if 3 <= u.month <= 11 else -5
+    et = u + timedelta(hours=off)
+    if et.weekday() >= 5:  # Sat/Sun
+        return False
+    minutes = et.hour * 60 + et.minute
+    return 9 * 60 + 30 <= minutes < 16 * 60
+
+
+def _enumerate_users_with_auto_start() -> list[tuple[int, list[str]]]:
+    """For every user, return (user_id, [sides_with_auto_start_set]).
+    Reads the credentials blob — the desktop syncs auto-start choices
+    there alongside Alpaca keys via the v4.6.27 client patch."""
+    try:
+        from . import credentials as creds
+    except ImportError:
+        import credentials as creds  # type: ignore
+    # Walk every row in user_credentials. Direct SQL is fine since
+    # credentials.py doesn't have a list-all helper.
+    out = []
+    try:
+        with sqlite3.connect(_db_path()) as c:
+            rows = c.execute(
+                "SELECT user_id FROM user_credentials"
+            ).fetchall()
+        for (uid,) in rows:
+            blob = creds.load_credentials(uid) or {}
+            sides = []
+            for side in ("LONG", "SHORT", "DAY"):
+                if str(blob.get(f"APEX_AUTO_SCHEDULE_{side}", "")) == "1":
+                    sides.append(side)
+            # Discover custom-bot slugs too
+            try:
+                from . import bot_runner as br
+                priv = br.private_bots_dir(uid)
+                if priv.exists():
+                    for p in priv.glob("*.py"):
+                        slug = p.stem.upper()
+                        if str(blob.get(
+                                f"APEX_AUTO_SCHEDULE_{slug}", "")) == "1":
+                            sides.append(slug)
+            except Exception:
+                pass
+            if sides:
+                out.append((uid, sides))
+    except Exception as e:
+        print(f"[auto-scheduler] enumerate users failed: {e}", flush=True)
+    return out
+
+
+def _db_path() -> str:
+    """Locate the same SQLite database the rest of the server uses."""
+    try:
+        from . import database
+    except ImportError:
+        import database  # type: ignore
+    return database.DB_PATH
+
+
+def _tick() -> None:
+    """Single scheduler iteration. Detect open edge, start scheduled
+    bots. Idempotent — re-invoking when market state hasn't changed
+    is a no-op."""
+    global _PREV_OPEN
+    is_open = _market_is_open()
+    if is_open is None:
+        return
+    with _PREV_OPEN_LOCK:
+        prev = _PREV_OPEN
+        _PREV_OPEN = is_open
+    # Only act on the closed → open edge (avoid restarting every minute)
+    if not (is_open and prev in (None, False)):
+        return
+    print(f"[auto-scheduler] market OPEN edge detected — starting "
+          f"scheduled bots", flush=True)
+    try:
+        from . import bot_runner as br
+    except ImportError:
+        import bot_runner as br  # type: ignore
+    started_total = 0
+    for uid, sides in _enumerate_users_with_auto_start():
+        for side in sides:
+            try:
+                result = br.start_bot(uid, side)
+                if result.get("ok"):
+                    if result.get("already_running"):
+                        print(f"[auto-scheduler] user={uid} {side} "
+                              f"already running pid={result.get('pid')}",
+                              flush=True)
+                    else:
+                        started_total += 1
+                        print(f"[auto-scheduler] user={uid} {side} "
+                              f"started pid={result.get('pid')}",
+                              flush=True)
+                else:
+                    print(f"[auto-scheduler] user={uid} {side} start "
+                          f"failed: {result.get('detail')}", flush=True)
+            except Exception as e:
+                print(f"[auto-scheduler] user={uid} {side} exception: "
+                      f"{e}", flush=True)
+    print(f"[auto-scheduler] open-edge cycle complete — "
+          f"{started_total} bot(s) started", flush=True)
+
+
+def _watchdog_tick() -> None:
+    """V4.6.63 — keep every DESIRED bot running 24/7. For each (user, side,
+    broker) the user has started on the cloud, ensure it's alive; restart it if
+    not. This is what makes cloud bots survive crashes, the desktop being
+    closed, and server restarts — instead of only starting at the market-open
+    edge. start_bot is idempotent (already_running is a no-op)."""
+    try:
+        from . import bot_runner as br
+    except ImportError:
+        import bot_runner as br  # type: ignore
+    for uid, side, broker in br.list_all_desired():
+        try:
+            if br.is_running(uid, side, broker):
+                continue
+            res = br.start_bot(uid, side, broker)
+            if res.get("ok") and not res.get("already_running"):
+                print(f"[watchdog] restarted user={uid} {side}/{broker} "
+                      f"pid={res.get('pid')}", flush=True)
+            elif not res.get("ok"):
+                print(f"[watchdog] user={uid} {side}/{broker} restart failed: "
+                      f"{res.get('detail')}", flush=True)
+        except Exception as e:
+            print(f"[watchdog] user={uid} {side}/{broker} exception: {e}",
+                  flush=True)
+
+
+def start_cron():
+    """Spawn the scheduler thread. Idempotent — calling twice is a
+    no-op because we check the thread name."""
+    name = "auto_scheduler"
+    for t in threading.enumerate():
+        if t.name == name:
+            return
+    def _loop():
+        # Wait ~10s after import so the FastAPI app is fully up before
+        # we start polling.
+        time.sleep(10)
+        while True:
+            try:
+                _tick()            # seed APEX_AUTO_SCHEDULE bots at market open
+            except Exception as e:
+                print(f"[auto-scheduler] loop error: {e}", flush=True)
+            try:
+                _watchdog_tick()   # keep all desired bots alive 24/7
+            except Exception as e:
+                print(f"[watchdog] loop error: {e}", flush=True)
+            time.sleep(45)
+    threading.Thread(target=_loop, daemon=True, name=name).start()
+    print(f"[auto-scheduler] started (edge auto-start + 45s keep-alive "
+          f"watchdog)", flush=True)

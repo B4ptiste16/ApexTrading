@@ -380,7 +380,34 @@ class _IBKRShim:
             except OSError:
                 pass
 
+    def _ensure_connected(self) -> bool:
+        """V4.6.62 — the IB socket can drop (gateway restart, network blip). The
+        shim held one persistent connection and never reconnected, so every
+        later call failed 'Not connected' and the bot could neither price nor
+        trade. Re-establish the connection on demand. Returns True if connected."""
+        try:
+            if self.ib.isConnected():
+                return True
+        except Exception:
+            pass
+        host = os.environ.get("APEX_IBKR_HOST") or "127.0.0.1"
+        port = int(os.environ.get("APEX_IBKR_PORT") or "7497")
+        cid  = int(os.environ.get("APEX_IBKR_CLIENT_ID") or "1")
+        try:
+            self.ib.connect(host, port, clientId=cid, timeout=15, readonly=False)
+            print(f"[broker] IBKR reconnected {host}:{port} cid={cid}", flush=True)
+            try:
+                self.ib.reqMarketDataType(
+                    int(os.environ.get("APEX_IBKR_DATA_TYPE") or "1"))
+            except Exception:
+                pass
+            return True
+        except Exception as e:
+            print(f"[broker] IBKR reconnect failed: {e}", flush=True)
+            return False
+
     def get_account(self):
+        self._ensure_connected()
         # V4.6.38 — ledger-scoped account: the bot only ever sees its own
         # slice's free cash + the market value of the shares it holds.
         if self.ledger is not None:
@@ -603,6 +630,7 @@ class _IBKRShim:
         req = order_data if order_data is not None else req
         if req is None:
             raise ValueError("submit_order: no order request provided")
+        self._ensure_connected()
         side_str = str(getattr(req, "side", "")).split(".")[-1].upper()
         if side_str not in ("BUY", "SELL"):
             raise ValueError(f"Unsupported order side for IBKR shim: {req.side}")
@@ -711,8 +739,23 @@ class _IBKRShim:
         if self.ledger is None:
             return
         filled, avg = self._fill_info(trade)
+        # V4.6.62 — CRITICAL: never book a fill the broker didn't make. The
+        # ledger used to assume req_qty filled whenever the gateway reported
+        # filled=0 — but a CANCELLED / REJECTED order (e.g. IBKR Error 10349)
+        # also reports filled=0, so the slice recorded phantom sells and went
+        # to negative/garbage holdings. Only optimistically assume a fill when
+        # the order is still LIVE (will fill); skip when it's dead.
+        status = ""
+        try:
+            status = str(trade.orderStatus.status or "")
+        except Exception:
+            pass
+        if status in ("Cancelled", "ApiCancelled", "Inactive", "PendingCancel"):
+            print(f"  [ledger] {side} {sym} NOT recorded — order {status} "
+                  f"(filled={filled:g}); ledger unchanged", flush=True)
+            return
         if filled <= _EPS:
-            filled = req_qty            # assume it will fill (market order)
+            filled = req_qty            # live order — assume the market fill
         px = avg if avg > 0 else est_price
         if px <= 0:
             px = self._price(sym)
@@ -766,12 +809,25 @@ class _IBKRShim:
         sym = normalize_symbol(symbol)
         if sym in self._unsupported:
             raise UnsupportedSymbol(sym)
+        self._ensure_connected()
         c = self._contract(sym)
         try:
             self.ib.qualifyContracts(c)
         except Exception:
             c = None
         if not c or not getattr(c, "conId", 0):
+            # V4.6.62 — only flag a symbol as permanently unsupported when we're
+            # actually CONNECTED and IBKR has no security definition. If the
+            # socket is down, qualification fails transiently — don't poison the
+            # cache (a tradeable stock like SNOW was being marked 'not tradeable'
+            # with the misleading crypto message and skipped forever).
+            try:
+                connected = self.ib.isConnected()
+            except Exception:
+                connected = False
+            if not connected:
+                raise RuntimeError(
+                    f"IBKR not connected — could not qualify {sym} (will retry)")
             self._unsupported.add(sym)
             raise UnsupportedSymbol(sym)
         return c
@@ -784,6 +840,7 @@ class _IBKRShim:
 
     def _price(self, symbol: str) -> float:
         sym = normalize_symbol(symbol)
+        self._ensure_connected()
         # 1) reuse the live portfolio mark if we already hold it
         try:
             for it in self.ib.portfolio():
@@ -866,6 +923,15 @@ class _IBKRShim:
                 if px > 0:
                     order.totalQuantity = 0
                     order.cashQty = round(qty * px, 2)
+        else:
+            # V4.6.62 — set TIF + outsideRth EXPLICITLY for stocks. Leaving them
+            # unset let the IBKR account's order preset override the TIF, which
+            # then bounced every order with 'Error 10349: Order TIF was set to
+            # DAY based on order preset' (cancelled, filled=0). An explicit DAY
+            # TIF + allow-outside-RTH avoids that and also lets exits fill in
+            # pre/post market.
+            order.tif = "DAY"
+            order.outsideRth = True
         trade = self.ib.placeOrder(contract, order)
         # Give the gateway a moment to assign an orderId / report a fill.
         self.ib.sleep(2)
@@ -910,6 +976,12 @@ class _IBKRShim:
         sl.ocaGroup = oca; sl.ocaType = 1
         sl.transmit = True          # transmits the whole chain
 
+        # V4.6.62 — explicit TIF/outsideRth on every leg so the account's order
+        # preset can't reject them with Error 10349 (see _market_order).
+        for _o in (parent, tp, sl):
+            _o.tif = "GTC" if _o is not parent else "DAY"
+            _o.outsideRth = True
+
         parent_trade = self.ib.placeOrder(contract, parent)
         self.ib.placeOrder(contract, tp)
         self.ib.placeOrder(contract, sl)
@@ -934,6 +1006,11 @@ class _IBKRShim:
         tp.ocaGroup = oca; tp.ocaType = 1; tp.transmit = False
         sl = StopOrder(action, qty, self._round_px(sl_price))
         sl.ocaGroup = oca; sl.ocaType = 1; sl.transmit = True
+        # V4.6.62 — resting protective exits: GTC so they persist + explicit
+        # outsideRth, avoiding the order-preset TIF rejection (Error 10349).
+        for _o in (tp, sl):
+            _o.tif = "GTC"
+            _o.outsideRth = True
 
         self.ib.placeOrder(contract, tp)
         sl_trade = self.ib.placeOrder(contract, sl)
