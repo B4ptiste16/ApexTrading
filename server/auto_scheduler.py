@@ -161,7 +161,33 @@ def _watchdog_tick() -> None:
     broker) the user has started on the cloud, ensure it's alive; restart it if
     not. This is what makes cloud bots survive crashes, the desktop being
     closed, and server restarts — instead of only starting at the market-open
-    edge. start_bot is idempotent (already_running is a no-op)."""
+    edge. start_bot is idempotent (already_running is a no-op).
+
+    V4.6.65 — single-flight across uvicorn workers: only the worker that grabs
+    the lock runs the sweep, so we don't do the same work 3× or spam logs."""
+    import fcntl as _fcntl, tempfile as _tf, os as _os
+    _wd = None
+    try:
+        _wd = open(_os.path.join(_tf.gettempdir(), "apex_watchdog.lock"), "w")
+        try:
+            _fcntl.flock(_wd, _fcntl.LOCK_EX | _fcntl.LOCK_NB)
+        except OSError:
+            _wd.close()
+            return  # another worker is running this sweep
+    except Exception:
+        _wd = None
+    try:
+        _watchdog_sweep()
+    finally:
+        if _wd is not None:
+            try:
+                _fcntl.flock(_wd, _fcntl.LOCK_UN)
+            except Exception:
+                pass
+            _wd.close()
+
+
+def _watchdog_sweep() -> None:
     try:
         from . import bot_runner as br
     except ImportError:

@@ -748,7 +748,24 @@ def dashboard_page(user: dict, tab: str = "overview") -> HTMLResponse:
         <span class="v" id="today">—</span></div>
       <div class="stat"><span class="k">SERVER</span>
         <span class="v" id="srv">checking…</span></div>
+      <div class="stat"><span class="k">BOTS RUNNING</span>
+        <span class="v" id="runcount">—</span></div>
+      <div class="stat"><span class="k">BROKER</span>
+        <span class="v" style="display:flex;gap:6px;">
+          <button class="brk-btn on" data-brk="alpaca"
+                  onclick="setBroker('alpaca')">Alpaca</button>
+          <button class="brk-btn" data-brk="ibkr"
+                  onclick="setBroker('ibkr')">IBKR</button>
+        </span></div>
     </div>
+    <style>
+      .brk-btn{{background:rgba(138,147,201,0.15);color:var(--muted);
+        border:1px solid transparent;border-radius:6px;padding:3px 12px;
+        font-size:12px;font-weight:700;cursor:pointer;transition:all .15s;}}
+      .brk-btn:hover{{background:rgba(138,147,201,0.30);}}
+      .brk-btn.on{{background:var(--accent,#5b6cf0);color:#fff;
+        border-color:var(--accent,#5b6cf0);}}
+    </style>
 
     {tab_html}
 
@@ -844,6 +861,16 @@ def dashboard_page(user: dict, tab: str = "overview") -> HTMLResponse:
     // custom bots in the user's private_bots/ folder). Default to the
     // built-ins until the first /web/api/status response arrives.
     let SIDES = ["LONG", "SHORT", "DAY"];
+    // V4.6.65 — which broker the dashboard is viewing (Alpaca / IBKR).
+    let BROKER = (localStorage.getItem("apex_broker") || "alpaca");
+    function setBroker(b) {{
+      BROKER = b;
+      try {{ localStorage.setItem("apex_broker", b); }} catch(e) {{}}
+      document.querySelectorAll(".brk-btn").forEach(el => {{
+        el.classList.toggle("on", el.dataset.brk === b);
+      }});
+      refresh();
+    }}
     const fmt$ = n =>
       n == null ? "—"
         : (n >= 0 ? "+$" : "-$") +
@@ -1034,7 +1061,7 @@ def dashboard_page(user: dict, tab: str = "overview") -> HTMLResponse:
 
     async function refresh() {{
       try {{
-        const r = await fetch("/web/api/status");
+        const r = await fetch("/web/api/status?broker=" + BROKER);
         const j = await r.json();
         _lastState = j;
         // V4.6.14 — adopt the server's sides list so custom bots
@@ -1051,6 +1078,12 @@ def dashboard_page(user: dict, tab: str = "overview") -> HTMLResponse:
         }}
         renderBots(j);
         renderBotsMini(j);
+        const rc = document.getElementById("runcount");
+        if (rc) {{
+          const n = j.running_count || 0;
+          rc.textContent = n + " / " + (j.sides ? j.sides.length : 0);
+          rc.className = "v " + (n > 0 ? "pos" : "");
+        }}
         // Re-fetch open detail panels
         for (const side of SIDES) {{
           if (_detailOpen[side]) fetchPositions(side);
@@ -1064,7 +1097,7 @@ def dashboard_page(user: dict, tab: str = "overview") -> HTMLResponse:
     async function act(side, cmd) {{
       if (!confirm(`${{cmd.toUpperCase()}} ${{side}} bot?`)) return;
       try {{
-        const r = await fetch(`/web/api/bots/${{side}}/${{cmd}}`,
+        const r = await fetch(`/web/api/bots/${{side}}/${{cmd}}?broker=${{BROKER}}`,
                               {{ method: "POST" }});
         const j = await r.json();
         if (!r.ok) alert(j.detail || "Action failed.");
@@ -1089,7 +1122,7 @@ def dashboard_page(user: dict, tab: str = "overview") -> HTMLResponse:
       refresh();
     }}
 
-    refresh();
+    setBroker(BROKER);
     setInterval(refresh, 30000);
     // V4.6.16 — AI usage donut refreshes every 2 min (platform-wide
     // data changes slowly; no need to poll as often as user state).

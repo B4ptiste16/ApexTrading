@@ -148,9 +148,10 @@ def _reconcile_user(user_id: int, is_open: bool) -> None:
         if is_open and not running:
             bot_runner.start_bot(user_id, side)
             print(f"[sched] started {side} for user {user_id}")
-        elif (not is_open) and running:
-            bot_runner.stop_bot(user_id, side)
-            print(f"[sched] stopped {side} for user {user_id}")
+        # V4.6.65 — do NOT auto-stop at market close. Cloud bots run 24/7
+        # (crypto trades around the clock; stock bots sleep themselves when the
+        # market is shut). The market-close stop was fighting the keep-alive
+        # watchdog and dropping bots from the always-on registry.
 
 
 # ── Public lifecycle hooks (called from app.py lifespan) ────────────

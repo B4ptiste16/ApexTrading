@@ -171,29 +171,54 @@ def list_desired(user_id: int) -> list[dict]:
         return []
 
 
-def _save_desired(user_id: int, items: list) -> None:
+def _mutate_desired(user_id: int, fn) -> None:
+    """V4.6.65 — atomic read-modify-write of the desired registry under a file
+    lock. uvicorn runs --workers 2 and each worker's watchdog touches this file;
+    without a lock, concurrent stale-read writes clobbered entries (bots silently
+    dropped from the always-on set). `fn(items) -> new_items`."""
     import json as _j
+    p = _desired_path(user_id)
     try:
-        p = _desired_path(user_id)
         p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(_j.dumps(items, indent=2), encoding="utf-8")
-    except Exception as e:
-        print(f"[desired] save failed: {e}", flush=True)
+    except Exception:
+        pass
+    lock = open(p.with_suffix(".lock"), "w")
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        try:
+            items = _j.loads(p.read_text(encoding="utf-8")) if p.exists() else []
+            if not isinstance(items, list):
+                items = []
+        except Exception:
+            items = []
+        new = fn(list(items))
+        try:
+            p.write_text(_j.dumps(new, indent=2), encoding="utf-8")
+        except Exception as e:
+            print(f"[desired] save failed: {e}", flush=True)
+    finally:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_UN)
+        except Exception:
+            pass
+        lock.close()
 
 
 def add_desired(user_id: int, side: str, broker: str) -> None:
     s = side.upper(); b = (broker or "alpaca").lower()
-    items = list_desired(user_id)
-    if not any(i.get("side") == s and i.get("broker") == b for i in items):
-        items.append({"side": s, "broker": b})
-        _save_desired(user_id, items)
+    def _f(items):
+        if not any(i.get("side") == s and i.get("broker") == b for i in items):
+            items.append({"side": s, "broker": b})
+        return items
+    _mutate_desired(user_id, _f)
 
 
 def remove_desired(user_id: int, side: str, broker: str) -> None:
     s = side.upper(); b = (broker or "alpaca").lower()
-    items = [i for i in list_desired(user_id)
-             if not (i.get("side") == s and i.get("broker") == b)]
-    _save_desired(user_id, items)
+    def _f(items):
+        return [i for i in items
+                if not (i.get("side") == s and i.get("broker") == b)]
+    _mutate_desired(user_id, _f)
 
 
 def list_all_desired() -> list[tuple]:
@@ -681,16 +706,20 @@ def _start_bot_impl(user_id: int, side: str, broker: Optional[str] = None) -> di
             "log": str(log_path)}
 
 
-def stop_bot(user_id: int, side: str, broker: Optional[str] = None) -> dict:
+def stop_bot(user_id: int, side: str, broker: Optional[str] = None,
+             user_initiated: bool = False) -> dict:
     s = side.upper()
     b = _resolve_broker(user_id, s, broker)
     key = (user_id, s, b)
-    # V4.6.63 — a deliberate stop removes it from the desired registry so the
-    # watchdog does NOT resurrect it.
-    try:
-        remove_desired(user_id, s, b)
-    except Exception:
-        pass
+    # V4.6.65 — only an EXPLICIT user stop removes it from the always-on
+    # registry. Automated stops (graceful server shutdown via shutdown_all,
+    # the market-close reconcile) must NOT wipe the user's 24/7 intent — that
+    # was dropping cloud bots from the keep-alive set on every restart / close.
+    if user_initiated:
+        try:
+            remove_desired(user_id, s, b)
+        except Exception:
+            pass
     # PID file is the cross-worker source of truth; fall back to the
     # worker-local registry only when the file is gone.
     pid = _read_pid_file(user_id, s, b)

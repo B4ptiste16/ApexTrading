@@ -1073,14 +1073,37 @@ def _alpaca_client_for(user_id: int, side: str):
         return None
 
 
-def _bot_state(user_id: int, side: str) -> dict:
-    """Returns equity / today's P/L / position count / running flag for
-    one bot. All fields are None when broker linking is missing or the
-    Alpaca call fails — the dashboard renders that as "—"."""
+def _bot_state(user_id: int, side: str, broker: str = "alpaca") -> dict:
+    """Returns equity / today's P/L / position count / running flag for one
+    bot on a given broker. V4.6.65 — broker-aware + real running state (was
+    hard-coded False, so the site never showed bots as running)."""
+    b = (broker or "alpaca").lower()
+    try:
+        running = bool(bot_runner.is_running(user_id, side, b))
+    except Exception:
+        running = False
+
+    if b == "ibkr":
+        # Equity + holdings come from the bot's server-side sub-portfolio ledger
+        # (no Alpaca account for IBKR).
+        try:
+            for led in bot_runner.list_ibkr_ledgers(user_id):
+                if str(led.get("bot_id", "")).upper() == side.upper():
+                    h = led.get("holdings", {}) or {}
+                    npos = len([1 for v in h.values()
+                                if abs(float(v or 0)) > 1e-9])
+                    return {"equity": led.get("value"), "today_pl": None,
+                            "today_pct": None, "positions": npos,
+                            "running": running, "broker": "ibkr"}
+        except Exception:
+            pass
+        return {"equity": None, "today_pl": None, "today_pct": None,
+                "positions": None, "running": running, "broker": "ibkr"}
+
     c = _alpaca_client_for(user_id, side)
     if c is None:
         return {"equity": None, "today_pl": None, "today_pct": None,
-                "positions": None, "running": False}
+                "positions": None, "running": running, "broker": "alpaca"}
     try:
         acct = c.get_account()
         equity = float(acct.equity)
@@ -1093,15 +1116,12 @@ def _bot_state(user_id: int, side: str) -> dict:
             "today_pl":  pl,
             "today_pct": pct,
             "positions": len(positions),
-            # "running" requires a bot-process registry that lives on the
-            # Oracle server. Until step 5 (deploy bots to Oracle with
-            # systemd / cron), we report False here; once the bot service
-            # is up, we'll flip this to read the systemd unit state.
-            "running":   False,
+            "running":   running,
+            "broker":    "alpaca",
         }
     except Exception:
         return {"equity": None, "today_pl": None, "today_pct": None,
-                "positions": None, "running": False}
+                "positions": None, "running": running, "broker": "alpaca"}
 
 
 @app.get("/web/api/status", include_in_schema=False)
@@ -1126,14 +1146,19 @@ def web_api_status(request: Request):
                     sides.append(slug)
     except Exception as e:
         print(f"[web_api_status] custom-bot scan failed: {e}")
-    bots = {side: _bot_state(user["id"], side) for side in sides}
-    return {"linked": linked, "sides": sides, "bots": bots}
+    from fastapi import Query as _Q  # local import keeps the signature simple
+    broker = (request.query_params.get("broker") or "alpaca").lower()
+    bots = {side: _bot_state(user["id"], side, broker) for side in sides}
+    running_count = sum(1 for s in bots.values() if s.get("running"))
+    return {"linked": linked, "sides": sides, "bots": bots,
+            "broker": broker, "running_count": running_count}
 
 
 @app.post("/web/api/bots/{side}/start", include_in_schema=False)
 def web_api_bot_start(side: str, request: Request):
     user   = _web_user(request)
-    result = bot_runner.start_bot(user["id"], side)
+    broker = (request.query_params.get("broker") or "alpaca").lower()
+    result = bot_runner.start_bot(user["id"], side, broker)
     if not result.get("ok"):
         raise HTTPException(400, result.get("detail", "start failed"))
     return result
@@ -1142,7 +1167,8 @@ def web_api_bot_start(side: str, request: Request):
 @app.post("/web/api/bots/{side}/stop", include_in_schema=False)
 def web_api_bot_stop(side: str, request: Request):
     user   = _web_user(request)
-    result = bot_runner.stop_bot(user["id"], side)
+    broker = (request.query_params.get("broker") or "alpaca").lower()
+    result = bot_runner.stop_bot(user["id"], side, broker, user_initiated=True)
     if not result.get("ok"):
         raise HTTPException(500, result.get("detail", "stop failed"))
     return result
@@ -1488,7 +1514,7 @@ def api_bot_start(side: str, broker: str | None = None,
 def api_bot_stop(side: str, broker: str | None = None,
                  authorization: str | None = Header(default=None)):
     user   = _current_user(authorization)
-    result = bot_runner.stop_bot(user["id"], side, broker)
+    result = bot_runner.stop_bot(user["id"], side, broker, user_initiated=True)
     if not result.get("ok"):
         raise HTTPException(500, result.get("detail", "stop failed"))
     return result
