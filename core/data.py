@@ -68,8 +68,64 @@ SNAPSHOT_FILES = {
 }
 
 
+import threading as _threading
+import time as _time_mod
+
+# V4.6.64 — thread-local broker override + a short display cache so a background
+# thread can PRELOAD the *other* broker's account/positions without changing the
+# global setting. This makes switching Alpaca<->IBKR instant. These caches are
+# DISPLAY-ONLY (the trading bots are separate processes) so staleness never
+# affects orders.
+_broker_override = _threading.local()
+_DISPLAY_TTL = 6.0
+_acct_cache: dict = {}   # (broker, side) -> (ts, dict)
+_pos_cache:  dict = {}   # (broker, side) -> (ts, list)
+_cache_lock = _threading.Lock()
+
+
 def current_broker() -> str:
+    ov = getattr(_broker_override, "value", None)
+    if ov:
+        return ov
     return load_settings().get("broker_mode", "alpaca")
+
+
+class broker_context:
+    """`with broker_context('alpaca'):` — read a specific broker's data on THIS
+    thread only (used by the background preloader)."""
+    def __init__(self, broker: str):
+        self.broker = broker
+    def __enter__(self):
+        _broker_override.value = self.broker
+        return self
+    def __exit__(self, *a):
+        _broker_override.value = None
+
+
+def prefetch_broker(broker: str, sides: list) -> None:
+    """Warm the display cache for `broker` (call from a background thread)."""
+    with broker_context(broker):
+        for side in sides:
+            try:
+                get_account(side)
+                get_positions(side)
+            except Exception:
+                pass
+
+
+def prefetch_other_broker(sides: list | None = None) -> None:
+    """Preload whichever broker the user is NOT currently viewing."""
+    cur = load_settings().get("broker_mode", "alpaca")
+    other = "ibkr" if cur == "alpaca" else "alpaca"
+    if sides is None:
+        sides = ["LONG", "SHORT", "DAY"]
+        try:
+            reg = load_bot_registry()
+            sides += [str(c.get("id", "")).upper()
+                      for c in reg.get("custom", []) if c.get("id")]
+        except Exception:
+            pass
+    prefetch_broker(other, list(dict.fromkeys(sides)))
 
 
 def broker_data_dir(broker: str | None = None) -> Path:
@@ -160,7 +216,7 @@ def get_client(side: str):
     # In non-Alpaca broker modes (e.g. IBKR) we must NOT fall back to the
     # Alpaca account — that would surface the wrong broker's returns. Each
     # broker owns its own data path.
-    if s.get("broker_mode", "alpaca") != "alpaca":
+    if current_broker() != "alpaca":
         return None
     side = side.upper()
     mode = s.get("alpaca_mode", "paper")          # paper / live
@@ -230,7 +286,24 @@ def load_jsonl(paths) -> list:
 # ─────────────────────────────────────────
 
 def get_account(side: str) -> dict:
-    if load_settings().get("broker_mode", "alpaca") == "ibkr":
+    # V4.6.64 — display cache (6s) keyed by broker+side so switching brokers is
+    # instant and the background preloader can warm the other broker.
+    b = current_broker()
+    key = (b, side.upper())
+    now = _time_mod.time()
+    with _cache_lock:
+        hit = _acct_cache.get(key)
+    if hit and (now - hit[0]) < _DISPLAY_TTL:
+        return hit[1]
+    val = _get_account_uncached(side, b)
+    if val:
+        with _cache_lock:
+            _acct_cache[key] = (now, val)
+    return val
+
+
+def _get_account_uncached(side: str, broker: str | None = None) -> dict:
+    if (broker or current_broker()) == "ibkr":
         from core import ibkr_data
         return ibkr_data.get_account(side)
     c = get_client(side)
@@ -337,10 +410,25 @@ def position_meta(positions: list, side: str,
 
 
 def get_positions(side: str) -> list:
+    # V4.6.64 — display cache (6s) + broker-override aware (see get_account).
+    b = current_broker()
+    key = (b, side.upper())
+    now = _time_mod.time()
+    with _cache_lock:
+        hit = _pos_cache.get(key)
+    if hit and (now - hit[0]) < _DISPLAY_TTL:
+        return hit[1]
+    val = _get_positions_uncached(side, b)
+    with _cache_lock:
+        _pos_cache[key] = (now, val)
+    return val
+
+
+def _get_positions_uncached(side: str, broker: str | None = None) -> list:
     # V4.6.43 — route to the IBKR data path in IBKR mode (get_client() returns
     # None there by design, which previously left the IBKR page with no
     # positions at all).
-    if load_settings().get("broker_mode", "alpaca") == "ibkr":
+    if (broker or current_broker()) == "ibkr":
         try:
             from core import ibkr_data
             return ibkr_data.get_positions(side)

@@ -446,6 +446,17 @@ class OverviewTab(QWidget):
         # Live total-portfolio chart (background fetch, 24/7)
         self._reload_combined()
 
+        # V4.6.64 — preload the OTHER broker's data in the background (throttled)
+        # so switching Alpaca<->IBKR is instant instead of blank-then-load.
+        try:
+            import time as _t, threading as _th
+            if (_t.time() - getattr(self, "_last_prefetch", 0)) > 9:
+                self._last_prefetch = _t.time()
+                _th.Thread(target=D.prefetch_other_broker,
+                           daemon=True).start()
+        except Exception:
+            pass
+
         # Costs — V7.1.2: surface lifetime spend as TOTAL SPENT,
         # demote the per-year projection.
         costs = D.estimate_total_costs()

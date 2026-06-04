@@ -1223,6 +1223,10 @@ class WheelGuard(QObject):
 
         # The wheel target is usually an inner viewport — climb to the
         # widget we care about.
+        # V4.6.64 — also guard combo boxes + spin boxes: when the cursor was over
+        # one of these in a long form (e.g. Tools → IBKR client-ID rows) the
+        # wheel got trapped and the page wouldn't scroll past it.
+        from PyQt6.QtWidgets import QComboBox, QAbstractSpinBox
         w = obj
         guarded = None
         focusable = False
@@ -1230,7 +1234,8 @@ class WheelGuard(QObject):
             if isinstance(w, ChartView):
                 guarded, focusable = w, False
                 break
-            if isinstance(w, (QTextEdit, QAbstractItemView)):
+            if isinstance(w, (QTextEdit, QAbstractItemView,
+                              QComboBox, QAbstractSpinBox)):
                 guarded, focusable = w, True
                 break
             w = w.parentWidget() if isinstance(w, QWidget) else None
