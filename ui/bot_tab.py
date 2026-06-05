@@ -201,6 +201,35 @@ class BotTab(QWidget):
         crw = QWidget(); crw.setLayout(conf_row)
         s.add(crw)
 
+        # V4.6.66 — adjustable AI call delay (seconds between cycles) with a
+        # LIVE cost preview and a confirm step before applying. Floored at 30s.
+        delay_row = QHBoxLayout()
+        delay_lbl = QLabel("AI call delay (sec):")
+        delay_lbl.setStyleSheet(f"color:{C['muted']};font-size:11px;")
+        self.delay_spin = QSpinBox()
+        self.delay_spin.setRange(D.CALL_DELAY_FLOOR, 3600)
+        self.delay_spin.setSingleStep(15)
+        self.delay_spin.setFixedWidth(90)
+        self.delay_spin.setValue(D.get_bot_call_delay(self.side, 120))
+        self.delay_spin.valueChanged.connect(self._update_delay_cost)
+        self.delay_apply = QPushButton("Apply")
+        self.delay_apply.setObjectName("toolBtn")
+        self.delay_apply.setFixedWidth(60)
+        self.delay_apply.clicked.connect(self._on_delay_apply)
+        self.delay_saved = QLabel("")
+        self.delay_saved.setStyleSheet(f"color:{C['green']};font-size:10px;")
+        self.delay_cost = QLabel("")
+        self.delay_cost.setStyleSheet(f"color:{C['muted']};font-size:10px;")
+        delay_row.addWidget(delay_lbl)
+        delay_row.addWidget(self.delay_spin)
+        delay_row.addWidget(self.delay_apply)
+        delay_row.addWidget(self.delay_saved)
+        delay_row.addWidget(self.delay_cost)
+        delay_row.addStretch()
+        drw = QWidget(); drw.setLayout(delay_row)
+        s.add(drw)
+        self._update_delay_cost()
+
         # Minimum positions floor (LONG only): deploy at least N names
         # even when the AI is cautious. 0 = fully cautious.
         if self.side == "LONG":
@@ -557,6 +586,49 @@ class BotTab(QWidget):
         D.set_bot_min_conf(self.side, val)
         self.conf_saved.setText("saved ✓")
         QTimer.singleShot(2000, lambda: self.conf_saved.setText(""))
+
+    def _update_delay_cost(self):
+        """Live preview of the projected cost at the selected call delay."""
+        try:
+            v = self.delay_spin.value()
+            est = D.estimate_daily_cost_at_delay(self.side, v)
+            warn = "  ⚠ very frequent" if v < 60 else ""
+            self.delay_cost.setText(
+                f"≈ {est['calls_per_day']:.0f} calls/day · "
+                f"${est['per_day']:.2f}/day · ${est['per_month']:.2f}/mo{warn}")
+            self.delay_cost.setStyleSheet(
+                f"color:{C['red'] if v < 60 else C['muted']};font-size:10px;")
+        except Exception:
+            pass
+
+    def _on_delay_apply(self):
+        """Confirm the new call delay (showing the projected cost) before saving.
+        Faster than ~60s is flagged; 30s is the hard floor."""
+        from PyQt6.QtWidgets import QMessageBox
+        v = self.delay_spin.value()
+        est = D.estimate_daily_cost_at_delay(self.side, v)
+        msg = (f"Set {self.side} to call the AI every {v} seconds?\n\n"
+               f"Estimated ~{est['calls_per_day']:.0f} AI calls/day\n"
+               f"≈ ${est['per_day']:.2f}/day  ·  ${est['per_month']:.2f}/month\n\n")
+        if v < 60:
+            msg += ("⚠ Calling more often than ~60s can hit API rate limits, "
+                    "spike your cost, and overlap cycles. 30s is the hard "
+                    "minimum.\n\n")
+        msg += "Apply? (takes effect on the bot's next cycle — no restart needed)"
+        box = QMessageBox(self)
+        box.setWindowTitle("Change AI call delay")
+        box.setIcon(QMessageBox.Icon.Warning if v < 60
+                    else QMessageBox.Icon.Question)
+        box.setText(msg)
+        box.setStandardButtons(QMessageBox.StandardButton.Yes |
+                               QMessageBox.StandardButton.No)
+        box.setDefaultButton(QMessageBox.StandardButton.No)
+        if box.exec() != QMessageBox.StandardButton.Yes:
+            self.delay_spin.setValue(D.get_bot_call_delay(self.side, 120))
+            return
+        D.set_bot_call_delay(self.side, v)
+        self.delay_saved.setText("saved ✓")
+        QTimer.singleShot(2500, lambda: self.delay_saved.setText(""))
 
     # ── V4.6.5 — per-bot universe picker ─────────────────────────
 

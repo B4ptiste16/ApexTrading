@@ -1,4 +1,4 @@
 {
-  "version": "4.6.65",
-  "notes": "v4.6.65 — App opens fully loaded (no more load-on-click)\n\n⚡ EAGER LOADING\n• The app now loads the Overview AND every bot tab right at launch and keeps them all refreshed in the background — so when you click a tab it's already populated instead of starting to load. Combined with the v4.6.64 broker preload, switching Alpaca<->IBKR is much faster too.\n\n(The currently-selected broker's tabs are always live; the other broker is kept warm in the background. A dedicated full-screen loading splash is coming next.)\n\nUpdate via the in-app banner.\n"
+  "version": "4.6.66",
+  "notes": "v4.6.66 — Adjustable AI call delay (with live cost preview)\n\n⏱️ CONTROL HOW OFTEN EACH BOT CALLS THE AI\n• Every bot tab now has an 'AI call delay (sec)' control. Set how many seconds the bot waits between cycles, see the projected cost update live (calls/day, $/day, $/month), and confirm before it applies.\n• Takes effect on the bot's next cycle — no restart needed — and syncs to your 24/7 cloud bots too.\n• Safety: 30s is the hard minimum, and anything under ~60s is flagged (calling too often can hit API rate limits, spike cost, and overlap cycles).\n\nUpdate via the in-app banner.\n"
 }

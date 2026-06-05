@@ -488,6 +488,14 @@ def _build_env(user_id: int, side: str,
     mc = blob.get(f"APEX_MIN_CONFIDENCE_{s}") or blob.get("APEX_MIN_CONFIDENCE")
     if mc not in (None, ""):
         env[f"APEX_MIN_CONFIDENCE_{s}"] = str(mc)
+    # V4.6.66 — per-bot call delay (seconds between AI calls), synced from the
+    # desktop. Floored server-side too so a bad value can't hammer the API.
+    cd = blob.get(f"APEX_CALL_DELAY_{s}") or blob.get("APEX_CALL_DELAY")
+    if cd not in (None, ""):
+        try:
+            env[f"APEX_CALL_DELAY_{s}"] = str(max(30, int(float(cd))))
+        except (TypeError, ValueError):
+            pass
     return env
 
 

@@ -2233,6 +2233,12 @@ class ToolsTab(QWidget):
                         payload[f"APEX_MIN_CONFIDENCE_{k.upper()}"] = str(float(v["min_confidence"]))
                     except (TypeError, ValueError):
                         pass
+                # V4.6.66 — sync each bot's call delay so cloud bots honor it.
+                if isinstance(v, dict) and v.get("call_delay"):
+                    try:
+                        payload[f"APEX_CALL_DELAY_{k.upper()}"] = str(int(v["call_delay"]))
+                    except (TypeError, ValueError):
+                        pass
             # V4.6.50 — sync each IBKR bot's allocation % (Tools → IBKR table)
             # so cloud bots seed their sub-portfolio slice instead of trading
             # the whole account. Stored in settings[ibkr_<mode>]["bots"].

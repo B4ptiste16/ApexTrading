@@ -992,6 +992,55 @@ def set_bot_min_conf(side: str, value: float) -> None:
         json.dump(s, f, indent=2)
 
 
+# ── Call delay (V4.6.66) — how often a bot calls the AI / runs a cycle ──────
+# Faster than this floor risks rate-limit / cost spikes / overlapping cycles.
+CALL_DELAY_FLOOR = 30          # seconds — minimum allowed
+_CALL_TOKENS = {
+    "LONG":  {"input": 12000, "output": 600},
+    "SHORT": {"input": 10000, "output": 600},
+    "DAY":   {"input":  6000, "output": 400},
+}
+
+
+def get_bot_call_delay(side: str, default: int = 120) -> int:
+    """Effective call delay (seconds) for a bot — saved override or default."""
+    try:
+        v = int(load_settings().get(side, {}).get("call_delay") or 0)
+        return v if v >= CALL_DELAY_FLOOR else int(default)
+    except Exception:
+        return int(default)
+
+
+def set_bot_call_delay(side: str, seconds: int) -> None:
+    """Persist a new call delay (seconds). Picked up on the bot's next cycle."""
+    s = load_settings()
+    s.setdefault(side, {})["call_delay"] = max(CALL_DELAY_FLOOR, int(seconds))
+    with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
+        json.dump(s, f, indent=2)
+
+
+def estimate_call_cost(side: str) -> float:
+    """Approx $ per AI call for this bot (Haiku pricing, token estimate)."""
+    est = _CALL_TOKENS.get(side.upper(), {"input": 8000, "output": 500})
+    return (est["input"]  / 1_000_000 * HAIKU_INPUT_PER_M +
+            est["output"] / 1_000_000 * HAIKU_OUTPUT_PER_M)
+
+
+def estimate_daily_cost_at_delay(side: str, delay_seconds: int) -> dict:
+    """Projected cost if the bot calls the AI every `delay_seconds`.
+    Assumes ~continuous operation (crypto 24/7; stock bots only call during
+    market hours, so this is a conservative upper bound)."""
+    delay = max(1, int(delay_seconds))
+    calls_per_day = 86400.0 / delay
+    per_call = estimate_call_cost(side)
+    return {
+        "calls_per_day": calls_per_day,
+        "per_call":      per_call,
+        "per_day":       calls_per_day * per_call,
+        "per_month":     calls_per_day * per_call * 30.0,
+    }
+
+
 # Min-positions floor (LONG bot) — deploy at least N names even if the AI
 # is cautious. 0 = fully cautious (original behaviour).
 BOT_DEFAULT_POS = {"LONG": 5}

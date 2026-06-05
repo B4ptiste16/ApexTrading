@@ -427,7 +427,7 @@ class BotRunner:
                         print(f"[{self.name}] will retry in {self.tick_seconds}s "
                               f"— fix the above and the bot resumes "
                               f"automatically (no restart needed).", flush=True)
-                        self._heartbeat_sleep(self.tick_seconds, cycle)
+                        self._heartbeat_sleep(self._call_delay(), cycle)
                         continue
                 if not did_startup_cleanup:
                     # Initial portfolio cleanup runs ONCE, after the client is
@@ -465,7 +465,7 @@ class BotRunner:
                     print(f"[{self.name}] no symbols configured — "
                           f"sleeping {self.tick_seconds}s",
                           flush=True)
-                    self._heartbeat_sleep(self.tick_seconds, cycle)
+                    self._heartbeat_sleep(self._call_delay(), cycle)
                     continue
                 # V4.6.51 — honor a pending allocation cut: sell holdings to
                 # hand cash back to the main account before this cycle trades.
@@ -495,7 +495,7 @@ class BotRunner:
                 print(f"[{self.name}] cycle {cycle} crashed: {e} "
                       f"— continuing", flush=True)
                 traceback.print_exc()
-            self._heartbeat_sleep(self.tick_seconds, cycle)
+            self._heartbeat_sleep(self._call_delay(), cycle)
 
     def _heartbeat_sleep(self, total_seconds: int, cycle: int):
         """V4.6.27 — sleep with periodic 'alive' prints. Without
@@ -513,6 +513,33 @@ class BotRunner:
             if remaining > 0:
                 print(f"[{self.name}] sleeping  ·  cycle {cycle}  ·  "
                       f"next tick in {remaining}s", flush=True)
+
+    def _call_delay(self) -> int:
+        """V4.6.66 — user-adjustable seconds between AI calls / cycles. Read
+        fresh each cycle (so changes apply without a restart), floored for
+        safety. Prefers the env var the cloud runner injects, then local
+        settings, then this bot's built-in tick_seconds."""
+        import os
+        env = (os.environ.get(f"APEX_CALL_DELAY_{self.name.upper()}")
+               or os.environ.get("APEX_CALL_DELAY"))
+        val = None
+        if env:
+            try:
+                val = int(float(env))
+            except ValueError:
+                val = None
+        if val is None:
+            try:
+                import core.data as _D
+                val = int(_D.get_bot_call_delay(self.name.upper(),
+                                                self.tick_seconds))
+            except Exception:
+                val = self.tick_seconds
+        try:
+            from core.data import CALL_DELAY_FLOOR as _floor
+        except Exception:
+            _floor = 30
+        return max(int(_floor), int(val))
 
     def _min_confidence(self) -> float:
         """V4.6.48 — the user's 'Minimum confidence to trade' for this bot.
