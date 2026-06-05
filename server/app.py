@@ -1552,6 +1552,15 @@ def api_ibkr_fills(side: str, mode: str = "paper", limit: int = 500,
     return {"fills": bot_runner.list_ibkr_fills(user["id"], side, mode, limit)}
 
 
+@app.post("/ibkr/{side}/liquidate")
+def api_ibkr_liquidate(side: str, mode: str = "paper",
+                       authorization: str | None = Header(default=None)):
+    """V4.6.70 — stop a cloud IBKR bot, market-sell its sub-portfolio and delete
+    its ledger so the desktop can remove it from the allocation table."""
+    user = _current_user(authorization)
+    return bot_runner.liquidate_ibkr_bot(user["id"], side, mode)
+
+
 @app.post("/ibkr/{side}/rebalance")
 def api_ibkr_rebalance(side: str, target_pct: float, mode: str = "paper",
                        authorization: str | None = Header(default=None)):

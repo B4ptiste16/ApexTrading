@@ -124,7 +124,7 @@ def _write_ibc_ini(user_id: int, username: str, password: str,
     # IBC reads IbLoginId/IbPassword from here when not passed on the CLI.
     # We pass user/pw on the CLI too, but keeping them here lets IBC's
     # auto-restart relogin without re-invoking ibcstart.
-    content = "\n".join([
+    lines = [
         f"IbLoginId={username}",
         f"IbPassword={password}",
         f"TradingMode={mode}",
@@ -147,12 +147,25 @@ def _write_ibc_ini(user_id: int, username: str, password: str,
         # TWS is closed (laptop off — the 24/7 case) and quietly yields if the
         # user opens TWS, instead of hanging or fighting for the session.
         "ExistingSessionDetectedAction=secondary",
-        # Paper has no 2FA, but be explicit so a stray prompt times out
-        # instead of hanging the launch forever.
-        "ExitAfterSecondFactorAuthenticationTimeout=yes",
-        "SecondFactorAuthenticationExitInterval=60",
-        "",
-    ])
+    ]
+    if (mode or "").lower() == "live":
+        # V4.6.70 — LIVE login triggers an IBKR Mobile 2FA push. WAIT for the
+        # user to approve it on their phone (don't exit on timeout), and if it
+        # ever times out, re-prompt so a later approval still gets them in.
+        lines += [
+            "ExitAfterSecondFactorAuthenticationTimeout=no",
+            "SecondFactorAuthenticationExitInterval=180",
+            "ReloginAfterSecondFactorAuthenticationTimeout=yes",
+        ]
+    else:
+        # Paper has no 2FA — be explicit so a stray prompt times out instead
+        # of hanging the launch forever.
+        lines += [
+            "ExitAfterSecondFactorAuthenticationTimeout=yes",
+            "SecondFactorAuthenticationExitInterval=60",
+        ]
+    lines.append("")
+    content = "\n".join(lines)
     ini.write_text(content, encoding="utf-8")
     try:
         os.chmod(ini, 0o600)
@@ -322,12 +335,11 @@ def ensure_gateway(user_id: int, username: str, password: str,
     provisioned or the gateway never comes up — the caller logs it and
     leaves the bot to retry, never crashing."""
     mode = (mode or "paper").lower()
-    if mode != "paper":
-        raise RuntimeError(
-            "cloud IBKR is PAPER-only — live accounts need IBKR Mobile 2FA "
-            "which can't be approved head-less on the server.")
+    # V4.6.70 — LIVE is allowed on the cloud now. IBKR still issues a Mobile 2FA
+    # challenge on a live login; the user approves it on their phone and the
+    # gateway is configured to WAIT for that approval (see _write_ibc_ini).
     if not username or not password:
-        raise RuntimeError("no IBKR paper username/password stored for user "
+        raise RuntimeError(f"no IBKR {mode} username/password stored for user "
                            f"{user_id} (sync them from Tools → IBKR).")
 
     port = user_port(user_id)
@@ -359,7 +371,9 @@ def ensure_gateway(user_id: int, username: str, password: str,
         f"--tws-settings-path={settings_dir}",
         f"--ibc-path={IBC_PATH}",
         f"--ibc-ini={ini}",
-        "--on2fatimeout=exit",
+        # V4.6.70 — LIVE: wait for the user's phone 2FA (restart the prompt on
+        # timeout) instead of exiting. PAPER has no 2FA so exit fast on a stray.
+        "--on2fatimeout=" + ("restart" if mode == "live" else "exit"),
     ]
     if JAVA_PATH:
         cmd.append(f"--java-path={JAVA_PATH}")

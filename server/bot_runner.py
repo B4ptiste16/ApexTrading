@@ -295,6 +295,90 @@ def list_ibkr_fills(user_id: int, side: str, mode: str = "paper",
     return out
 
 
+def liquidate_ibkr_bot(user_id: int, side: str, mode: str = "paper") -> dict:
+    """V4.6.70 — stop a cloud IBKR bot, MARKET-SELL its entire sub-portfolio via
+    the server gateway, and delete its ledger so the cash is freed for
+    redistribution. Lets the desktop remove a cloud bot from the allocation
+    table (the desktop has no local gateway to liquidate against)."""
+    import json as _j
+    s = side.upper()
+    # 1. stop the bot (user-initiated → drops it from the always-on registry)
+    try:
+        stop_bot(user_id, s, "ibkr", user_initiated=True)
+    except Exception:
+        pass
+    led_file = _ibkr_ledger_dir(user_id) / f"{s.lower()}_{mode.lower()}.json"
+    if not led_file.exists():
+        return {"ok": True, "detail": "No ledger for this bot — nothing to sell."}
+    try:
+        led = _j.loads(led_file.read_text(encoding="utf-8"))
+    except Exception as e:
+        return {"ok": False, "detail": f"ledger read failed: {e}"}
+    holdings = {sym: float(q) for sym, q in (led.get("holdings") or {}).items()
+                if abs(float(q or 0)) > 1e-9}
+
+    sold, failures = 0, []
+    if holdings:
+        try:
+            from . import ibkr_gateway
+            from ib_async import IB, Stock, Crypto, MarketOrder
+            import asyncio
+            try:
+                asyncio.get_event_loop()
+            except RuntimeError:
+                asyncio.set_event_loop(asyncio.new_event_loop())
+            port = ibkr_gateway.active_port(user_id, mode)
+            ib = IB()
+            ib.connect("127.0.0.1", int(port), clientId=9100, timeout=15,
+                       readonly=False)
+            try:
+                for sym, qty in holdings.items():
+                    action = "SELL" if qty > 0 else "BUY"
+                    placed = False
+                    for contract in (Stock(sym, "SMART", "USD"),
+                                     Crypto(sym, "PAXOS", "USD")):
+                        try:
+                            ib.qualifyContracts(contract)
+                            if not getattr(contract, "conId", 0):
+                                continue
+                            o = MarketOrder(action, abs(qty))
+                            if isinstance(contract, Crypto):
+                                o.tif = "IOC"
+                            else:
+                                o.tif = "DAY"; o.outsideRth = True
+                            ib.placeOrder(contract, o)
+                            ib.sleep(1)
+                            placed = True
+                            sold += 1
+                            break
+                        except Exception:
+                            continue
+                    if not placed:
+                        failures.append(sym)
+            finally:
+                try:
+                    ib.disconnect()
+                except Exception:
+                    pass
+        except Exception as e:
+            return {"ok": False,
+                    "detail": f"Could not reach the cloud gateway to liquidate "
+                              f"({e}). Ledger kept — try again."}
+    if failures:
+        return {"ok": False,
+                "detail": f"Could not sell: {', '.join(failures)}. Ledger kept."}
+    # 2. delete the ledger + its sidecar files (fills / rebalance request)
+    for suffix in (".json", ".fills.jsonl", ".rebalance.json"):
+        try:
+            p = _ibkr_ledger_dir(user_id) / f"{s.lower()}_{mode.lower()}{suffix}"
+            if p.exists():
+                p.unlink()
+        except Exception:
+            pass
+    return {"ok": True,
+            "detail": f"Sold {sold} position(s); {s} removed and cash freed."}
+
+
 def request_ibkr_rebalance(user_id: int, side: str, target_pct: float,
                            mode: str = "paper") -> dict:
     """V4.6.51 — drop a rebalance request next to the bot's ledger. The

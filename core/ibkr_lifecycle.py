@@ -195,6 +195,66 @@ def liquidate_and_remove(side: str, mode: str | None = None) -> tuple[bool, str]
                   f"cash freed for redistribution.")
 
 
+def free_ibkr_allocation(side: str) -> tuple[bool, str]:
+    """V4.6.70 — called when a bot is DELETED. Sells the bot's IBKR holdings,
+    removes its sub-portfolio ledger, and drops it from the Tools allocation
+    table (settings[ibkr_<mode>]['bots']) so its funds are freed. Handles both
+    a locally-run gateway and a cloud (Oracle) bot. Best-effort + never raises."""
+    import json as _json
+    import core.data as _D
+    side_u = side.upper()
+    mode = _mode()
+    s = _D.load_settings()
+    cfg = s.get(f"ibkr_{mode}", {}) or {}
+    is_cloud = bool(cfg.get("run_on_oracle"))
+
+    msg = ""
+    try:
+        if is_cloud:
+            # Liquidate + delete the ledger on the server (where the gateway is)
+            from core.paths import DATA_DIR
+            import urllib.request
+            tok = url = None
+            try:
+                with open(DATA_DIR / "apex_auth.json", encoding="utf-8") as f:
+                    tok = _json.load(f).get("token")
+                with open(DATA_DIR / "apex_server.json", encoding="utf-8") as f:
+                    url = _json.load(f).get("url", "").rstrip("/")
+            except Exception:
+                pass
+            if tok and url:
+                try:
+                    import requests
+                    r = requests.post(f"{url}/ibkr/{side_u}/liquidate",
+                                      params={"mode": mode},
+                                      headers={"Authorization": f"Bearer {tok}"},
+                                      timeout=45)
+                    j = r.json() if r.content else {}
+                    msg = j.get("detail", "")
+                except Exception as e:
+                    msg = f"cloud liquidation error: {e}"
+        else:
+            ok, info = liquidate_and_remove(side_u, mode)
+            msg = info
+    except Exception as e:
+        msg = f"liquidation error: {e}"
+
+    # Drop the bot from the allocation table regardless, so a deleted bot never
+    # keeps showing allocated funds.
+    try:
+        bots = cfg.get("bots") or []
+        new = [b for b in bots
+               if str(b.get("id", "")).upper() != side_u]
+        if len(new) != len(bots):
+            cfg["bots"] = new
+            s[f"ibkr_{mode}"] = cfg
+            with open(_D.SETTINGS_FILE, "w", encoding="utf-8") as f:
+                _json.dump(s, f, indent=2)
+    except Exception as e:
+        msg = (msg + f"  (allocation cleanup error: {e})").strip()
+    return True, (msg or f"{side_u} removed from IBKR allocation.")
+
+
 def _is_crypto_bot(side: str) -> bool:
     """Best-effort asset-type sniff so liquidation builds the right contract.
     Built-ins are equities; custom bots declare asset_type in their registry

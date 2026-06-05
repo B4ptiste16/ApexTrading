@@ -876,6 +876,16 @@ class MoreBotsTab(QWidget):
             print(f"[delete-bot] user cancelled", flush=True)
             return
 
+        # ── Step 0: free any IBKR allocation — sell the bot's sub-portfolio
+        # and drop it from the Tools allocation table so deleted bots never
+        # keep funds allocated (V4.6.70). Best-effort; never blocks deletion.
+        try:
+            from core import ibkr_lifecycle as _ibl
+            ok, info = _ibl.free_ibkr_allocation(side)
+            print(f"[delete-bot] IBKR allocation: {info}", flush=True)
+        except Exception as _e:
+            print(f"[delete-bot] IBKR allocation cleanup failed: {_e}", flush=True)
+
         # ── Step 1: delete the .py / .apex file ─────────────────
         deleted_files = []
         if script:

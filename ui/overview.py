@@ -1077,43 +1077,40 @@ class ToolsTab(QWidget):
             from PyQt6.QtWidgets import QMessageBox, QApplication
             from PyQt6.QtCore import Qt
             side = _e["id"]
-            # V4.6.38 — removing a bot liquidates its entire sub-portfolio so
-            # the cash is freed for manual redistribution. Confirm first since
-            # this places real market orders.
+            mode = D.load_settings().get("alpaca_mode", "paper")
+            cfg  = D.load_settings().get(f"ibkr_{mode}", {}) or {}
+            is_cloud = bool(cfg.get("run_on_oracle"))
+            # V4.6.70 — removing a bot liquidates its sub-portfolio and frees the
+            # cash. CLOUD bots are liquidated on the server (the desktop has no
+            # local gateway); LOCAL bots use the in-process gateway. Always
+            # confirm — this places real market orders.
+            resp = QMessageBox.question(
+                self, "Remove bot & liquidate",
+                f"Removing <b>{_e['label'].strip()}</b> will MARKET-SELL its "
+                f"entire IBKR sub-portfolio and free the allocated cash for "
+                f"redistribution.<br><br>Proceed?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No)
+            if resp != QMessageBox.StandardButton.Yes:
+                return
+            QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
             try:
-                from core import ibkr_lifecycle
-                from core.ledger import ledger_path, Ledger
-                from core.paths import DATA_DIR
-                mode = D.load_settings().get("alpaca_mode", "paper")
-                led = Ledger.load(ledger_path(side, "ibkr", mode, DATA_DIR))
-            except Exception:
-                led, ibkr_lifecycle = None, None
-            holdings = (led.symbols() if led is not None else [])
-            if holdings:
-                resp = QMessageBox.question(
-                    self, "Remove bot & liquidate",
-                    f"Removing <b>{_e['label'].strip()}</b> will MARKET-SELL its "
-                    f"entire sub-portfolio ({len(holdings)} position(s): "
-                    f"{', '.join(holdings)}) and free the cash for manual "
-                    f"redistribution.<br><br>Proceed?",
-                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                    QMessageBox.StandardButton.No)
-                if resp != QMessageBox.StandardButton.Yes:
-                    return
-                QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
-                try:
-                    ok, info = ibkr_lifecycle.liquidate_and_remove(side, mode)
-                finally:
-                    QApplication.restoreOverrideCursor()
-                if not ok:
-                    QMessageBox.warning(self, "Liquidation incomplete", info)
-                    return   # keep the row so positions aren't orphaned
-                if hasattr(self, "_ibkr_msg"):
-                    self._ibkr_msg.setText(f"✓ {info}")
-                    self._ibkr_msg.setStyleSheet(
-                        f"color:{C['green']};font-size:10px;")
-            elif led is not None:
-                led.delete()   # empty ledger — just drop it
+                if is_cloud:
+                    ok, info = self._cloud_liquidate_ibkr(side, mode)
+                else:
+                    try:
+                        from core import ibkr_lifecycle
+                        ok, info = ibkr_lifecycle.liquidate_and_remove(side, mode)
+                    except Exception as _ex:
+                        ok, info = False, str(_ex)
+            finally:
+                QApplication.restoreOverrideCursor()
+            if not ok:
+                QMessageBox.warning(self, "Liquidation incomplete", info)
+                return   # keep the row so positions aren't orphaned
+            if hasattr(self, "_ibkr_msg"):
+                self._ibkr_msg.setText(f"✓ {info}")
+                self._ibkr_msg.setStyleSheet(f"color:{C['green']};font-size:10px;")
             if _e in self._ibkr_bot_rows:
                 self._ibkr_bot_rows.remove(_e)
             _e["row_widget"].deleteLater()
@@ -1458,6 +1455,26 @@ class ToolsTab(QWidget):
             threading.Thread(target=_fetch, daemon=True).start()
         except Exception:
             _apply([])
+
+    def _cloud_liquidate_ibkr(self, side: str, mode: str):
+        """V4.6.70 — ask the server to stop, market-sell and delete a cloud IBKR
+        bot's sub-portfolio. Returns (ok, message)."""
+        try:
+            from ui.login import load_auth, load_server_url
+            import requests
+            tok = (load_auth() or {}).get("token")
+            if not tok:
+                return False, "Not signed in to the APEX cloud."
+            r = requests.post(f"{load_server_url()}/ibkr/{side}/liquidate",
+                              params={"mode": mode},
+                              headers={"Authorization": f"Bearer {tok}"},
+                              timeout=45)
+            j = r.json() if r.content else {}
+            if r.ok and j.get("ok"):
+                return True, j.get("detail", "removed")
+            return False, j.get("detail", f"server error (HTTP {r.status_code})")
+        except Exception as e:
+            return False, str(e)
 
     def _trigger_ibkr_rebalance(self, side: str, target_pct: float):
         """V4.6.51 — request a sell-down for one bot to `target_pct` of the

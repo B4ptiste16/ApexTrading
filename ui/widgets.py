@@ -408,14 +408,10 @@ class BotProcessWidget(QWidget):
             if self._broker_mode() == "ibkr":
                 if not self._ibkr_cloud_enabled():
                     return False
-                # V4.6.58 — LIVE / real-money IBKR cannot run on the head-less
-                # Oracle gateway: IBKR forces Mobile 2FA on every live login,
-                # which can't be approved server-side. So in LIVE mode, force
-                # LOCAL execution (against the user's live TWS) — flipping the
-                # Paper→Live switch must never silently trade the paper cloud
-                # account while the user believes it's live.
-                if _D.load_settings().get("alpaca_mode", "paper") == "live":
-                    return False
+                # V4.6.70 — cloud IBKR LIVE is now allowed. IBKR still requires
+                # Mobile 2FA on a live login, but the user approves it on their
+                # phone when the server gateway (re)connects; the gateway is
+                # configured to WAIT for that approval rather than exit.
             return _D.is_cloud_bot(self.side)
         except Exception:
             return False
