@@ -78,8 +78,12 @@ import time as _time_mod
 # affects orders.
 _broker_override = _threading.local()
 _DISPLAY_TTL = 6.0
-_acct_cache: dict = {}   # (broker, side) -> (ts, dict)
-_pos_cache:  dict = {}   # (broker, side) -> (ts, list)
+_DISPLAY_TTL_CHART = 30.0   # charts change slowly — longer cache so broker
+                            # switching renders instantly from a warm cache
+_acct_cache:   dict = {}   # (broker, side) -> (ts, dict)
+_pos_cache:    dict = {}   # (broker, side) -> (ts, list)
+_orders_cache: dict = {}   # (broker, side) -> (ts, DataFrame)
+_hist_cache:   dict = {}   # (broker, side, period) -> (ts, DataFrame)
 _cache_lock = _threading.Lock()
 
 
@@ -102,13 +106,18 @@ class broker_context:
         _broker_override.value = None
 
 
-def prefetch_broker(broker: str, sides: list) -> None:
-    """Warm the display cache for `broker` (call from a background thread)."""
+def prefetch_broker(broker: str, sides: list, charts: bool = True) -> None:
+    """Warm the display cache for `broker` (call from a background thread).
+    With charts=True also warms the equity history + orders so the bot tabs'
+    graphs render instantly when the user switches to this broker."""
     with broker_context(broker):
         for side in sides:
             try:
                 get_account(side)
                 get_positions(side)
+                if charts:
+                    get_orders(side)
+                    get_history(side, "1D")
             except Exception:
                 pass
 
@@ -501,9 +510,25 @@ def _ibkr_cloud_orders(side: str) -> pd.DataFrame:
 
 
 def get_orders(side: str) -> pd.DataFrame:
+    # V4.6.67 — cached per broker so switching brokers shows trades instantly
+    # and the background preloader can warm the other broker.
+    b = current_broker()
+    key = (b, side.upper())
+    now = _time_mod.time()
+    with _cache_lock:
+        hit = _orders_cache.get(key)
+    if hit and (now - hit[0]) < _DISPLAY_TTL_CHART:
+        return hit[1]
+    df = _get_orders_uncached(side, b)
+    with _cache_lock:
+        _orders_cache[key] = (now, df)
+    return df
+
+
+def _get_orders_uncached(side: str, broker: str | None = None) -> pd.DataFrame:
     # V4.6.63 — cloud IBKR bots have no Alpaca order API; read recorded fills
     # from the server instead.
-    if load_settings().get("broker_mode", "alpaca") == "ibkr":
+    if (broker or current_broker()) == "ibkr":
         return _ibkr_cloud_orders(side)
     c = get_client(side)
     if not c:
@@ -538,23 +563,30 @@ def get_orders(side: str) -> pd.DataFrame:
 
 
 def get_history(side: str, period: str) -> pd.DataFrame:
+    """V4.6.67 — cached per (broker, side, period) so the equity chart renders
+    instantly on broker switch (and the preloader can warm both brokers)."""
+    b = current_broker()
+    key = (b, side.upper(), period)
+    now = _time_mod.time()
+    with _cache_lock:
+        hit = _hist_cache.get(key)
+    if hit and (now - hit[0]) < _DISPLAY_TTL_CHART:
+        return hit[1]
+    df = _get_history_uncached(side, period, b)
+    with _cache_lock:
+        _hist_cache[key] = (now, df)
+    return df
+
+
+def _get_history_uncached(side: str, period: str,
+                          broker: str | None = None) -> pd.DataFrame:
     """
     Live portfolio history for one bot's Alpaca account.
 
-    V7.1.14: chart no longer shrinks to 13:30-20:00 UTC (US market
-    hours). Two changes:
-      1. Use intraday_reporting=CONTINUOUS exclusively when available
-         — it asks Alpaca for 24/7 equity samples. extended_hours
-         is only used as a fallback for older SDKs that don't have
-         the enum.
-      2. NaN equity samples outside market hours (when Alpaca has
-         no fresh tick because no trades happened) are now
-         forward-filled with the last known equity instead of being
-         dropped. The plot now shows a flat line overnight rather
-         than auto-shrinking the X-axis to the market session.
+    V7.1.14: chart no longer shrinks to 13:30-20:00 UTC (US market hours).
     """
     # V4.6.43 — IBKR mode has its own equity-history source.
-    if load_settings().get("broker_mode", "alpaca") == "ibkr":
+    if (broker or current_broker()) == "ibkr":
         try:
             from core import ibkr_data
             return ibkr_data.get_history(side, period)

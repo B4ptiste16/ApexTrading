@@ -3484,6 +3484,60 @@ def _install_exception_handler():
     sys.excepthook = _handler
 
 
+class _LoadingSplash(QWidget):
+    """V4.6.67 — startup splash with a progress bar shown while BOTH brokers'
+    data is preloaded, so the app opens fully populated."""
+    def __init__(self):
+        from PyQt6.QtWidgets import QProgressBar
+        super().__init__(None)
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint |
+                            Qt.WindowType.WindowStaysOnTopHint |
+                            Qt.WindowType.SplashScreen)
+        self.setFixedSize(460, 220)
+        self.setStyleSheet(
+            "background:#0e1016;border:1px solid #2a2f3e;border-radius:14px;")
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(34, 30, 34, 30)
+        lay.setSpacing(14)
+        title = QLabel("BAPTOU")
+        title.setStyleSheet("color:#7aa2ff;font-size:30px;font-weight:800;"
+                            "letter-spacing:3px;background:transparent;border:none;")
+        sub = QLabel("TRADING PLATFORM")
+        sub.setStyleSheet("color:#8a93c9;font-size:11px;letter-spacing:4px;"
+                          "background:transparent;border:none;")
+        lay.addStretch()
+        lay.addWidget(title)
+        lay.addWidget(sub)
+        self.bar = QProgressBar()
+        self.bar.setRange(0, 100)
+        self.bar.setValue(0)
+        self.bar.setTextVisible(False)
+        self.bar.setFixedHeight(8)
+        self.bar.setStyleSheet(
+            "QProgressBar{background:#1b1f2b;border:none;border-radius:4px;}"
+            "QProgressBar::chunk{background:#5b6cf0;border-radius:4px;}")
+        lay.addWidget(self.bar)
+        self.status = QLabel("Starting…")
+        self.status.setStyleSheet("color:#6b7390;font-size:10px;"
+                                  "background:transparent;border:none;")
+        lay.addWidget(self.status)
+        lay.addStretch()
+        # Center on the primary screen
+        try:
+            scr = QApplication.primaryScreen().geometry()
+            self.move(scr.center().x() - 230, scr.center().y() - 110)
+        except Exception:
+            pass
+
+    def set_progress(self, pct: int, msg: str = ""):
+        try:
+            self.bar.setValue(max(0, min(100, int(pct))))
+            if msg:
+                self.status.setText(msg)
+        except Exception:
+            pass
+
+
 def main():
     if len(sys.argv) >= 3 and sys.argv[1] == "--run-bot":
         # V4.6.15 — 4th arg is the optional explicit script path for
@@ -3518,9 +3572,73 @@ def main():
     )
 
     def _launch(user: dict):
+        from PyQt6.QtCore import QThread, pyqtSignal, QTimer as _QT
+        # Show the splash FIRST so it appears instantly, then build the window
+        # (heavy) and preload both brokers behind it.
+        splash = _LoadingSplash()
+        try:
+            splash.show(); app.processEvents()
+        except Exception:
+            splash = None
+
         w = ApexWindow(user=user)
         app._main_window = w
-        w.show()
+
+        try:
+            sides = list(w._bot_tabs.keys()) or ["LONG", "SHORT", "DAY"]
+        except Exception:
+            sides = ["LONG", "SHORT", "DAY"]
+
+        class _Preload(QThread):
+            progress = pyqtSignal(int, str)
+            finished_ = pyqtSignal()
+            def run(self):
+                try:
+                    import core.data as _D
+                    cur = _D.load_settings().get("broker_mode", "alpaca")
+                    order = [cur, "ibkr" if cur == "alpaca" else "alpaca"]
+                    total = max(1, len(order) * len(sides))
+                    i = 0
+                    for brk in order:
+                        for s in sides:
+                            try:
+                                _D.prefetch_broker(brk, [s])
+                            except Exception:
+                                pass
+                            i += 1
+                            self.progress.emit(int(i * 100 / total),
+                                               f"Loading {brk.upper()} · {s}…")
+                except Exception:
+                    pass
+                self.finished_.emit()
+
+        _shown = {"v": False}
+        def _reveal():
+            if _shown["v"]:
+                return
+            _shown["v"] = True
+            try:
+                if splash is not None:
+                    splash.close()
+            except Exception:
+                pass
+            w.show()
+            try:
+                w._refresh_all()
+            except Exception:
+                pass
+
+        try:
+            pre = _Preload()
+            app._preload_thread = pre   # keep a ref so it isn't GC'd
+            if splash is not None:
+                pre.progress.connect(splash.set_progress)
+            pre.finished_.connect(_reveal)
+            pre.start()
+        except Exception:
+            _reveal()
+        # Hard timeout — the app ALWAYS opens even if preload stalls.
+        _QT.singleShot(15000, _reveal)
 
     def _on_login_success(login_win, token: str, user: dict):
         login_win.close()
