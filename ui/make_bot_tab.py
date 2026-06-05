@@ -234,7 +234,7 @@ ai_used:            {{provider}}
 compatible_models:  {{provider, others}}
 asset_type:         {{stocks|crypto|etfs|futures|options}}
 brokers:            {{alpaca, ibkr}}
-universe:           {{universe_file.txt}}
+universe:           {{public universe name, or (ai-selected)}}
 requirements:       {{pip pkgs beyond APEX bundle, comma-sep, or empty}}
 """
 
@@ -359,6 +359,18 @@ _SYSTEM_PROMPT_TRADE = (
     "═══ FILL-IN RULES ═══\n\n"
     "• ai_used MUST be the literal provider that is generating this "
     "bot (e.g. 'groq', 'anthropic', 'openai', 'gemini').\n"
+    "• TICKER UNIVERSE: if the user's request begins with a "
+    "'TICKER UNIVERSE (mandatory): ...' block, you MUST set "
+    "`default_symbols` in the BotRunner call to EXACTLY that list of "
+    "tickers (no additions, no omissions) and set the META `universe:` "
+    "field to the universe name given in that block. If NO such block "
+    "is present, choose a small, sensible `default_symbols` list that "
+    "fits the strategy and set `universe:` to "
+    "'(ai-selected)'.\n"
+    "• The META `description:` (one punchy line) and `method:` (2-3 "
+    "sentences in plain English) are shown to the user on the bot's "
+    "card and in the marketplace — write them for a human, not as "
+    "placeholders. Make them accurate to the strategy you wrote.\n"
     "• If your strategy needs an extra pip package (e.g. scikit-learn, "
     "ccxt, ta), declare it in requirements: AND import it inside "
     "decide() — never at module level (so a missing dep doesn't kill "
@@ -792,11 +804,14 @@ class MakeBotTab(QWidget):
 
         s.add(SectionHeader("MAKE YOUR OWN BOT", C["purple"]))
         intro = QLabel(
-            "Describe a trading strategy in plain English and let an "
-            "AI write the bot for you. The generated file follows the "
-            "APEX bot contract (read it via Tools → Open skeleton "
-            "guide) and can be saved to your local library or "
-            "published to the public bot store on the APEX server."
+            "Describe a trading strategy in plain English and let an AI "
+            "write the bot for you. Three quick choices: which AI builds "
+            "it, which brokers it targets, and which ticker universe it "
+            "trades (a curated public universe, or let the AI pick). The "
+            "AI also writes the bot's name, description and method — the "
+            "info shown on its card. The generated file follows the APEX "
+            "bot contract and can be saved to your library or published "
+            "to the public bot store."
         )
         intro.setStyleSheet(f"color:{C['muted']};font-size:11px;")
         intro.setWordWrap(True)
@@ -984,8 +999,9 @@ class MakeBotTab(QWidget):
         desc_help = QLabel(
             "Plain English. Mention: when to buy / sell, position "
             "sizing, stop-loss / take-profit, any indicators or "
-            "external signals. The clearer the spec, the better the "
-            "generated code.")
+            "external signals. You don't need to list tickers — that's "
+            "the “Ticker universe” dropdown above. The clearer the spec, "
+            "the better the generated code.")
         desc_help.setStyleSheet(f"color:{C['muted']};font-size:11px;")
         desc_help.setWordWrap(True)
         s.add(desc_help)

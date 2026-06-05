@@ -64,7 +64,7 @@ _SECTORS: dict[str, tuple[list, str]] = {
         "QLYS", "TENB", "VRNS", "CHKP", "GEN", "AKAM",
     ], "Cybersecurity pure-plays."),
     "fintech_payments": ([
-        "V", "MA", "PYPL", "SQ", "AXP", "FI", "GPN", "COIN", "HOOD", "SOFI",
+        "V", "MA", "PYPL", "XYZ", "AXP", "FI", "GPN", "COIN", "HOOD", "SOFI",
         "AFRM", "NU", "TOST", "DLO", "FOUR", "WU", "PAGS", "STNE", "UPST",
     ], "Payments, fintech & digital banking."),
     "banks": ([
@@ -77,7 +77,7 @@ _SECTORS: dict[str, tuple[list, str]] = {
     ], "Electric vehicles & clean-energy."),
     "energy_oil": ([
         "XOM", "CVX", "COP", "SLB", "EOG", "OXY", "PSX", "MPC", "VLO", "HAL",
-        "DVN", "FANG", "KMI", "WMB", "HES", "BKR", "OKE", "MRO", "CTRA", "APA",
+        "DVN", "FANG", "KMI", "WMB", "TRGP", "BKR", "OKE", "EQT", "CTRA", "APA",
     ], "Oil, gas & energy services."),
     "healthcare": ([
         "UNH", "LLY", "JNJ", "PFE", "MRK", "ABBV", "BMY", "AMGN", "GILD",
@@ -108,7 +108,7 @@ _SECTORS: dict[str, tuple[list, str]] = {
     ], "Communication services — media, telecom, social."),
     "retail": ([
         "WMT", "COST", "TGT", "HD", "LOW", "TJX", "ROST", "DG", "DLTR",
-        "BBY", "ULTA", "KR", "DKS", "FIVE", "BURL", "M", "GPS", "ANF",
+        "BBY", "ULTA", "KR", "DKS", "FIVE", "BURL", "M", "GAP", "ANF",
     ], "Retailers — big-box, specialty & grocery."),
     "reits": ([
         "PLD", "AMT", "EQIX", "SPG", "O", "PSA", "CCI", "WELL", "DLR", "VICI",
@@ -160,7 +160,7 @@ def _all_base_stocks() -> list:
 
 _BASE_CRYPTO = [
     "BTC-USD", "ETH-USD", "SOL-USD", "XRP-USD", "ADA-USD", "AVAX-USD",
-    "DOGE-USD", "LINK-USD", "DOT-USD", "LTC-USD", "BCH-USD", "MATIC-USD",
+    "DOGE-USD", "LINK-USD", "DOT-USD", "LTC-USD", "BCH-USD", "POL-USD",
     "UNI-USD", "ATOM-USD", "ETC-USD", "XLM-USD", "NEAR-USD", "APT-USD",
     "FIL-USD", "ARB-USD",
 ]
