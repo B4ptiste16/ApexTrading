@@ -1040,21 +1040,25 @@ class ToolsTab(QWidget):
         live_lbl.setFixedWidth(150)
 
         # Replace button — opens picker to swap this slot to another bot
-        repl_btn = QPushButton("↔ Replace")
-        repl_btn.setFixedWidth(72)
+        repl_btn = QPushButton("Replace")
+        repl_btn.setMinimumWidth(84)
         repl_btn.setFixedHeight(26)
         repl_btn.setStyleSheet(
             f"QPushButton{{background:rgba(138,147,201,0.18);color:{C['purple']};"
-            f"border:none;border-radius:4px;font-size:10px;font-weight:600;}}"
+            f"border:none;border-radius:4px;font-size:10px;font-weight:600;"
+            f"padding:0 10px;}}"
             f"QPushButton:hover{{background:rgba(138,147,201,0.30);}}")
 
-        rm_btn = QPushButton("✕")
-        rm_btn.setFixedWidth(26)
+        # Remove button — "×" renders reliably (the ✕ glyph was missing from the
+        # button font, so it showed as a blank red square). V4.6.72.
+        rm_btn = QPushButton("Remove")
+        rm_btn.setMinimumWidth(80)
         rm_btn.setFixedHeight(26)
         rm_btn.setStyleSheet(
-            f"QPushButton{{background:rgba(231,76,60,0.15);color:{C['red']};"
-            f"border:none;border-radius:4px;font-size:11px;font-weight:700;}}"
-            f"QPushButton:hover{{background:rgba(231,76,60,0.30);}}")
+            f"QPushButton{{background:rgba(231,76,60,0.16);color:{C['red']};"
+            f"border:none;border-radius:4px;font-size:10px;font-weight:700;"
+            f"padding:0 10px;}}"
+            f"QPushButton:hover{{background:rgba(231,76,60,0.34);}}")
 
         row_l.addWidget(lbl_w)
         row_l.addWidget(cid_edit)
@@ -1078,8 +1082,17 @@ class ToolsTab(QWidget):
             from PyQt6.QtCore import Qt
             side = _e["id"]
             mode = D.load_settings().get("alpaca_mode", "paper")
-            cfg  = D.load_settings().get(f"ibkr_{mode}", {}) or {}
-            is_cloud = bool(cfg.get("run_on_oracle"))
+            # V4.6.72 — liquidate where the bot's ledger LIVES, not by the
+            # checkbox: a local ledger ⇒ local gateway; no local ledger ⇒ it's a
+            # cloud (Oracle) bot, so liquidate on the server. This makes Remove
+            # work whether the bot ran locally or on the cloud.
+            try:
+                from core.ledger import ledger_path, Ledger
+                from core.paths import DATA_DIR
+                _local_led = Ledger.load(ledger_path(side, "ibkr", mode, DATA_DIR))
+            except Exception:
+                _local_led = None
+            is_cloud = _local_led is None
             # V4.6.70 — removing a bot liquidates its sub-portfolio and frees the
             # cash. CLOUD bots are liquidated on the server (the desktop has no
             # local gateway); LOCAL bots use the in-process gateway. Always
@@ -1118,7 +1131,10 @@ class ToolsTab(QWidget):
             self._ibkr_refresh_add_combo()
             self._update_ibkr_remaining()
 
-        rm_btn.clicked.connect(_remove)
+        # V4.6.72 — clicked emits a `checked` bool; pass the entry explicitly so
+        # _remove doesn't receive the bool as `_e` (caused 'bool' not
+        # subscriptable on _e["id"]).
+        rm_btn.clicked.connect(lambda checked=False, _e=entry: _remove(_e))
         repl_btn.clicked.connect(lambda checked=False, _e=entry: self._ibkr_start_replace(_e))
         self._ibkr_refresh_add_combo()
         self._update_ibkr_remaining()

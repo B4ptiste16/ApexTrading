@@ -1,4 +1,4 @@
 {
-  "version": "4.6.71",
-  "notes": "v4.6.71 — Sober, minimalist cards\n\n🎛️ CLEANER UI\n• Removed the coloured accent lines (the top/side bars and bracket-like edges) from cards and blocks across the app — Overview bot blocks, metric cards, bot-tab panels and the More-Bots cards are now flat and calm.\n• Each bot keeps its identity through its coloured title, not heavy outlines. Subtle rounded corners + panel tint remain so things stay readable.\n\nUpdate via the in-app banner.\n"
+  "version": "4.6.72",
+  "notes": "v4.6.72 — Fix removing IBKR bots\n\n🐛 FIXED\n• Removing a bot from the IBKR allocation table crashed ('bool' object is not subscriptable') — the button click passed the wrong argument. Fixed.\n• Remove now works for CLOUD bots: it liquidates wherever the bot's ledger actually lives (server for cloud bots, local for local bots) instead of always trying a local gateway that isn't there.\n• The Remove and Replace buttons now show clear labels (the ✕ glyph was missing from the font and rendered as a blank red square) and are wide enough for their text.\n\nUpdate via the in-app banner.\n"
 }
