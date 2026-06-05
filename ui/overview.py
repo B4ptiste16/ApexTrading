@@ -323,7 +323,7 @@ class OverviewTab(QWidget):
         block = QFrame()
         block.setStyleSheet(
             f"background:{C['panel']};border:none;"
-            f"border-radius:10px;border-left:3px solid {color};"
+            f"border-radius:10px;"
         )
         layout = QVBoxLayout(block)
         layout.setContentsMargins(16, 14, 16, 14)
@@ -692,7 +692,7 @@ class ToolsTab(QWidget):
             wrap = QFrame()
             wrap.setStyleSheet(
                 f"background:{C['panel']};border:none;"
-                f"border-radius:10px;border-left:3px solid {C['orange']};")
+                f"border-radius:10px;")
             v = QVBoxLayout(wrap)
             v.setContentsMargins(24, 22, 24, 22)
             v.setSpacing(8)
@@ -727,7 +727,7 @@ class ToolsTab(QWidget):
         banner = QFrame()
         banner.setStyleSheet(
             f"background:rgba(255,165,0,0.07);border:none;border-radius:8px;"
-            f"border-left:3px solid {mode_color};")
+            f"")
         banner_row = QHBoxLayout(banner)
         banner_row.setContentsMargins(14, 10, 14, 10)
         banner_lbl = QLabel(
@@ -1878,7 +1878,7 @@ class ToolsTab(QWidget):
         manual_frame = QFrame()
         manual_frame.setStyleSheet(
             f"background:{C['panel']};border:none;"
-            f"border-radius:8px;border-left:3px solid {C['orange']};")
+            f"border-radius:8px;")
         mfl = QGridLayout(manual_frame)
         mfl.setContentsMargins(16, 14, 16, 14)
         mfl.setHorizontalSpacing(10)
@@ -2586,7 +2586,7 @@ class ToolsTab(QWidget):
         stay_frame = QFrame()
         stay_frame.setStyleSheet(
             f"background:{C['panel']};border:none;"
-            f"border-radius:10px;border-left:3px solid {C['green']};")
+            f"border-radius:10px;")
         sv = QVBoxLayout(stay_frame)
         sv.setContentsMargins(20, 16, 20, 16)
         sv.setSpacing(8)

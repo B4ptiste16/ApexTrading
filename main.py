@@ -458,7 +458,7 @@ class MoreBotsTab(QWidget):
         market_wrap = QFrame()
         market_wrap.setStyleSheet(
             f"background:{C['panel']};border:none;"
-            f"border-radius:12px;border-top:3px solid {C['purple']};")
+            f"border-radius:12px;")
         mv = QVBoxLayout(market_wrap)
         mv.setContentsMargins(24, 20, 24, 20)
         mv.setSpacing(8)
@@ -709,7 +709,7 @@ class MoreBotsTab(QWidget):
         card = QFrame()
         card.setStyleSheet(
             f"background:{C['panel2']};border:none;"
-            f"border-radius:10px;border-top:2px solid {color};"
+            f"border-radius:10px;"
         )
         # V4.6.9 — wider card so all three buttons (Silence + Remove +
         # Delete) fit without clipping. Previously 220px forced "Remove"

@@ -144,13 +144,12 @@ class MetricCard(QFrame):
         else:
             self._sub = None
 
-        # Top accent line via stylesheet
+        # V4.6.71 — minimalist: flat card, no coloured top-accent line.
         self.setStyleSheet(
             f"QFrame#card {{"
             f"  background:{C['panel']};"
             f"  border:none;"
             f"  border-radius:8px;"
-            f"  border-top:2px solid {color};"
             f"}}"
         )
 
@@ -167,7 +166,6 @@ class MetricCard(QFrame):
             f"  background:{C['panel']};"
             f"  border:none;"
             f"  border-radius:8px;"
-            f"  border-top:2px solid {c};"
             f"}}"
         )
         if sub is not None and self._sub:

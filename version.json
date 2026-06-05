@@ -1,4 +1,4 @@
 {
-  "version": "4.6.70",
-  "notes": "v4.6.70 — IBKR allocation fixes + cloud IBKR LIVE\n\n💸 ALLOCATION\n• Removing an IBKR bot from the allocation table now works for CLOUD bots too — the server market-sells its sub-portfolio, deletes its ledger and frees the cash (before it failed because the desktop had no local gateway).\n• Deleting a bot now automatically sells its IBKR holdings and removes it from the allocation table, so deleted bots no longer keep funds allocated.\n\n🔴 CLOUD IBKR LIVE\n• You can now run IBKR bots LIVE on the cloud. IBKR sends a Mobile 2FA push on a live login — approve it on your phone and the gateway waits for it (instead of giving up). Paper still needs no 2FA.\n\nUpdate via the in-app banner.\n"
+  "version": "4.6.71",
+  "notes": "v4.6.71 — Sober, minimalist cards\n\n🎛️ CLEANER UI\n• Removed the coloured accent lines (the top/side bars and bracket-like edges) from cards and blocks across the app — Overview bot blocks, metric cards, bot-tab panels and the More-Bots cards are now flat and calm.\n• Each bot keeps its identity through its coloured title, not heavy outlines. Subtle rounded corners + panel tint remain so things stay readable.\n\nUpdate via the in-app banner.\n"
 }

@@ -455,7 +455,7 @@ class BotTab(QWidget):
         frame = QFrame()
         frame.setStyleSheet(
             f"background:{C['panel']};border:none;"
-            f"border-radius:8px;border-top:2px solid {self.color};")
+            f"border-radius:8px;")
         layout = QGridLayout(frame)
         layout.setContentsMargins(14,10,14,10)
         layout.setSpacing(14)
