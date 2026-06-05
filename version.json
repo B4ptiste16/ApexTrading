@@ -1,4 +1,4 @@
 {
-  "version": "4.6.64",
-  "notes": "v4.6.64 — Instant broker switching (preload) + smoother scrolling\n\n⚡ PRELOAD — Alpaca & IBKR both stay loaded\n• The app now preloads the OTHER broker's account/positions in the background, so switching between Alpaca and IBKR is instant instead of blank-then-load. (Display-only caching — it never affects your bots' trading.)\n\n🖱️ SCROLLING — Tools page\n• The mouse wheel no longer gets trapped over dropdowns / number fields (e.g. the IBKR client-ID rows), so you can scroll past them to the Save / Notes area.\n\nIf the Tools page still snags at a specific spot, send me a screenshot of where it stops and I'll pin it down exactly.\n\nUpdate via the in-app banner.\n"
+  "version": "4.6.65",
+  "notes": "v4.6.65 — App opens fully loaded (no more load-on-click)\n\n⚡ EAGER LOADING\n• The app now loads the Overview AND every bot tab right at launch and keeps them all refreshed in the background — so when you click a tab it's already populated instead of starting to load. Combined with the v4.6.64 broker preload, switching Alpaca<->IBKR is much faster too.\n\n(The currently-selected broker's tabs are always live; the other broker is kept warm in the background. A dedicated full-screen loading splash is coming next.)\n\nUpdate via the in-app banner.\n"
 }

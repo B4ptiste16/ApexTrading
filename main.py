@@ -1509,6 +1509,9 @@ class ApexWindow(QMainWindow):
         self.refresh_timer = QTimer()
         self.refresh_timer.timeout.connect(self._refresh_all)
         self.refresh_timer.start(45_000)
+        # V4.6.65 — eager-load every tab right after launch so the app opens
+        # already populated (no load-on-click wait on first visit).
+        QTimer.singleShot(600, self._refresh_all)
 
         self._blink_timer = QTimer()
         self._blink_timer.start(500)   # dot blink ticks handled per-dot
@@ -3093,13 +3096,27 @@ class ApexWindow(QMainWindow):
         off the fetch and refresh the market status."""
         self.statusBar().showMessage("Refreshing data...")
         try:
-            idx = self.tabs.currentIndex()
-            tab = self.tabs.widget(idx)
-            if tab and hasattr(tab, "refresh"):
-                try:
-                    tab.refresh()
-                except Exception as e:
-                    print(f"[refresh] tab error: {e}")
+            # V4.6.65 — eagerly refresh ALL data tabs (Overview + every bot
+            # tab), not just the visible one, so every tab is preloaded and
+            # switching is instant instead of loading-on-click. Bot-tab refresh
+            # is async (spawns a worker), so this never blocks the UI.
+            targets = []
+            ov = getattr(self, "overview_tab", None)
+            if ov is not None:
+                targets.append(ov)
+            try:
+                targets += list(self._bot_tabs.values())
+            except Exception:
+                pass
+            cur = self.tabs.widget(self.tabs.currentIndex())
+            if cur is not None and cur not in targets:
+                targets.append(cur)
+            for tab in targets:
+                if hasattr(tab, "refresh"):
+                    try:
+                        tab.refresh()
+                    except Exception as e:
+                        print(f"[refresh] tab error: {e}")
             try:
                 self._refresh_market_status()
             except Exception as e:
