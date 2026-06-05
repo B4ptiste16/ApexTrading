@@ -45,3 +45,7 @@ build_log*.txt
 build/
 dist/
 APEX.spec
+
+# stray build artifacts (unexpanded %TEMP% folder + temp commit message)
+{%TEMP}/
+.git_commit_msg.txt

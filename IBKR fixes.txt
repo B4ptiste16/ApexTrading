@@ -1,0 +1,9 @@
+IBKR fixes
+
+- If two bots buy shares from the same stock, when replacing one bot or wanting to sell its position or wanting to value its postions, that bot will have to know how many of those shares are his with exact precision.
+
+- Also add the IBKR ALPACA switch on the website and make sure the website correctly displays bot running if aa bot is running. Improve the website any way you want, be creative.
+
+- The app must load all info and bot info even it the tab or page is not open (If Alpaca is open, IBKR needs to load too so that if i swithc pages i don't have to wait for it to load.)
+
+- Sometimes in the tools section, I can't scroll further than the client id part in IBKR the scrollbar blocks in this spot (i can scroll back up)

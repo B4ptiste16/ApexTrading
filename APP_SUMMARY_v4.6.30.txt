@@ -1,0 +1,362 @@
+================================================================================
+BAPTOU TRADING PLATFORM — FULL APP SUMMARY
+As of v4.6.30  ·  generated 2026-05-29
+================================================================================
+
+Branded end-user-facing as "BAPTOU Trading Platform".
+Internally still APEX / APEX_* everywhere (data dir, env vars, installer name,
+code symbols, GitHub repo "ApexTrading"). DO NOT rename — it would orphan every
+existing install's settings + API keys.
+
+Sole developer / primary user: Baptiste (GitHub B4ptiste16).
+Repo: https://github.com/B4ptiste16/ApexTrading  (branch: main)
+Local: C:\Users\bapti\Documents\Trade app
+
+
+================================================================================
+🧭 1. WHAT THE APP IS (THE BIG PICTURE)
+================================================================================
+
+A Windows desktop trading app (PyQt6, packaged with PyInstaller --onedir) that
+runs AI-driven trading bots against the Alpaca API (paper + live). It is backed
+by a FastAPI server on Oracle Cloud that adds accounts, cloud bot execution,
+a bot marketplace, a phone web dashboard, a credits economy, friends, and
+moderation.
+
+THE CORE PITCH (what should draw users — keep this front of mind):
+  1. Trade MANUALLY against your friends (rivalry / leaderboards).
+  2. Build / buy / sell trading BOTS on a marketplace and earn credits.
+
+Three pieces fit together:
+  • DESKTOP APP  — the control room (overview, per-bot tabs, make-bot, manual
+    trading, friends, account, admin, universe, tools).
+  • ORACLE SERVER — auth, encrypted broker creds, 24/7 cloud bot running,
+    marketplace, web dashboard, credits/revenue, moderation, scheduler.
+  • WEBSITE       — landing page + phone-friendly dashboard showing PLATFORM-WIDE
+    data (the desktop overview shows YOUR personal data).
+
+
+================================================================================
+🤖 2. THE BOTS
+================================================================================
+
+BUILT-IN BOTS (ship in the app, also run on Oracle):
+  • LONG  (longbot_v2.py)  — momentum + mean-reversion portfolio, AI scores/ranks
+                             candidates (Claude / Gemini / Groq, Vision on charts).
+  • SHORT (shortbot_v2.py) — bear-momentum short selling.
+  • DAY   (daybot.py)      — single high-conviction intraday bracket order
+                             (entry + GTC take-profit + GTC stop-loss + stale-
+                             bracket safety net + orphaned-position re-arm).
+  • UNIVERSE MANAGER (universe_manager.py) — refreshes candidate ticker lists.
+
+CUSTOM / AI-GENERATED BOTS:
+  • Built in the MAKE BOT tab by an AI from a strict skeleton (BOT_SKELETON.md).
+  • Each bot carries an APEX-BOT-META docstring header: name, description,
+    method, ai_used, compatible_models, asset_type, universe, requirements,
+    broker.
+  • The bot FRAMEWORK (core/bot_framework.py BotRunner) owns all the plumbing so
+    AI bots only have to write decide(symbol, bars, position, account) ->
+    {action, qty, reason}. The framework handles: yfinance fetch, MultiIndex
+    flatten, BTC-USD <-> BTC/USD symbol mapping, MarketOrderRequest, per-symbol
+    error isolation, the main loop, the heartbeat sleep, trade-log writing.
+  • Example user bot: CRYPTO trend bot (linear-regression trend follower on top
+    crypto pairs, 24/7).
+
+HOW A BOT RUNS:
+  • LOCALLY  — desktop launches it as a QProcess subprocess.
+  • ON ORACLE (cloud) — uploaded to /opt/apex_users/user_<id>/private_bots/ and
+    spawned server-side so it keeps trading 24/7 EVEN WHEN THE DESKTOP APP IS
+    CLOSED. Cloud bots are never killed on app quit (that's the whole point).
+  • Each bot reads its Alpaca slot keys (ALPACA_API_KEY_<SIDE> /
+    ALPACA_SECRET_KEY_<SIDE>) — <SIDE> is LONG/SHORT/DAY or the custom bot's slug.
+
+PER-BOT DATA SCOPING (v4.6.28+):
+  • Every P/L number a bot shows is scoped to THAT BOT'S LIFETIME, never the
+    Alpaca account's history. A brand-new bot shows $0.00 / 0.0% / "new bot".
+  • Backed by per-bot snapshots: <slug>_lifetime.jsonl + <slug>_trade_log.jsonl.
+  • v4.6.30 fixed custom bots showing no data: core.data lookups were hardcoded
+    to LONG/SHORT/DAY; now log_files_for(side)/snapshot_files_for(side) resolve
+    files for ANY slug, and BotRunner + the crypto template write a trade-log
+    entry on every executed order. Custom-bot tabs now populate Closed Trades +
+    equity chart once they trade.
+
+
+================================================================================
+🖥️ 3. DESKTOP APP TABS / FEATURES
+================================================================================
+
+HEADER:        broker-mode chip, Paper/Live trading toggle (iPhone-style switch),
+               ⚡AUTO / ✋MANUAL toggle, credits chip, user chip + account menu,
+               market-open/closed badge (red w/ shimmer when closed), UPDATE
+               banner, QUIT.
+OVERVIEW:      per-bot blocks in a grid — NOW 2 PER ROW (v4.6.30; was 3, too
+               cramped). Period combo, AI-cost cards. Shows YOUR data only.
+PER-BOT TAB:   metrics with ⓘ hover tooltips (formula + time-frame), equity
+               chart, Closed Trades feed, ▶/■/↺ controls (54px, always visible),
+               local-or-cloud run, "MUST ASSIGN API KEY IN TOOLS" pre-flight.
+MAKE BOT:      provider dropdown (Via APEX / Anthropic / OpenAI / OpenRouter /
+               🎁Gemini / 🎁Groq — free tiers badged), model selector, credit-cost
+               badge for Via-APEX, "Improve existing bot" mode, broker checkbox
+               (Alpaca / IBKR) with broker-specific generation prompt, universe-
+               generator mode, AI-output syntax validation before save.
+MORE BOTS:     local bot manager + 🛒 Open Bot Market + 🔒 Library Lock + ⬆ Publish
+               + Delete bot.
+MANUAL TRADE:  ManualTradingTab — order entry, positions table, account selector,
+               friend-challenge stub (activated by the ✋MANUAL header toggle).
+FRIENDS:       search/add/accept, in-place profile view (P&L metric cards + their
+               bot list with ⬇ Install), shared-stats line under each friend.
+UNIVERSE:      editable ticker lists, split left/right columns, per-bot universe
+               assignment (drives what the bot trades).
+ACCOUNT:       display name + phone, password/email change + re-verify, 5 themes
+               with live apply (no restart).
+ADMIN:         role-gated. Users table, grant credits, BOSS-ADMIN-only role
+               assignment + REVENUE SPLIT card, FEATURE/RECOMMEND classifier,
+               MODERATION (flag/unflag/remove + refund).
+TOOLS:         broker-aware. Alpaca = numbered API-key slots with assignment
+               dropdowns (custom bots included), auto-sync keys to server on
+               save. AUTOMATION (auto-start at market open, run-on-Oracle),
+               account linking, STAY UPDATED + check-for-updates card.
+LOGIN:         email/password, Continue-as-Guest, real Continue-with-Google
+               (loopback OAuth2), saved-account picker, server-status dot.
+
+
+================================================================================
+☁️ 4. SERVER / CLOUD (Oracle)
+================================================================================
+
+IP 145.241.170.165 · DuckDNS apexbaptou.duckdns.org · Caddy reverse proxy.
+FastAPI (uvicorn --workers 2) at :8000, systemd unit apex_server.service.
+SQLite DB at /opt/apex_data/apex_server.db. Oracle Linux 9, SELinux enforcing.
+
+ENDPOINT GROUPS: Auth, Credentials, Schedule, Bot lifecycle, Marketplace,
+Private bots, Make-bot (Via APEX), Friends, Credits+Admin, Revenue split,
+Web JSON (cookie-auth), plus web AI-returns/AI-stats + bot optimums.
+
+SERVER DAEMON THREADS:
+  • auto_scheduler  — 60s loop, starts cloud bots at market-open edge (asset-
+    type aware: crypto bots are 24/7 and skip the market-open gate).
+  • auto_moderation — hourly algorithmic copyright/moderation pass.
+  • bot_optimums    — hourly aggregation of bot run settings vs returns.
+
+SECURITY MODEL: broker creds Fernet-encrypted per user (key derived from
+APEX_JWT_SECRET). Bot library lock (.py <-> .apex) is OBFUSCATION not vault-grade
+— the key ships in the exe; real protection is cloud-only execution.
+
+
+================================================================================
+💰 5. ECONOMY
+================================================================================
+
+  • Credits = virtual money (1 ◊ = $0.01). Real money conceptually sits in the
+    app's bank account; credits track ownership.
+  • Buying a bot: ~5% of credits split to admin + running account, rest to the
+    seller (ownership of real money changes while money stays in the app account).
+  • MAKE BOT "Via APEX" generations cost credits (own AI keys = 0 cost; Via-APEX
+    charged per model). Free-tier rate-limit projection shown.
+  • Cashout to real fiat (Stripe Connect / Revolut) is NOT built yet — see §7.
+
+
+================================================================================
+🛠️ 6. BUILD / RELEASE PIPELINE (how a version ships)
+================================================================================
+
+  1. Edit version.json (version + notes).
+  2. tools/embed_version.py (build.bat step 1c) bakes the version into
+     apex_version.py, core/_version.py, installer.iss — AND nukes stale
+     dist/APEX + build/APEX. Has a --validate-dist guard (APEX.exe > 10MB,
+     version.json present + matching).
+  3. PyInstaller --onedir -> dist/APEX (APEX.exe ~25MB + _internal/).
+  4. Inno Setup (ISCC) -> installer/APEX_Setup.exe (~200MB, per-user install to
+     %LocalAppData%\APEX Trading Platform, /VERYSILENT capable).
+  5. git commit + push, then gh release create/upload "vX.Y.Z" with the
+     installer attached. The in-app updater reads /releases/latest.
+
+RECURRING BUILD GOTCHAS (lessons baked in):
+  • ALWAYS gh release create — committing alone doesn't publish.
+  • ALWAYS smoke-launch dist\APEX\APEX.exe before releasing.
+  • A hung gh upload can lock installer\APEX_Setup.exe, which makes the NEXT Inno
+    compile fail with "EndUpdateResource failed (110)" and uploads a stale stub.
+    (This bit v4.6.30 — fixed by killing the stale gh PID, deleting the locked
+    file, recompiling, re-uploading --clobber.)
+  • Force-kill all APEX processes before a silent install or Inno returns exit 0
+    without replacing files.
+
+TOOLCHAIN: Python 3.14 (dev) / 3.11 (Oracle), Inno Setup 6 at
+"C:\Program Files (x86)\Inno Setup 6\ISCC.exe", gh CLI.
+
+
+================================================================================
+📦 7. WHAT YOU ASKED FOR THAT IS *** STILL NOT DONE ***
+================================================================================
+
+These are pulled from Vnext.txt, V4.0.0.txt, and this session's deferred tasks.
+Grouped by area, with rough size.
+
+--- A. BIG NET-NEW FEATURES (not started) -------------------------------------
+
+[ ] STOCKS / MARKET BROWSER TAB  (BIG)
+    A standout Stocks tab like every trading app: top movers, watchlist
+    (add/remove per stock), search bar, modular-timeframe graphs, per-stock
+    description. Every AI model rates each stock out of 10 (e.g. 9.13/10) with a
+    detailed breakdown; weekly re-rating + an extra rating shortly after major
+    events (earnings, etc.). Fetch heavy data from an external source.
+
+[ ] FRIEND GROUPS + LEADERBOARDS  (MEDIUM-BIG)
+    Create multiple friend groups; ranking boards by return over adjustable
+    period (1D/1W/1M/...); weekly/monthly/yearly winners. Order the friends list
+    as a ranking with details under each name. Notifications when a friend has a
+    big win (beat them) or big loss (keep going).
+    (Today: friends list + shared-stats line exist; no groups, no leaderboards.)
+
+[ ] CUSTOM LAYOUTS / DRAGGABLE PANELS  (BIG)
+    Drag/move/remove graphs, store removed ones to re-add, save named custom
+    layouts (overview + bot pages + manual trading), reupload saved layouts.
+    Qt has the primitives (QDockWidget) but it's a substantial UI restructure.
+
+[ ] PROFILE PICTURES  (SMALL-MEDIUM)
+    Schema already has avatar_url. Needs upload endpoint + storage + UI.
+
+[ ] PHONE CONFIRMATIONS  (MEDIUM, costs $)
+    SMS confirmations via Twilio. users.phone column already exists.
+
+[ ] REAL-MONEY CASHOUT / BANKING  (BIG, legal)
+    Link a bank/Revolut account; Stripe Connect Express or Revolut Business for
+    actual fiat cashout. Needs an LLC/SAS + KYC. Open legal question of what can
+    be sold and whether to hold money vs. only draw on transaction. Defer until
+    ~50 active users. (Open question you raised — answer is mostly "needs a
+    banking layer + entity", not just code.)
+
+--- B. IBKR DEEP SUPPORT (page exists, real wiring missing) -------------------
+
+[ ] IBKR is selectable and shows the full app + a Tools setup section (gateway
+    host/port, per-bot clientId, fund allocation, test button), but real IBKR
+    money handling is not built:
+      - per-bot money ALLOCATION (Alpaca gives each bot its own account; IBKR
+        does not — need to allocate + track per bot).
+      - handle short bots using negative-value positions.
+      - optional money transfer Alpaca <-> IBKR when real money is used.
+      - detect whether a key/gateway is REAL vs PAPER money and label it in
+        overview / bot portfolio / manual portfolio.
+      - in manual mode, show VIRTUAL vs REAL portfolios (fake vs real money)
+        instead of bot tabs.
+
+--- C. WEBSITE / MOBILE POLISH --------------------------------------------------
+
+[ ] Website bot page: click a bot to see DETAILS with graphs. The Liquidate
+    button gives no info (scary) — add info + a CONFIRMATION dialog before
+    liquidating.
+[ ] Website overview: add the dropdown timestamp + portfolio % increase.
+[ ] Mobile site: the area beside the iPhone camera/notch shows WHITE, creating
+    an ugly seam against the page colour — make it match.
+[ ] Website sober restyle: fewer lines/outlines around text (partially done in
+    app; website still needs a pass).
+
+--- D. CHARTS / METRICS ---------------------------------------------------------
+
+[ ] Graphs should run market-CLOSE to market-CLOSE, skipping hours where prices
+    aren't updated (define per broker). Today rangebreaks only cut weekends +
+    fixed hours — not a true per-broker close-to-close.
+[ ] Superpose per-AI return curves on the overview equity graph (only AIs in
+    use). (AI cost cards exist; the per-AI return overlay does not.)
+
+--- E. THIS SESSION'S DEFERRED BOT FEATURES -------------------------------------
+
+[ ] (#20) Per-bot universe MANAGER bundled at generation — a generated bot ships
+    with its own universe-refresh script.
+[ ] (#34) Per-bot universe CARD in the Universe tab, + SELF-UNIVERSE bots: a bot
+    that builds its own universe (e.g. a Groq bot that scrapes X/Twitter
+    speculation then trades it). Design questions were dismissed — awaiting your
+    direction.
+[ ] (#35) Bot SLEEP-INTERVAL picker that shows the $/day cost of each interval.
+[ ] OPTIMAL-VALUE UI HINTS — the server backbone shipped (bot_optimums pools
+    every user's runs by ai_model / min_confidence / universe / asset_type and
+    computes the return-maximising value, min 5 samples). The "optimal: X" hint
+    next to each control in the client still needs wiring once enough data
+    accumulates.
+
+--- F. RECURRING / UNCERTAIN BUGS TO RE-VERIFY ----------------------------------
+
+[ ] BRACKET AUTO-SELL: you've reported the DAY bot's targets being surpassed
+    without the position selling. Patched multiple times (force_close_stale_
+    brackets, rearm_orphaned_positions) but re-confirm it's actually fixed live.
+[ ] RIGHT-SIDE TABS slightly lower than left tabs. A fix shipped
+    (_sync_corner_height) but you reported it again — may still be imperfect;
+    needs a pixel-level pass.
+
+--- G. OPEN INFRA / "YOUR ACTION" ITEMS -----------------------------------------
+
+[ ] HTTPS on apexbaptou.duckdns.org is down (Let's Encrypt SERVFAIL on DuckDNS).
+    Real fix: buy a domain (e.g. baptou.app) at Cloudflare -> A-record to the IP
+    -> update /etc/caddy/Caddyfile. HTTP works today.
+[ ] Rename Oracle instance to "baptou" (OCI console, cosmetic).
+[ ] Foolproof security: lock ALL bots/files, no access to the install folder,
+    API keys, or code/structure. Today only partial (Fernet obfuscation +
+    cloud-only). True lockdown = cloud-only execution.
+
+INFORMATIONAL QUESTIONS YOU ASKED (answers, not build items):
+  • "Can unlimited people share one Claude/AI key?" — No; provider rate limits
+    (RPM/TPM/daily) are per key, so a shared key throttles under load. Use
+    per-user keys or server-side pooled keys with rate-limit projection
+    (already modelled in Make Bot pricing).
+
+
+================================================================================
+✅ 8. WHAT YOU ASKED FOR THAT *** IS DONE *** (so it's not re-requested)
+================================================================================
+
+  • BAPTOU rebrand (user-facing strings), new B-shaped logo (green-up/red-down).
+  • Credits economy (1◊=$0.01), 5% admin/running split, BOSS-ADMIN revenue-split
+    UI, seller ownership model.
+  • Friends: list + shared P&L info under names ("not sharing" placeholders),
+    in-place profile view with their bots + install.
+  • Overview cards wrap; now stacked 2 per row (v4.6.30).
+  • Bigger always-visible play/stop/restart buttons (54px).
+  • Traditional green replaced with teal-cyan; lighter palette.
+  • Live themes (5) apply instantly, no restart; sober border-free style in app.
+  • MARKET CLOSED red badge with left-to-right shimmer (SweepLabel).
+  • ⓘ tooltips on metric cards (formula + time-frame).
+  • Manual trading mode + ⚡AUTO/✋MANUAL toggle.
+  • Paper/Live trading toggle in header.
+  • Publish button in MORE BOTS; Delete bot.
+  • Make Bot: "Improve existing bot" mode; free AI (Gemini/Groq) + Via APEX (no
+    own key needed); broker checkbox (Alpaca/IBKR) + broker-filtered bots +
+    broker-specific prompt; per-model credit cost; AI-output syntax validation.
+  • Per-bot universe ASSIGNMENT drives trading + appears in Universe tab; universe
+    generator mode in Make Bot.
+  • Market cards show 🤖 Created by / ⚡ Runs with / 🏦 Works on.
+  • IBKR mode shows the full app (not a coming-soon page) + Tools setup section.
+  • "New bot won't start — no API key" slot-assignment bug fixed; slot dropdowns
+    include custom bots; auto-sync keys to server on save.
+  • Custom bots run on Oracle (cloud, 24/7), survive app quit; asset-type-aware
+    auto-start (crypto skips market-open gate).
+  • Bot data scoped to the bot's own lifetime (new bot = 0%/$0).
+  • Per-bot lifetime snapshots + trade logs so custom bots show graphs/feed.
+  • Website home: grouped AI-return chart (adjustable timeframe) + animated
+    ranking + pie chart of most-used AIs across the platform; download buttons.
+  • Algorithmic copyright + moderation bots (automatic, no AI key required).
+  • Auto-start at market open + run-on-Oracle scheduler (server-side, works with
+    app closed).
+  • Bot-optimums server backbone (profit vs settings, pooled across users).
+  • Robust bot framework: fixes sklearn-missing (pip preflight), Series-vs-scalar,
+    MarketOrderRequest API, hardcoded symbols, heartbeat sleep, load_dotenv
+    override, CLAUDE_MODEL NameError, portfolio-cleanup/liquidation on takeover.
+  • Update loop + silent installer reliability (embed_version nuke + validate).
+
+
+================================================================================
+📌 9. STANDING CONVENTIONS / REMINDERS
+================================================================================
+
+  • EVERY time a bot error is fixed, update BOT_SKELETON.md + the Make Bot prompt
+    so AI-generated bots never hit that error again (framework-level enforcement
+    > per-bot patches).
+  • Soft-fail every optional integration (Resend, Google OAuth, pooled Anthropic)
+    — never crash the app if an env var is missing.
+  • Cloud bots are NEVER stopped on app quit; only local subprocess bots are.
+  • Bot P/L is ALWAYS the bot's own lifetime, never account-wide.
+  • Concise, table-based answers; before/after bug explanations; do SSH from
+    PowerShell directly when a server change is needed.
+
+================================================================================
+END — keep this file beside version.json / PROJECT_CONTEXT.md.
+================================================================================

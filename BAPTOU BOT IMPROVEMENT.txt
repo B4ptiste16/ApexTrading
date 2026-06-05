@@ -1,0 +1,23 @@
+BAPTOU BOT IMPROVEMENT
+
+- Have a common universe which are run every monday automatically at market open on the oracle server but that is not present on anyone's account. Instead, It will create tens of different universes each for their own use. One for example for shorting, one for long term Investment, one for short term investment, one for options trading, one for crypto, one for highly speculative stocks etc... (Still use the same format for universes in the universe tab with the scores for each ticker etc...)
+
+-  Created bots must be sold and reference one of those universes or request a custom built universe which will be generated at the same time (or uploaded to generate bot if universe was already created for another similar bot. This means that the universe creation in make bot must be removed and bots will be created with the option ti use existing universe or create with new universe which will create a new universe generator with the created bot). (remove the drop down menu to choose the universe assigned to a bot, it must be done automatically as it would have been assigned at bot creation.)
+
+- Make sure to update the bot creation instructions with all new rules that we might have imposed ever, and have the ai create description and all bot  info present of the bot's card.
+
+- Make the Manual trading operational, it will also have its own paper/live switch but the paper account split in tools will be mixed as in it is your job to split portfolio between manual and auto bot trading. (For IBKR add a manual in the funds allocation which can't be removed or replaced but can be set to 0 and for the alpaca mode, add a Manual option in the drop down switch to allocate api  key to manual account)
+
+- Make sure a bot in alpaca can be allocated 2 paper accounts so can run 2 accounts at the same time which means running the script twice at once or having multiple scripts of the same bot. 
+
+- Make sure live trading is configured despite possible 2FA on both brokers for all modes.
+
+- Make a protection for when someone tries to delete a custom universe as it might prevent the bot from ever running again. so never be able  to delete a universe if it is linked to a bot. 
+
+- When a bot is on the market, it must have a symbol to state if  it is sold with a universe of if it is linked to a public universe (meaning a default universe, one of the universes mentioned in first dash of this page)
+
+- The recent closed trades part of the bot tab doesn't need to take the whole width so have it do half half at the bottom of the page with the positions table.
+
+- remove the drop  down menu to decide if wanting to create bot or create universe. as universe are now created with the bots if they are not assigned a created universe at creation.
+
+- The apply button for the bot delay is too small as in the word APPLY doesn't properly fit inside the button.

@@ -68,3 +68,5 @@ More
 
 - analyse profit of each bot depeding on all variable factors, ai executor, min confidence, universe etc... and after collecting enough data from anyone using the bot on the server, show next to each of these selection, the optimal value.
 
+- Bots data still shows about account data in overview and individual tab, it should only show lifetime returns or periodic returns during the which the bot was actually trading. If I switch Day bot with shortbot, shortbot data must only show personal bot data and not account data. So if I add a new bot, then this one should show O% return and 0 profit as it is new and has never traded before.
+

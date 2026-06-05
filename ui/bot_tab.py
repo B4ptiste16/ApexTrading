@@ -166,11 +166,13 @@ class BotTab(QWidget):
         self.bot_ctrl = BotProcessWidget(self.side, self.script)
         s.add(self.bot_ctrl)
 
-        # V4.6.5 — per-bot universe picker. Lists every *_universe.txt
-        # discovered by core.data, filtered to those whose asset_type
-        # is compatible with this bot's asset_type (read from its
-        # APEX-BOT-META block, falling back to "stocks" for built-ins).
-        self._build_universe_picker(s)
+        # V4.6.73 — the per-bot universe picker was removed. A bot's
+        # ticker universe is now assigned ONCE, at creation (Make Bot's
+        # "Ticker universe" dropdown, fed by the server's themed public
+        # universes), and baked into the bot's code. There's no longer a
+        # per-tab dropdown to reassign it. (_build_universe_picker and the
+        # APEX_BOT_UNIVERSE resolution remain for any legacy custom
+        # universe scripts a user may still have, but aren't shown here.)
 
         # Adjustable AI confidence threshold (live, no restart)
         conf_row = QHBoxLayout()

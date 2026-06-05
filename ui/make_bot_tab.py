@@ -697,6 +697,76 @@ class _GenerateWorker(QThread):
         self.done.emit(True, cleaned)
 
 
+# ── V4.6.73 — public themed universes (server-generated) ──────────────
+# The Oracle server's universe_factory regenerates a set of THEMED public
+# universes weekly (long_term / short / short_term / speculative / options /
+# crypto). Make Bot lets the user pick one of these at CREATION so the new
+# bot trades a curated, pre-scored ticker list instead of the AI inventing
+# symbols. All helpers are best-effort: a network/auth failure just falls
+# back to "let the AI choose tickers".
+
+def _server_creds() -> tuple:
+    """(token, base_url) from the desktop auth files. Mirrors
+    core.ibkr_data._cloud_creds without importing it (avoids a heavy import
+    on a UI tab)."""
+    tok = None
+    url = "http://localhost:8000"
+    try:
+        with open(DATA_DIR / "apex_auth.json", encoding="utf-8") as f:
+            tok = json.load(f).get("token")
+    except Exception:
+        pass
+    try:
+        with open(DATA_DIR / "apex_server.json", encoding="utf-8") as f:
+            url = json.load(f).get("url", url).rstrip("/")
+    except Exception:
+        pass
+    return tok, url
+
+
+def _fetch_public_universes() -> list:
+    """[{name, total, blurb}] from GET /universes — best-effort, [] on fail."""
+    tok, url = _server_creds()
+    headers = {"Authorization": f"Bearer {tok}"} if tok else {}
+    try:
+        r = requests.get(f"{url}/universes", headers=headers, timeout=8)
+        if r.ok:
+            data = r.json()
+            return data.get("universes", data) if isinstance(data, dict) else data
+    except Exception as e:
+        print(f"[make-bot] fetch universes failed: {e}")
+    return []
+
+
+def _fetch_universe_tickers(name: str) -> list:
+    """Plain ticker list for one public universe via GET /universes/{name}.
+    Parses the TICKER  # score=.. | reason format. [] on failure."""
+    tok, url = _server_creds()
+    headers = {"Authorization": f"Bearer {tok}"} if tok else {}
+    try:
+        r = requests.get(f"{url}/universes/{name}", headers=headers, timeout=8)
+        if not r.ok:
+            return []
+        txt = ""
+        try:
+            j = r.json()
+            txt = j.get("content", j.get("text", "")) if isinstance(j, dict) else ""
+        except Exception:
+            txt = r.text
+        out = []
+        for ln in txt.splitlines():
+            ln = ln.strip()
+            if not ln or ln.startswith("#"):
+                continue
+            sym = ln.split("#")[0].strip()
+            if sym:
+                out.append(sym)
+        return out
+    except Exception as e:
+        print(f"[make-bot] fetch universe '{name}' failed: {e}")
+    return []
+
+
 # ── Tab widget ────────────────────────────────────────────────────────
 
 class MakeBotTab(QWidget):
@@ -758,44 +828,52 @@ class MakeBotTab(QWidget):
         self._existing_lbl.setVisible(False)
         self._existing_combo.setVisible(False)
 
-        # ── V4.6.4 — Bot kind switch: Trade bot vs Universe bot ───
-        # Two radio-style buttons in a row. Picks which system prompt
-        # the AI gets, what fields it MUST declare in APEX-BOT-META,
-        # and (for universe bots) prevents the AI from generating
-        # order-submission code.
-        from PyQt6.QtWidgets import QRadioButton, QButtonGroup
-        kind_row = QHBoxLayout()
-        kind_lbl = QLabel("Generate:")
-        kind_lbl.setStyleSheet(f"color:{C['text']};font-size:11px;")
-        self._mode_trade_radio    = QRadioButton("Trading bot (.py that submits orders)")
-        self._mode_universe_radio = QRadioButton("Universe generator (.py that rewrites a *_universe.txt)")
-        self._mode_trade_radio.setChecked(True)
-        self._mode_trade_radio.setStyleSheet(
-            f"color:{C['text']};font-size:11px;")
-        self._mode_universe_radio.setStyleSheet(
-            f"color:{C['text']};font-size:11px;")
-        self._kind_group = QButtonGroup(self)
-        self._kind_group.addButton(self._mode_trade_radio)
-        self._kind_group.addButton(self._mode_universe_radio)
-        kind_row.addWidget(kind_lbl)
-        kind_row.addSpacing(8)
-        kind_row.addWidget(self._mode_trade_radio)
-        kind_row.addSpacing(14)
-        kind_row.addWidget(self._mode_universe_radio)
-        kind_row.addStretch()
-        kw = QWidget(); kw.setLayout(kind_row)
-        s.add(kw)
-        kind_hint = QLabel(
-            "Both options generate a Python (.py) script. The Trading "
-            "bot opens / closes positions on Alpaca. The Universe "
-            "generator is a separate Python script that picks tickers "
-            "and writes them into a *_universe.txt file (e.g. "
-            "crypto_universe.txt) which a trading bot then reads. Pick "
-            "Universe generator when you want a 'pre-filter' that runs "
-            "less often (e.g. nightly scan) and feeds a trading bot.")
-        kind_hint.setStyleSheet(f"color:{C['muted']};font-size:10px;")
-        kind_hint.setWordWrap(True)
-        s.add(kind_hint)
+        # ── V4.6.73 — Universe at creation ────────────────────────
+        # Replaces the old "Trading bot vs Universe generator" chooser.
+        # Make Bot now ALWAYS creates a trading bot; the bot's ticker
+        # universe is assigned HERE, at creation, from the server's
+        # weekly themed public universes — or "Let the AI choose", in
+        # which case the model invents the symbols as before. Picking a
+        # public universe feeds its scored ticker list into the prompt
+        # and stamps META.universe so the bot trades exactly that list.
+        uni_row = QHBoxLayout()
+        uni_lbl = QLabel("Ticker universe:")
+        uni_lbl.setStyleSheet(f"color:{C['text']};font-size:11px;")
+        self._universe_combo = NoScrollComboBox()
+        self._universe_combo.setMinimumWidth(300)
+        self._universe_combo.addItem(
+            "🤖  Let the AI choose the tickers", "")
+        try:
+            for u in _fetch_public_universes():
+                nm = u.get("name", "")
+                if not nm:
+                    continue
+                total = u.get("total", "")
+                blurb = (u.get("blurb", "") or "").strip()
+                label = f"🌐  {nm}"
+                if total:
+                    label += f"  ({total} tickers)"
+                if blurb:
+                    label += f"  —  {blurb}"
+                self._universe_combo.addItem(label, nm)
+        except Exception as e:
+            print(f"[make-bot] universe combo populate failed: {e}")
+        uni_row.addWidget(uni_lbl)
+        uni_row.addSpacing(8)
+        uni_row.addWidget(self._universe_combo)
+        uni_row.addStretch()
+        uw = QWidget(); uw.setLayout(uni_row)
+        s.add(uw)
+        uni_hint = QLabel(
+            "Pick a curated, pre-scored public universe (regenerated "
+            "weekly on the APEX server) so your bot trades a fixed, "
+            "vetted list of tickers — or leave it on “Let the AI choose” "
+            "to have the model pick symbols from your description. The "
+            "chosen universe is baked into the bot at creation; you "
+            "don't assign it again later.")
+        uni_hint.setStyleSheet(f"color:{C['muted']};font-size:10px;")
+        uni_hint.setWordWrap(True)
+        s.add(uni_hint)
 
         # ── V4.6.48 — Compatible brokers (checkboxes, multi-select) ──
         # The bot is generated broker-AGNOSTIC (it uses the APEX framework's
@@ -1212,18 +1290,44 @@ class MakeBotTab(QWidget):
                 "new Python source."
             )
 
+        # V4.6.73 — if the user picked a public themed universe, fetch its
+        # ticker list and bake it into the prompt so the generated bot
+        # trades EXACTLY those symbols (and stamps META.universe). Done on
+        # the UI thread before the worker starts; best-effort.
+        uni_name = ""
+        try:
+            uni_name = (self._universe_combo.currentData() or "").strip()
+        except Exception:
+            uni_name = ""
+        if uni_name:
+            self._status.setText(f"Loading “{uni_name}” universe…")
+            tickers = _fetch_universe_tickers(uni_name)
+            if tickers:
+                tick_str = ", ".join(tickers)
+                prompt = (
+                    f"TICKER UNIVERSE (mandatory): This bot must trade ONLY "
+                    f"the following pre-vetted tickers and no others. Set the "
+                    f"BotRunner `default_symbols` to EXACTLY this list and set "
+                    f"the APEX-BOT-META `universe:` field to `{uni_name}`:\n"
+                    f"{tick_str}\n\n"
+                    f"=== STRATEGY (how to trade the universe above) ===\n"
+                    f"{prompt}"
+                )
+            else:
+                QMessageBox.warning(self, "Universe unavailable",
+                    f"Couldn't load the '{uni_name}' universe from the "
+                    f"server (offline or not signed in). Generating with "
+                    f"AI-chosen tickers instead.")
+
         self._gen_btn.setEnabled(False)
         self._gen_btn.setText("Generating…")
         self._status.setText("Calling the model — this can take 20-40 s.")
         self._status.setStyleSheet(f"color:{C['muted']};font-size:11px;")
 
-        # V4.6.4 — pass current mode (trade vs universe) so the worker
-        # picks the right system prompt and the META block ends up with
-        # the correct ai_used value.
-        mode = "universe" if getattr(self, "_mode_universe_radio",
-                                     None) and \
-                            self._mode_universe_radio.isChecked() \
-                         else "trade"
+        # V4.6.73 — Make Bot only generates trading bots now (the old
+        # "universe generator" mode was removed; public universes are
+        # generated on the server). Always trade mode.
+        mode = "trade"
         # V4.6.48 — compatible-broker checkboxes (multi-select). The bot is
         # generated broker-agnostic and stamps META.brokers. Default: both.
         brokers = []
@@ -1357,49 +1461,9 @@ class MakeBotTab(QWidget):
         slug = "".join(ch if ch.isalnum() or ch in "-_" else "_"
                        for ch in name.strip().lower())
 
-        # V4.6.7 — universe generators save to a separate directory and
-        # are registered with the universe manager, NOT the bot library.
-        # Trading bots go to bots/ as before.
-        is_universe = (getattr(self, "_mode_universe_radio", None)
-                       and self._mode_universe_radio.isChecked())
-
-        if is_universe:
-            universe_dir = DATA_DIR / "universe_scripts"
-            universe_dir.mkdir(exist_ok=True)
-            dest = universe_dir / f"{slug}.py"
-            dest.write_text(code, encoding="utf-8")
-            # Register in settings under 'universe_scripts' so the
-            # UniverseTab can list it. Each entry tracks the script
-            # path + the universe file it rewrites (from META.universe).
-            try:
-                from core.bot_meta import parse_meta
-                meta = parse_meta(code) or {}
-                target_universe = (meta.get("universe", "")
-                                   or f"{slug}_universe.txt")
-                s = D.load_settings()
-                lst = s.setdefault("universe_scripts", [])
-                # de-dupe by slug
-                lst = [u for u in lst if u.get("id") != slug]
-                lst.append({
-                    "id":             slug,
-                    "label":          name,
-                    "script":         str(dest),
-                    "target":         target_universe,
-                    "asset_type":     meta.get("asset_type", ""),
-                    "description":    meta.get("description", ""),
-                })
-                s["universe_scripts"] = lst
-                import json as _j
-                with open(D.SETTINGS_FILE, "w", encoding="utf-8") as f:
-                    _j.dump(s, f, indent=2)
-            except Exception as e:
-                print(f"[make-bot] universe registry update failed: {e}")
-            self._toast(
-                f"✓ Saved {slug}.py as a UNIVERSE GENERATOR. "
-                f"Open the UNIVERSE tab to run it or pick it for a bot.")
-            return
-
-        # Trading bot — original path
+        # V4.6.73 — Make Bot only produces trading bots now (universe
+        # generators were removed; public universes come from the server
+        # and are assigned at creation via the Ticker-universe dropdown).
         bots_dir = DATA_DIR / "bots"
         bots_dir.mkdir(exist_ok=True)
         dest = bots_dir / f"{slug}.py"

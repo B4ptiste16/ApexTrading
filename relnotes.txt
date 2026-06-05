@@ -1,0 +1,8 @@
+v4.6.72 — Fix removing IBKR bots
+
+🐛 FIXED
+• Removing a bot from the IBKR allocation table crashed ('bool' object is not subscriptable') — the button click passed the wrong argument. Fixed.
+• Remove now works for CLOUD bots: it liquidates wherever the bot's ledger actually lives (server for cloud bots, local for local bots) instead of always trying a local gateway that isn't there.
+• The Remove and Replace buttons now show clear labels (the ✕ glyph was missing from the font and rendered as a blank red square) and are wide enough for their text.
+
+Update via the in-app banner.
