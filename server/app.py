@@ -1576,6 +1576,31 @@ def api_bots_running(authorization: str | None = Header(default=None)):
     return {"bots": bot_runner.list_running(user["id"])}
 
 
+@app.get("/universes")
+def api_list_universes():
+    """V4.6.73 — public themed universes (long_term / short / short_term /
+    speculative / crypto / options), regenerated weekly on the server."""
+    try:
+        from . import universe_factory as uf
+        return {"universes": uf.list_universes()}
+    except Exception as e:
+        return {"universes": [], "error": str(e)}
+
+
+@app.get("/universes/{name}")
+def api_get_universe(name: str):
+    try:
+        from . import universe_factory as uf
+        txt = uf.read_universe(name)
+        if txt is None:
+            raise HTTPException(404, "Universe not found.")
+        return Response(content=txt, media_type="text/plain")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
 @app.get("/web/api/bots/{side}/positions", include_in_schema=False)
 def web_api_bot_positions(side: str, request: Request):
     """Return open positions for one bot's Alpaca account."""

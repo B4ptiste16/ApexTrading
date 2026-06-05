@@ -187,7 +187,43 @@ def _watchdog_tick() -> None:
             _wd.close()
 
 
+_LAST_UNIVERSE_WEEK = None
+
+
+def _maybe_generate_universes() -> None:
+    """V4.6.73 — regenerate the public themed universes once per week, on
+    Monday at/after the US market open. Runs inside the single-flight watchdog
+    sweep so only one worker does it."""
+    global _LAST_UNIVERSE_WEEK
+    from datetime import datetime, timezone, timedelta
+    u = datetime.now(timezone.utc)
+    off = -4 if 3 <= u.month <= 11 else -5      # EDT/EST
+    et = u + timedelta(hours=off)
+    if et.weekday() != 0:                        # Monday only
+        return
+    if (et.hour * 60 + et.minute) < (9 * 60 + 30):
+        return
+    wk = et.isocalendar()[1]
+    if _LAST_UNIVERSE_WEEK == wk:
+        return
+    _LAST_UNIVERSE_WEEK = wk
+    try:
+        from . import universe_factory as _uf
+    except ImportError:
+        import universe_factory as _uf  # type: ignore
+    try:
+        print("[universe-factory] weekly regeneration starting…", flush=True)
+        counts = _uf.generate_all()
+        print(f"[universe-factory] done: {counts}", flush=True)
+    except Exception as e:
+        print(f"[universe-factory] generation failed: {e}", flush=True)
+
+
 def _watchdog_sweep() -> None:
+    try:
+        _maybe_generate_universes()
+    except Exception as e:
+        print(f"[universe-factory] tick error: {e}", flush=True)
     try:
         from . import bot_runner as br
     except ImportError:
