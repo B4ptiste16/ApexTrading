@@ -344,6 +344,12 @@ def seconds_since_open():
 
 
 def get_sleep_seconds() -> int:
+    # V4.6.68 — honor the user's adjustable call delay (default 30 min).
+    try:
+        import core.data as _D
+        return _D.resolve_call_delay("LONG")
+    except Exception:
+        pass
     elapsed = seconds_since_open()
     if elapsed is not None and elapsed < OPENING_BURST_DURATION:
         return OPENING_BURST_SECONDS

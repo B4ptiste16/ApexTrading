@@ -741,6 +741,14 @@ class MoreBotsTab(QWidget):
         acct.setWordWrap(True)
         vl.addWidget(acct)
 
+        # V4.6.68 — enriched meta: AI-app logos (built-with + runs-on), broker
+        # chips, and a Details button → telemetry dialog.
+        try:
+            from ui.bot_card import add_card_meta
+            add_card_meta(vl, side, info, side not in BUILTIN_BOTS, self)
+        except Exception as _e:
+            print(f"[card-meta] {side}: {_e}")
+
         vl.addSpacing(4)
         btn_row = QHBoxLayout()
         btn_row.setSpacing(6)

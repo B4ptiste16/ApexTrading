@@ -880,3 +880,42 @@ def combined_lifetime(snapshots: dict) -> str:
         "yaxis": {"gridcolor":BORDER,"tickprefix":"$","automargin":False},
     })
     return _make_html(data, layout)
+
+
+def returns_by_confidence(log_df, side: str) -> str:
+    """V4.6.68 — telemetry: average portfolio change per AI-confidence bucket
+    (a proxy for 'returns as a function of confidence used'). Built from the
+    bot's structured log (confidence + portfolio_before/after)."""
+    color = BOT_COLOR.get(side, G)
+    try:
+        if log_df is None or getattr(log_df, "empty", True):
+            return empty_chart("No AI calls logged yet", 240)
+        df = log_df.copy()
+        for col in ("confidence", "pv_before", "pv_after"):
+            if col not in df.columns:
+                return empty_chart("Telemetry builds as the bot runs", 240)
+        df = df[df["confidence"].notna() & df["pv_before"].notna()
+                & df["pv_after"].notna()]
+        df = df[df["pv_before"].astype(float) > 0]
+        if df.empty:
+            return empty_chart("Telemetry builds as the bot runs", 240)
+        df["ret"] = (df["pv_after"].astype(float)
+                     / df["pv_before"].astype(float) - 1.0) * 100.0
+        df["bucket"] = (df["confidence"].astype(float) * 10).round() / 10.0
+        g = df.groupby("bucket")["ret"].mean().reset_index().sort_values("bucket")
+        xs = [f"{b:.0%}" for b in g["bucket"]]
+        ys = [round(float(v), 3) for v in g["ret"]]
+        bars = [{
+            "type": "bar", "x": xs, "y": ys,
+            "marker": {"color": [G if v >= 0 else R for v in ys]},
+            "hovertemplate": "conf %{x}: %{y:.3f}%<extra></extra>",
+        }]
+        layout = _base_layout(260, "Avg return by AI confidence", color, {
+            "xaxis": {"title": {"text": "AI confidence"}, "gridcolor": BORDER},
+            "yaxis": {"title": {"text": "avg Δ %"}, "gridcolor": BORDER,
+                      "ticksuffix": "%", "zeroline": True,
+                      "zerolinecolor": MUTED},
+        })
+        return _make_html(bars, layout)
+    except Exception as e:
+        return empty_chart(f"telemetry error: {e}", 240)

@@ -376,6 +376,13 @@ def is_good_trading_time() -> tuple:
 def get_sleep(clock) -> int:
     if not clock.is_open:
         return 60
+    # V4.6.68 — honor the user's adjustable call delay (default 30 min) during
+    # market hours. (Closed = cheap 60s clock re-check, no AI calls.)
+    try:
+        import core.data as _D
+        return _D.resolve_call_delay("DAY")
+    except Exception:
+        pass
     mkt_open = clock.next_close - timedelta(hours=6, minutes=30)
     elapsed  = (clock.timestamp - mkt_open).total_seconds()
     if elapsed < OPENING_BURST_DURATION:

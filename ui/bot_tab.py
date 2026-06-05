@@ -210,7 +210,7 @@ class BotTab(QWidget):
         self.delay_spin.setRange(D.CALL_DELAY_FLOOR, 3600)
         self.delay_spin.setSingleStep(15)
         self.delay_spin.setFixedWidth(90)
-        self.delay_spin.setValue(D.get_bot_call_delay(self.side, 120))
+        self.delay_spin.setValue(D.get_bot_call_delay(self.side))
         self.delay_spin.valueChanged.connect(self._update_delay_cost)
         self.delay_apply = QPushButton("Apply")
         self.delay_apply.setObjectName("toolBtn")
@@ -624,7 +624,7 @@ class BotTab(QWidget):
                                QMessageBox.StandardButton.No)
         box.setDefaultButton(QMessageBox.StandardButton.No)
         if box.exec() != QMessageBox.StandardButton.Yes:
-            self.delay_spin.setValue(D.get_bot_call_delay(self.side, 120))
+            self.delay_spin.setValue(D.get_bot_call_delay(self.side))
             return
         D.set_bot_call_delay(self.side, v)
         self.delay_saved.setText("saved ✓")

@@ -531,8 +531,10 @@ class BotRunner:
         if val is None:
             try:
                 import core.data as _D
-                val = int(_D.get_bot_call_delay(self.name.upper(),
-                                                self.tick_seconds))
+                # V4.6.68 — default cadence is 30 min (DEFAULT_CALL_DELAY)
+                # unless the user set a value for this bot.
+                _dflt = getattr(_D, "DEFAULT_CALL_DELAY", 1800)
+                val = int(_D.get_bot_call_delay(self.name.upper(), _dflt))
             except Exception:
                 val = self.tick_seconds
         try:

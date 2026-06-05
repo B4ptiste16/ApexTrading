@@ -1027,6 +1027,7 @@ def set_bot_min_conf(side: str, value: float) -> None:
 # ── Call delay (V4.6.66) — how often a bot calls the AI / runs a cycle ──────
 # Faster than this floor risks rate-limit / cost spikes / overlapping cycles.
 CALL_DELAY_FLOOR = 30          # seconds — minimum allowed
+DEFAULT_CALL_DELAY = 1800      # seconds — default cadence (30 min) when unset
 _CALL_TOKENS = {
     "LONG":  {"input": 12000, "output": 600},
     "SHORT": {"input": 10000, "output": 600},
@@ -1034,7 +1035,7 @@ _CALL_TOKENS = {
 }
 
 
-def get_bot_call_delay(side: str, default: int = 120) -> int:
+def get_bot_call_delay(side: str, default: int = DEFAULT_CALL_DELAY) -> int:
     """Effective call delay (seconds) for a bot — saved override or default."""
     try:
         v = int(load_settings().get(side, {}).get("call_delay") or 0)
@@ -1049,6 +1050,22 @@ def set_bot_call_delay(side: str, seconds: int) -> None:
     s.setdefault(side, {})["call_delay"] = max(CALL_DELAY_FLOOR, int(seconds))
     with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
         json.dump(s, f, indent=2)
+
+
+def resolve_call_delay(side: str) -> int:
+    """V4.6.68 — the effective seconds a bot should sleep between AI calls.
+    Honors the cloud-synced env var, then the user's saved per-bot setting,
+    then the 30-min default. Floored for safety. Built-in bots (LONG/SHORT/DAY)
+    call this from their own loop so the call-delay control applies to them too."""
+    import os
+    env = (os.environ.get(f"APEX_CALL_DELAY_{side.upper()}")
+           or os.environ.get("APEX_CALL_DELAY"))
+    if env:
+        try:
+            return max(CALL_DELAY_FLOOR, int(float(env)))
+        except (TypeError, ValueError):
+            pass
+    return max(CALL_DELAY_FLOOR, get_bot_call_delay(side, DEFAULT_CALL_DELAY))
 
 
 def estimate_call_cost(side: str) -> float:

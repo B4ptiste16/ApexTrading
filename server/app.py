@@ -424,12 +424,10 @@ def list_public_bots(q: str = "", tag: str = "",
     )}
 
 
-@app.get("/bots/{slug}")
-def get_public_bot(slug: str):
-    row = marketplace.get_bot(slug)
-    if not row:
-        raise HTTPException(404, "Bot not found.")
-    return row
+# NOTE (V4.6.68): the catch-all GET /bots/{slug} is registered LATER in this
+# file (after the static /bots/v2, /bots/mine, /bots/running, /bots/philosophies
+# routes). FastAPI matches routes in definition order, so defining it here
+# shadowed those static paths ("Bot not found" on the marketplace browse).
 
 
 @app.get("/bots/{slug}/download")
@@ -1789,6 +1787,17 @@ def api_bots_v2(q: str = "", tag: str = "", philosophy: str = "",
         min_win_rate=min_win_rate, section=section, owner_id=owner_id,
         sort=sort, limit=min(limit, 100), offset=offset,
     )}
+
+
+# V4.6.68 — catch-all bot detail route, registered AFTER every static /bots/*
+# route so it no longer shadows them (was returning "Bot not found" for
+# /bots/v2, /bots/mine, etc., breaking the marketplace browse).
+@app.get("/bots/{slug}")
+def get_public_bot(slug: str):
+    row = marketplace.get_bot(slug)
+    if not row:
+        raise HTTPException(404, "Bot not found.")
+    return row
 
 
 # ──────────────────────────────────────────────────────────────────────────────
