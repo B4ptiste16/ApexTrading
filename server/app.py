@@ -1601,6 +1601,46 @@ def api_get_universe(name: str):
         raise HTTPException(500, str(e))
 
 
+_UNIVERSE_REGEN_RUNNING = False
+
+
+@app.post("/admin/universes/regenerate")
+def api_regen_universes(x_admin_token: str | None = Header(default=None)):
+    """V4.6.74 — regenerate ALL public universes on demand (don't wait for the
+    Monday cron). Gated by the APEX_ADMIN_TOKEN env var. Runs in a background
+    thread (yfinance over ~250 tickers takes a minute) so the request returns
+    immediately."""
+    global _UNIVERSE_REGEN_RUNNING
+    want = _os.environ.get("APEX_ADMIN_TOKEN", "")
+    if not want:
+        raise HTTPException(503, "APEX_ADMIN_TOKEN is not set on the server.")
+    if x_admin_token != want:
+        raise HTTPException(403, "Bad admin token.")
+    if _UNIVERSE_REGEN_RUNNING:
+        return {"ok": True, "status": "already_running"}
+
+    def _run():
+        global _UNIVERSE_REGEN_RUNNING
+        _UNIVERSE_REGEN_RUNNING = True
+        try:
+            from . import universe_factory as uf
+            print("[universe-factory] manual regeneration starting…",
+                  flush=True)
+            counts = uf.generate_all()
+            print(f"[universe-factory] manual regeneration done: {counts}",
+                  flush=True)
+        except Exception as e:
+            print(f"[universe-factory] manual regeneration failed: {e}",
+                  flush=True)
+        finally:
+            _UNIVERSE_REGEN_RUNNING = False
+
+    import threading
+    threading.Thread(target=_run, daemon=True,
+                     name="universe_regen").start()
+    return {"ok": True, "status": "started"}
+
+
 @app.get("/web/api/bots/{side}/positions", include_in_schema=False)
 def web_api_bot_positions(side: str, request: Request):
     """Return open positions for one bot's Alpaca account."""
