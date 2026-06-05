@@ -153,10 +153,8 @@ class BotTab(QWidget):
         rw = QWidget(); rw.setLayout(row)
         s.add(rw)
 
-        # 2. RECENT CLOSED TRADES
-        s.add(SectionHeader("RECENT CLOSED TRADES", self.color))
-        self.closed_trades_feed = ClosedTradesFeed()
-        s.add(self.closed_trades_feed)
+        # V4.6.69 — RECENT CLOSED TRADES moved to the bottom, side-by-side with
+        # the positions table (see POSITION MANAGEMENT section).
 
         # 3. SIGNAL
         s.add(SectionHeader("LAST AI SIGNAL", self.color))
@@ -214,7 +212,11 @@ class BotTab(QWidget):
         self.delay_spin.valueChanged.connect(self._update_delay_cost)
         self.delay_apply = QPushButton("Apply")
         self.delay_apply.setObjectName("toolBtn")
-        self.delay_apply.setFixedWidth(60)
+        self.delay_apply.setMinimumWidth(78)
+        self.delay_apply.setStyleSheet(
+            f"QPushButton{{background:rgba(138,147,201,0.18);color:{C['purple']};"
+            f"border:none;border-radius:4px;padding:4px 14px;font-size:10px;"
+            f"font-weight:700;}}QPushButton:hover{{background:rgba(138,147,201,0.32);}}")
         self.delay_apply.clicked.connect(self._on_delay_apply)
         self.delay_saved = QLabel("")
         self.delay_saved.setStyleSheet(f"color:{C['green']};font-size:10px;")
@@ -412,11 +414,27 @@ class BotTab(QWidget):
         cw2 = QWidget(); cw2.setLayout(cr2)
         s.add(cw2)
 
-        # 11. POSITION MANAGEMENT
-        s.add(SectionHeader("POSITION MANAGEMENT", self.color))
+        # 11. POSITIONS + RECENT CLOSED TRADES (half/half, V4.6.69)
+        s.add(SectionHeader("POSITIONS & RECENT CLOSED TRADES", self.color))
         self.pos_table = DataTable()
-        self.pos_table.setFixedHeight(180)
-        s.add(self.pos_table)
+        self.pos_table.setFixedHeight(190)
+        self.closed_trades_feed = ClosedTradesFeed()
+        split = QHBoxLayout()
+        split.setSpacing(12)
+        _left = QVBoxLayout(); _left.setSpacing(4)
+        _lt = QLabel("Open positions")
+        _lt.setStyleSheet(f"color:{C['muted']};font-size:10px;letter-spacing:1px;")
+        _left.addWidget(_lt); _left.addWidget(self.pos_table)
+        _lw = QWidget(); _lw.setLayout(_left)
+        _right = QVBoxLayout(); _right.setSpacing(4)
+        _rt = QLabel("Recent closed trades")
+        _rt.setStyleSheet(f"color:{C['muted']};font-size:10px;letter-spacing:1px;")
+        _right.addWidget(_rt); _right.addWidget(self.closed_trades_feed)
+        _rw = QWidget(); _rw.setLayout(_right)
+        split.addWidget(_lw, 1)
+        split.addWidget(_rw, 1)
+        spw = QWidget(); spw.setLayout(split)
+        s.add(spw)
         mr = QHBoxLayout()
         self.pos_combo = NoScrollComboBox()
         self.pos_combo.setPlaceholderText("Select ticker...")

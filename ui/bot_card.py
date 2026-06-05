@@ -17,11 +17,15 @@ real logo files are dropped in.
 
 from pathlib import Path
 
+import math
+
 from PyQt6.QtWidgets import (
     QWidget, QLabel, QHBoxLayout, QVBoxLayout, QPushButton, QDialog, QFrame,
 )
-from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QPixmap
+from PyQt6.QtCore import Qt, QPointF, QRectF
+from PyQt6.QtGui import (
+    QPixmap, QPainter, QColor, QPen, QBrush, QPolygonF,
+)
 
 from ui.styles import COLORS
 import core.data as D
@@ -58,30 +62,107 @@ AI_BRANDS_KEY_CANON = {"claude": "anthropic", "gpt": "openai",
                        "gemini": "google", "grok": "xai"}
 
 
-def ai_logo_chip(provider: str, active: bool = False) -> QWidget:
-    """A small logo chip for an AI provider. Uses assets/ai_logos/<p>.png if
-    present, else a branded text chip."""
+_ICON_CACHE: dict = {}
+
+
+def _draw_provider_icon(prov: str, brand: str, size: int) -> QPixmap:
+    """Draw a clean, recognizable brand mark for an AI provider (no bundled
+    files / no clipping). Real logos override via assets/ai_logos/<p>.png."""
+    pm = QPixmap(size, size)
+    pm.fill(Qt.GlobalColor.transparent)
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.RenderHint.Antialiasing)
+    col = QColor(brand)
+    c = size / 2.0
+    if prov == "anthropic":            # sunburst / asterisk
+        p.setPen(QPen(col, max(1.4, size * 0.11), Qt.PenStyle.SolidLine,
+                      Qt.PenCapStyle.RoundCap))
+        for ang in range(0, 360, 45):
+            r = math.radians(ang)
+            p.drawLine(QPointF(c, c),
+                       QPointF(c + c * 0.82 * math.cos(r),
+                               c + c * 0.82 * math.sin(r)))
+    elif prov == "openai":             # ring (blossom stand-in)
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.setPen(QPen(col, max(1.6, size * 0.13)))
+        p.drawEllipse(QRectF(size * 0.16, size * 0.16, size * 0.68, size * 0.68))
+    elif prov in ("google", "gemini"): # 4-point sparkle
+        pts = []
+        outer, inner = c * 0.92, c * 0.30
+        for i in range(8):
+            ang = math.radians(i * 45 - 90)
+            rr = outer if i % 2 == 0 else inner
+            pts.append(QPointF(c + rr * math.cos(ang), c + rr * math.sin(ang)))
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QBrush(col))
+        p.drawPolygon(QPolygonF(pts))
+    elif prov == "xai":                # X
+        p.setPen(QPen(col, max(1.8, size * 0.15), Qt.PenStyle.SolidLine,
+                      Qt.PenCapStyle.RoundCap))
+        m = size * 0.24
+        p.drawLine(QPointF(m, m), QPointF(size - m, size - m))
+        p.drawLine(QPointF(size - m, m), QPointF(m, size - m))
+    else:                              # groq / unknown — filled disc
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QBrush(col))
+        p.drawEllipse(QRectF(size * 0.16, size * 0.16, size * 0.68, size * 0.68))
+        p.setBrush(QBrush(QColor("#0e1016")))
+        p.drawEllipse(QRectF(size * 0.40, size * 0.40, size * 0.20, size * 0.20))
+    p.end()
+    return pm
+
+
+# Candidate logo filenames per provider (brand names + keys, any case).
+_LOGO_FILES = {
+    "anthropic": ["anthropic", "Anthropic", "claude", "Claude"],
+    "openai":    ["openai", "OpenAI", "OpenAi"],
+    "google":    ["google", "Google", "gemini", "Gemini"],
+    "xai":       ["xai", "xAI", "XAI", "grok", "Grok"],
+    "groq":      ["groq", "Groq", "GroQ"],
+}
+
+
+def _logo_path(key: str):
+    for stem in _LOGO_FILES.get(key, [key]):
+        for ext in (".png", ".PNG", ".svg"):
+            p = _LOGO_DIR / f"{stem}{ext}"
+            if p.exists():
+                return p
+    return None
+
+
+def provider_icon(provider: str, size: int = 18) -> QPixmap:
     key = _norm_provider(provider)
-    name, brand = AI_BRANDS.get(key, AI_BRANDS.get(AI_BRANDS_KEY_CANON.get(key, ""),
-                                                   (provider or "AI", C["muted"])))
-    png = _LOGO_DIR / f"{key}.png"
-    lbl = QLabel()
-    if png.exists():
+    ck = (key, size)
+    if ck in _ICON_CACHE:
+        return _ICON_CACHE[ck]
+    name, brand = AI_BRANDS.get(key, (provider or "AI", C["muted"]))
+    png = _logo_path(key)
+    if png is not None:
         try:
             pm = QPixmap(str(png)).scaledToHeight(
-                18, Qt.TransformationMode.SmoothTransformation)
-            lbl.setPixmap(pm)
-            lbl.setToolTip(name)
-            return lbl
+                size, Qt.TransformationMode.SmoothTransformation)
+            if not pm.isNull():
+                _ICON_CACHE[ck] = pm
+                return pm
         except Exception:
             pass
-    # Branded text chip fallback
-    lbl.setText(name)
-    border = brand if active else "transparent"
-    lbl.setStyleSheet(
-        f"background:{brand}26;color:{brand};border:1px solid {border};"
-        f"border-radius:9px;padding:2px 9px;font-size:10px;font-weight:700;")
-    lbl.setToolTip(f"{name}" + ("  · used to build this bot" if active else ""))
+    pm = _draw_provider_icon(key, brand, size)
+    _ICON_CACHE[ck] = pm
+    return pm
+
+
+def ai_logo_chip(provider: str, active: bool = False) -> QWidget:
+    """Logo icon for an AI provider — a drawn brand mark (or a real PNG from
+    assets/ai_logos/<p>.png). Shows the icon only; name in the tooltip."""
+    key = _norm_provider(provider)
+    name, _brand = AI_BRANDS.get(key, (provider or "AI", C["muted"]))
+    sz = 22 if active else 18
+    lbl = QLabel()
+    lbl.setPixmap(provider_icon(provider, sz))
+    lbl.setFixedSize(sz + 4, sz + 4)
+    lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    lbl.setToolTip(name + ("  · used to build this bot" if active else ""))
     return lbl
 
 
