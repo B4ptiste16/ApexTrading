@@ -41,7 +41,7 @@ body {
   padding: 0;
   padding-top: env(safe-area-inset-top);
   padding-bottom: env(safe-area-inset-bottom);
-  background: linear-gradient(135deg, var(--bg), var(--bg2));
+  background: var(--bg);
   color: var(--text);
   font-family: 'JetBrains Mono', ui-monospace, monospace;
   min-height: 100vh;
@@ -587,7 +587,7 @@ _SAFE_AREA_CSS = """
   body {
     padding-top: env(safe-area-inset-top);
     padding-bottom: env(safe-area-inset-bottom);
-    background: linear-gradient(135deg, var(--bg), var(--bg2));
+    background: var(--bg);
     min-height: calc(100vh + env(safe-area-inset-top));
   }
 """

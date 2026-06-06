@@ -525,14 +525,28 @@ async def upload_public_bot(
         own_slugs = [b.get("slug") for b in own_bots if b.get("slug")]
     except Exception:
         pass
-    matches = similarity.compare_against_marketplace(
-        src_text, marketplace.MARKETPLACE_DIR,
-        skip_slugs=own_slugs)
-    if matches and matches[0]["score"] >= 0.85:
+    # V4.6.78 — compare against EVERY bot (including the user's own) so we can
+    # catch identical re-publishes. Two rules:
+    #   • ≥97% similar to ANY bot (incl. your own) → near-identical DUPLICATE,
+    #     blocked. This stops the "3 copies of my crypto bot" problem.
+    #   • ≥85% similar to a DIFFERENT owner's bot → copy of someone else's
+    #     work, blocked. Your own bots in the 85–97% band are still allowed
+    #     (genuine improvements / re-publishes).
+    all_matches = similarity.compare_against_marketplace(
+        src_text, marketplace.MARKETPLACE_DIR, skip_slugs=[])
+    if all_matches and all_matches[0]["score"] >= 0.97:
         raise HTTPException(
             409,
-            f"Too similar to '{matches[0]['slug']}' "
-            f"(score {matches[0]['score']:.0%}). "
+            f"This is a near-identical DUPLICATE of '{all_matches[0]['slug']}' "
+            f"(score {all_matches[0]['score']:.0%}). Edit that bot instead of "
+            f"publishing another copy.")
+    non_own = [m for m in all_matches if m.get("slug") not in own_slugs]
+    matches = non_own   # keep the downstream similarity_warning band behaviour
+    if non_own and non_own[0]["score"] >= 0.85:
+        raise HTTPException(
+            409,
+            f"Too similar to '{non_own[0]['slug']}' "
+            f"(score {non_own[0]['score']:.0%}). "
             f"Consider basing yours on that bot rather than re-publishing "
             f"a near-duplicate.")
     try:

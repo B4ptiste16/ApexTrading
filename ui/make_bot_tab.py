@@ -974,10 +974,11 @@ class MakeBotTab(QWidget):
         # the "Via APEX" provider is picked. Shows live cost + balance
         # (the worker refreshes balance after each successful generation).
         self._free_badge = QLabel("◊ 10 / gen  ·  balance: —")
+        # V4.6.78 — flat, sober chip (was a purple→green gradient) to match
+        # the minimalist style used across the rest of the app.
         self._free_badge.setStyleSheet(
-            "background: qlineargradient(x1:0, y1:0, x2:1, y2:0,"
-            f"  stop:0 {C['purple']}, stop:1 #2eea88);"
-            f"color:#0c1018;font-weight:800;font-size:10px;"
+            f"background:{C['panel2']};color:{C['muted']};"
+            f"font-weight:700;font-size:10px;"
             "letter-spacing:1px;padding:4px 10px;border-radius:6px;"
         )
         self._free_badge.setVisible(False)

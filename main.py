@@ -1215,74 +1215,67 @@ class MoreBotsTab(QWidget):
         except Exception as e:
             # Network/server problems shouldn't block publishing — just log.
             print(f"[publish] similarity check failed: {e}")
-        name, ok = QInputDialog.getText(
-            self, "Bot name", "Display name:",
-            text=pf.get("name") or Path(path).stem)
-        if not ok or not name.strip():
-            return
-        desc, _ = QInputDialog.getText(
-            self, "Description", "One-line description:",
-            text=pf.get("description", ""))
-        tags, _ = QInputDialog.getText(
-            self, "Tags", "Comma-separated tags (optional):",
-            text=pf.get("tags", ""))
-        # V3.1.1 — capture philosophy + price so the listing surfaces in
-        # the new filters and the publisher can monetise.
-        philos_choices = ["long", "short", "day", "options", "momentum",
-                          "mean-reversion", "scalping", "swing", "other"]
-        pf_phil = pf.get("philosophy", "")
-        pf_idx  = philos_choices.index(pf_phil) if pf_phil in philos_choices else 0
-        philos, ok_p = QInputDialog.getItem(
-            self, "Philosophy",
-            "Trading philosophy (helps users find your bot):",
-            philos_choices, pf_idx, False)
-        if not ok_p:
-            philos = ""
-        price, _ = QInputDialog.getInt(
-            self, "Price",
-            "Price in BAPTOU credits  (0 = free):", 0, 0, 1_000_000, 10)
-        # V4.1.0 — AI transparency fields
-        from PyQt6.QtWidgets import QDialog, QDialogButtonBox, QCheckBox, QScrollArea
-        ai_choices = ["Claude (Anthropic)", "GPT-4 (OpenAI)", "Gemini (Google)",
-                      "Llama (Groq)", "Grok (xAI)", "Custom / Other"]
-        pf_cai = pf.get("creator_ai", "")
-        cai_idx = next((i for i,c in enumerate(ai_choices)
-                        if pf_cai.lower() in c.lower()), 0)
-        creator_ai, _ = QInputDialog.getItem(
-            self, "Creator AI",
-            "Which AI model was used to GENERATE this bot?",
-            ai_choices, cai_idx, False)
+        # V4.6.78 — ZERO manual entry. Everything the marketplace needs is
+        # auto-derived from the bot's APEX-BOT-META (written by the AI at
+        # creation) + any prefill from Make Bot. We show ONE confirmation so
+        # the user can review/cancel, but they never have to type anything.
+        from core.bot_meta import parse_meta
+        try:
+            meta = parse_meta(blob.decode("utf-8", "replace")) or {}
+        except Exception:
+            meta = {}
 
-        # Runner AI: allow selecting multiple models (comma-separated in storage)
-        run_dlg = QDialog(self)
-        run_dlg.setWindowTitle("Runner AI models")
-        run_dlg.setMinimumWidth(340)
-        run_vl = QVBoxLayout(run_dlg)
-        run_vl.addWidget(QLabel(
-            "Which AI model(s) can RUN this bot?\n"
-            "(Select all that apply — stored as a comma-separated list.)"))
-        run_checks = []
-        for ai in ai_choices:
-            cb = QCheckBox(ai)
-            run_vl.addWidget(cb)
-            run_checks.append(cb)
-        run_btns = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok |
-            QDialogButtonBox.StandardButton.Cancel)
-        run_btns.accepted.connect(run_dlg.accept)
-        run_btns.rejected.connect(run_dlg.reject)
-        run_vl.addWidget(run_btns)
-        if run_dlg.exec() == QDialog.DialogCode.Accepted:
-            selected = [cb.text() for cb in run_checks if cb.isChecked()]
-            runner_ai = ", ".join(selected) if selected else ""
+        name = (pf.get("name") or meta.get("name") or Path(path).stem).strip()
+        desc = (pf.get("description") or meta.get("description")
+                or meta.get("method") or "").strip()
+        # Tags: prefill, else asset_type + brokers (keeps listings searchable).
+        if pf.get("tags"):
+            tags = pf["tags"].strip()
         else:
-            runner_ai = ""
+            _tag_bits = [meta.get("asset_type", "")] + list(meta.get("brokers") or [])
+            tags = ", ".join(t for t in _tag_bits if t)
+        philos = (pf.get("philosophy") or meta.get("philosophy") or "").strip().lower()
+        if philos not in ("long", "short", "day", "options", "momentum",
+                          "mean-reversion", "scalping", "swing"):
+            philos = ""    # server accepts empty
+        try:
+            price = int(pf.get("price", 0) or 0)
+        except (TypeError, ValueError):
+            price = 0
+        creator_ai = (pf.get("creator_ai") or meta.get("ai_used") or "").strip()
+        _cm = meta.get("compatible_models")
+        runner_ai = (pf.get("runner_ai")
+                     or (", ".join(_cm) if isinstance(_cm, list)
+                         else (_cm or ""))).strip()
+        _bl = meta.get("brokers") or []
+        if isinstance(_bl, str):
+            _bl = [_bl]
+        _bl = [str(x).strip().lower() for x in _bl]
+        if "alpaca" in _bl and "ibkr" in _bl:
+            broker = "Alpaca + IBKR"
+        elif "ibkr" in _bl:
+            broker = "IBKR (Interactive Brokers)"
+        elif "alpaca" in _bl:
+            broker = "Alpaca"
+        else:
+            broker = "Alpaca + IBKR"
 
-        broker_choices = ["Alpaca", "IBKR (Interactive Brokers)", "Alpaca + IBKR"]
-        broker, _ = QInputDialog.getItem(
-            self, "Compatible broker",
-            "Which broker does this bot work with?",
-            broker_choices, 0, False)
+        uni_txt = bot_universe or "(AI-selected tickers)"
+        summary = (
+            f"<b>{name}</b><br><br>"
+            f"{desc or 'No description.'}<br><br>"
+            f"<b>AI:</b> {creator_ai or '—'}<br>"
+            f"<b>Runs on:</b> {broker}<br>"
+            f"<b>Universe:</b> {uni_txt}<br>"
+            f"<b>Tags:</b> {tags or '—'}<br>"
+            f"<b>Price:</b> {'FREE' if not price else f'{price} credits'}<br><br>"
+            f"All of this was filled in automatically from the bot. "
+            f"Publish to the BAPTOU bot market?")
+        if QMessageBox.question(
+                self, "Publish bot", summary,
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        ) != QMessageBox.StandardButton.Yes:
+            return
 
         from PyQt6.QtCore import QThread, pyqtSignal as _Sig
 
