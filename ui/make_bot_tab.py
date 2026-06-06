@@ -419,7 +419,36 @@ _SYSTEM_PROMPT_TRADE = (
     "today's actual BTC price (~$110k as of late 2025 / early 2026), "
     "do your thresholds produce a real trade signal, or do they "
     "compare numbers that can never cross? If they can never cross, "
-    "rewrite the logic."
+    "rewrite the logic.\n\n"
+    "═══ RUN-READY CHECKLIST (MUST ALL PASS) ═══\n\n"
+    "The file you output MUST run on the very first try with no edits. "
+    "Verify EVERY item before responding:\n"
+    "1. It `compile()`s — balanced quotes/parens, no half-finished "
+    "  docstrings, no markdown fences, no prose. Output ONLY the .py.\n"
+    "2. Top-level imports are limited to: os, math, statistics, pandas "
+    "  as pd, numpy as np, and `from core.bot_framework import BotRunner`. "
+    "  ANY other package goes in requirements: AND is imported INSIDE "
+    "  decide() in a try/except (so a missing dep can't crash startup).\n"
+    "3. `decide()` ALWAYS returns a valid dict on every path — including "
+    "  the very first ticks. Guard short history: "
+    "  `if len(bars) < N or pd.isna(x): return {{'action':'HOLD',"
+    "  'reason':'warming up'}}`.\n"
+    "4. Quantities are valid: BUY/SHORT qty is a POSITIVE number "
+    "  (`max(1, int(...))` for stocks; a positive float like 0.01 for "
+    "  crypto). SELL/COVER use `position['qty']`. Never return qty<=0, "
+    "  None, or NaN.\n"
+    "5. Never size bigger than the wallet: cap notional with "
+    "  `account['buying_power']`. Read prices from `bars['Close']` only — "
+    "  do NOT fetch your own data or call a broker SDK.\n"
+    "6. `default_symbols` matches asset_type: yfinance form. Stocks/ETFs "
+    "  → 'AAPL'; crypto → 'BTC-USD'. If a TICKER UNIVERSE block was "
+    "  given, default_symbols must equal that exact list.\n"
+    "7. The APEX-BOT-META block has EVERY field filled with a real value "
+    "  (no leftover {{placeholders}}), including a human-readable "
+    "  description + method and the correct brokers list.\n"
+    "8. You did NOT rename or re-signature `decide(symbol, bars, position, "
+    "  account)` and did NOT add a `main()` — `BotRunner(...).run(decide)` "
+    "  is the only entry point."
 )
 
 
@@ -1488,16 +1517,25 @@ class MakeBotTab(QWidget):
         # Register in the user's bot registry so MORE BOTS picks it up
         try:
             reg = D.load_bot_registry()
-            # V4.6.29 — read META.broker so the registry entry records
-            # which broker this bot targets. Defaults to alpaca. Used
-            # by the broker-mode switch to show/hide the bot.
-            bot_broker = "alpaca"
+            # V4.6.76 — read META.brokers (a LIST: alpaca / ibkr) so the
+            # registry records which brokers this bot supports. The old code
+            # read a singular `broker` key that doesn't exist in META, so it
+            # ALWAYS defaulted to 'alpaca' — which wrongly hid dual-broker
+            # bots from the IBKR tab. Store both the list and a derived
+            # singular string for backward-compatible consumers.
+            bot_brokers = ["alpaca", "ibkr"]
             try:
                 from core.bot_meta import parse_meta
-                bot_broker = (parse_meta(code) or {}).get(
-                    "broker", "alpaca").lower() or "alpaca"
+                m = parse_meta(code) or {}
+                bl = m.get("brokers")
+                if isinstance(bl, list) and bl:
+                    bot_brokers = [str(x).strip().lower() for x in bl if str(x).strip()]
+                elif isinstance(bl, str) and bl.strip():
+                    bot_brokers = [bl.strip().lower()]
             except Exception:
                 pass
+            bot_broker = ("alpaca,ibkr" if len(bot_brokers) > 1
+                          else (bot_brokers[0] if bot_brokers else "alpaca"))
             existing = [c["id"] for c in reg.get("custom", [])]
             if slug not in existing:
                 reg.setdefault("custom", []).append({
@@ -1506,6 +1544,7 @@ class MakeBotTab(QWidget):
                     "script":  str(dest),
                     "color":   C["purple"],
                     "broker":  bot_broker,
+                    "brokers": bot_brokers,
                 })
                 D.save_bot_registry(reg)
         except Exception as e:

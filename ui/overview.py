@@ -898,6 +898,9 @@ class ToolsTab(QWidget):
         self._ibkr_rows_layout.addWidget(hdr_w)
 
         for entry in self._ibkr_load_saved_bots(cur):
+            # V4.6.76 — never show an Alpaca-only bot in the IBKR table.
+            if not self._bot_supports_ibkr(entry["id"]):
+                continue
             self._ibkr_add_bot_row(
                 entry["id"],
                 entry.get("client_id", ""),
@@ -1288,8 +1291,43 @@ class ToolsTab(QWidget):
             self._ibkr_msg.setStyleSheet(f"color:{C['green']};font-size:10px;")
             QTimer.singleShot(6000, lambda: self._ibkr_msg.setText(""))
 
+    def _bot_supports_ibkr(self, bot_id) -> bool:
+        """V4.6.76 — True unless the bot is ALPACA-ONLY. Built-ins (LONG /
+        SHORT / DAY) are broker-agnostic. For custom bots, prefer the
+        registry's `brokers` list; fall back to re-parsing the bot file's
+        META.brokers (older registry entries stored a buggy singular
+        `broker='alpaca'`); an untagged bot shows everywhere."""
+        bid_u = str(bot_id).upper()
+        if bid_u in ("LONG", "SHORT", "DAY"):
+            return True
+        try:
+            for c in D.load_all_custom_bots():
+                if not isinstance(c, dict) or c.get("id") != bot_id:
+                    continue
+                brokers = c.get("brokers")
+                if not brokers:
+                    script = c.get("script", "")
+                    if script:
+                        try:
+                            from core.bot_meta import parse_meta
+                            src = open(script, encoding="utf-8").read()
+                            brokers = (parse_meta(src) or {}).get("brokers")
+                        except Exception:
+                            brokers = None
+                if not brokers:
+                    b = str(c.get("broker", "")).lower()
+                    brokers = [b] if b else []
+                brokers = [str(x).lower() for x in (brokers or [])]
+                if not brokers:
+                    return True   # untagged → don't hide it
+                return any(("ibkr" in x or "both" in x) for x in brokers)
+        except Exception:
+            pass
+        return True
+
     def _ibkr_refresh_add_combo(self):
-        """Refresh the 'add bot' combo: only bots not yet in the table."""
+        """Refresh the 'add bot' combo: only bots not yet in the table.
+        V4.6.76 — Alpaca-only bots are excluded (they can't run on IBKR)."""
         if not hasattr(self, "_ibkr_add_combo"):
             return
         already = {r["id"] for r in getattr(self, "_ibkr_bot_rows", [])}
@@ -1303,7 +1341,7 @@ class ToolsTab(QWidget):
                 if not isinstance(c, dict):
                     continue
                 bid = c.get("id", "")
-                if bid and bid not in already:
+                if bid and bid not in already and self._bot_supports_ibkr(bid):
                     options.append((bid, c.get("label", bid)))
         except Exception:
             pass

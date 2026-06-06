@@ -1,27 +1,22 @@
 """
-APEX Universe Manager Tab
-Run universe_manager.py (like a bot) and see the per-bot ticker breakdown.
+APEX Universe Tab
+View the ticker universes — both YOUR BOTS' assigned universes and the full
+catalogue of curated PUBLIC universes the APEX server regenerates weekly.
 
-V4.6.2 — side-by-side layout. Instead of one long table that mixes every
-bot's tickers, each universe gets its own card laid out in a 2-wide grid:
-the first universe goes top-left, the second top-right, the third
-bottom-left, and so on. With LONG + a custom CRYPTO bot you see stocks
-on the left, crypto on the right — no scrolling between them.
+V4.6.76 — removed the "run a universe script" control. Universes are no
+longer something the user runs locally: the server's universe_factory
+regenerates ~34 themed public universes every Monday, and each bot picks one
+(or its own tickers) at creation. This tab is now read-only: it shows what
+each of your bots trades, plus every public universe available to assign.
 """
-
-from pathlib import Path
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QFrame,
-    QPushButton,
 )
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QThread, pyqtSignal
 
 from ui.styles  import COLORS
-from ui.widgets import (
-    SectionHeader, BotProcessWidget, ScrollContent, DataTable,
-    NoScrollComboBox,
-)
+from ui.widgets import SectionHeader, ScrollContent, DataTable
 import core.data as D
 
 C = COLORS
@@ -62,11 +57,80 @@ class UniverseCard(QFrame):
     def load(self, rows: list):
         """rows: list of {Ticker, Note} dicts."""
         self.count_lbl.setText(f"{len(rows)} tickers")
-        # Strip the 'Bot' column from the per-card table — it's redundant
-        # because the card header already names the bot.
         flat = [{"Ticker": r["Ticker"], "Note": r["Note"] or "—"}
                 for r in rows]
         self.table.load(flat, ["Ticker", "Note"])
+
+
+class PublicUniverseCard(QFrame):
+    """Compact card for one server-side public universe: name, count, blurb,
+    and the ticker list (wrapped). Light-weight so all ~34 render fast."""
+
+    def __init__(self, name: str, total: int, blurb: str, tickers: list,
+                 parent=None):
+        super().__init__(parent)
+        self.setStyleSheet(
+            f"QFrame{{background:{C['panel']};border:none;"
+            f"border-radius:8px;}}")
+        v = QVBoxLayout(self)
+        v.setContentsMargins(12, 10, 12, 10)
+        v.setSpacing(4)
+
+        head = QHBoxLayout()
+        title = QLabel(f"🌐  {name.upper()}")
+        title.setStyleSheet(
+            f"color:{C['purple']};font-weight:800;font-size:12px;"
+            f"letter-spacing:1px;border:none;")
+        count = QLabel(f"{total} tickers")
+        count.setStyleSheet(f"color:{C['muted']};font-size:11px;border:none;")
+        head.addWidget(title)
+        head.addStretch()
+        head.addWidget(count)
+        hw = QWidget(); hw.setLayout(head)
+        v.addWidget(hw)
+
+        if blurb:
+            b = QLabel(blurb)
+            b.setStyleSheet(f"color:{C['muted']};font-size:10px;border:none;")
+            b.setWordWrap(True)
+            v.addWidget(b)
+
+        if tickers:
+            t = QLabel(", ".join(tickers))
+            t.setStyleSheet(
+                f"color:{C['text']};font-family:'JetBrains Mono';"
+                f"font-size:10px;line-height:1.5;border:none;")
+            t.setWordWrap(True)
+            v.addWidget(t)
+
+
+class _PublicUniWorker(QThread):
+    """Fetches the public-universe catalogue (list + each one's tickers) off
+    the UI thread. Emits a list of {name,total,blurb,tickers}."""
+    done = pyqtSignal(list)
+
+    def run(self):
+        out = []
+        try:
+            from ui.make_bot_tab import (_fetch_public_universes,
+                                         _fetch_universe_tickers)
+            for u in _fetch_public_universes():
+                nm = u.get("name", "")
+                if not nm:
+                    continue
+                try:
+                    tickers = _fetch_universe_tickers(nm)
+                except Exception:
+                    tickers = []
+                out.append({
+                    "name":  nm,
+                    "total": u.get("total", len(tickers)),
+                    "blurb": (u.get("blurb", "") or "").strip(),
+                    "tickers": tickers,
+                })
+        except Exception as e:
+            print(f"[universe-tab] public fetch failed: {e}")
+        self.done.emit(out)
 
 
 class UniverseTab(QWidget):
@@ -79,207 +143,97 @@ class UniverseTab(QWidget):
         root.addWidget(self.scroll)
         self._cards: dict[str, UniverseCard] = {}
         self._grid: QGridLayout | None = None
+        self._pub_grid: QGridLayout | None = None
+        self._pub_worker: _PublicUniWorker | None = None
         self._build()
 
     def _build(self):
         s = self.scroll
 
-        s.add(SectionHeader("UNIVERSE MANAGER", C["purple"]))
+        s.add(SectionHeader("YOUR BOTS' UNIVERSES", C["purple"]))
         info = QLabel(
-            "Discovers market movers, scores them with Claude, and rewrites "
-            "each bot's ticker universe. Click RUN to update now — output "
-            "streams below just like a bot.")
+            "The ticker universe each of your bots currently trades. Universes "
+            "are assigned when a bot is created (in Make Bot) — pick a curated "
+            "public universe below, or let the bot choose its own tickers.")
         info.setStyleSheet(f"color:{C['muted']};font-size:11px;")
         info.setWordWrap(True)
         s.add(info)
 
-        # V4.6.9 — Universe-script picker. The built-in universe_manager.py
-        # is always available; every custom universe generator that the
-        # user has created via Make Bot (kind=Universe) shows up too.
-        # Selecting a different one swaps the script the BotProcessWidget
-        # below runs.
-        pick_row = QHBoxLayout()
-        pick_lbl = QLabel("Run which universe script:")
-        pick_lbl.setStyleSheet(f"color:{C['muted']};font-size:11px;")
-        # V4.6.11 — create _desc_lbl BEFORE populating the combo so
-        # the chain _populate_script_combo -> _on_script_changed ->
-        # self._desc_lbl.setText(...) doesn't AttributeError on first
-        # paint.
-        self._desc_lbl = QLabel("")
-        self._desc_lbl.setStyleSheet(
-            f"color:{C['muted']};font-size:10px;")
-        self._desc_lbl.setWordWrap(True)
-        self._script_combo = NoScrollComboBox()
-        self._script_combo.setMinimumWidth(280)
-        self._populate_script_combo()
-        self._script_combo.currentIndexChanged.connect(
-            self._on_script_changed)
-        # Refresh button to rescan the universe_scripts/ folder
-        refresh_btn = QPushButton("↻")
-        refresh_btn.setToolTip("Rescan universe scripts AND re-read "
-                              "every *_universe.txt to repopulate the "
-                              "breakdown cards below")
-        refresh_btn.setFixedWidth(28)
-        # V4.6.27 — use refresh() (script combo + breakdown grid)
-        # instead of only _populate_script_combo (script combo only).
-        refresh_btn.clicked.connect(self.refresh)
-        pick_row.addWidget(pick_lbl)
-        pick_row.addWidget(self._script_combo)
-        pick_row.addWidget(refresh_btn)
-        pick_row.addStretch()
-        pw = QWidget()
-        pw.setLayout(pick_row)
-        s.add(pw)
-        s.add(self._desc_lbl)
-
-        s.add(SectionHeader("RUN", C["purple"]))
-        # The runner script can be swapped at runtime. Default to the
-        # built-in universe_manager.py path.
-        self.runner = BotProcessWidget("UNIVERSE", D.UNIVERSE_SCRIPT)
-        s.add(self.runner)
-        # V4.6.27 — refresh the breakdown grid when the universe runner
-        # transitions from running → stopped. Without this, the cards
-        # show whatever tickers were on disk at app start; running
-        # universe_manager later refreshes the .txt files but the UI
-        # doesn't reflect the new contents until the user restarts APEX.
-        try:
-            self.runner.status_changed.connect(
-                lambda _side, running: (None if running
-                                        else self.refresh()))
-        except Exception as e:
-            print(f"[universe-tab] could not wire status_changed: {e}")
-
-        s.add(SectionHeader("UNIVERSE BREAKDOWN", C["purple"]))
-        layout_hint = QLabel(
-            "One card per registered bot universe — your stocks universe "
-            "sits on the left, crypto (or any custom bot's universe) on "
-            "the right, additional universes stack underneath in the same "
-            "2-wide grid.")
-        layout_hint.setStyleSheet(f"color:{C['muted']};font-size:11px;")
-        layout_hint.setWordWrap(True)
-        s.add(layout_hint)
-
-        # ── 2-wide grid container ───────────────────────────────
+        # ── 2-wide grid: one card per bot universe ──────────────
         grid_wrap = QWidget()
         self._grid = QGridLayout(grid_wrap)
         self._grid.setContentsMargins(0, 8, 0, 0)
         self._grid.setHorizontalSpacing(12)
         self._grid.setVerticalSpacing(12)
-        # Make both columns share width 50/50
         self._grid.setColumnStretch(0, 1)
         self._grid.setColumnStretch(1, 1)
         s.add(grid_wrap)
+
+        # ── Public universe catalogue (server) ──────────────────
+        s.add(SectionHeader("PUBLIC UNIVERSES  ·  REGENERATED WEEKLY", C["green"]))
+        pub_info = QLabel(
+            "Curated, pre-scored universes the APEX server rebuilds every "
+            "Monday. Any bot can be assigned one of these at creation. "
+            "Sector packs, factor packs and crypto — all shown below.")
+        pub_info.setStyleSheet(f"color:{C['muted']};font-size:11px;")
+        pub_info.setWordWrap(True)
+        s.add(pub_info)
+
+        self._pub_status = QLabel("Loading public universes…")
+        self._pub_status.setStyleSheet(f"color:{C['muted']};font-size:11px;")
+        s.add(self._pub_status)
+
+        pub_wrap = QWidget()
+        self._pub_grid = QGridLayout(pub_wrap)
+        self._pub_grid.setContentsMargins(0, 8, 0, 0)
+        self._pub_grid.setHorizontalSpacing(12)
+        self._pub_grid.setVerticalSpacing(12)
+        self._pub_grid.setColumnStretch(0, 1)
+        self._pub_grid.setColumnStretch(1, 1)
+        s.add(pub_wrap)
         s.add_stretch()
 
         self.refresh()
+        self._load_public_universes()
 
-    # ── V4.6.9 universe-script picker ───────────────────────────
+    # ── public universe catalogue ───────────────────────────────
 
-    def _populate_script_combo(self):
-        """Build / rebuild the dropdown contents. Always include the
-        built-in universe_manager.py at the top, then list every
-        registered custom universe generator from settings."""
-        self._script_combo.blockSignals(True)
-        self._script_combo.clear()
-        # Built-in
-        self._script_combo.addItem(
-            "Built-in: universe_manager.py  (default)",
-            {"path": str(D.UNIVERSE_SCRIPT),
-             "label": "Built-in universe_manager",
-             "description": "Default APEX universe scanner — picks "
-                            "movers across LONG / SHORT / DAY pools."})
-        # Custom universe scripts the user has generated via Make Bot
+    def _load_public_universes(self):
         try:
-            s = D.load_settings()
-            scripts = s.get("universe_scripts", []) or []
-        except Exception:
-            scripts = []
-        for entry in scripts:
-            if not isinstance(entry, dict):
-                continue
-            path = entry.get("script", "")
-            if not path or not Path(path).exists():
-                continue
-            label  = entry.get("label", entry.get("id", "(unnamed)"))
-            target = entry.get("target", "")
-            desc   = entry.get("description", "")
-            ui_label = f"{label}  →  rewrites {target}" if target else label
-            self._script_combo.addItem(ui_label, {
-                "path":        path,
-                "label":       label,
-                "description": desc or "(no description in META)",
-            })
-        # Restore last-selected script if it still exists
-        try:
-            last = D.load_settings().get("universe_script_selection", "")
-            if last:
-                for i in range(self._script_combo.count()):
-                    if (self._script_combo.itemData(i) or {}).get(
-                            "path") == last:
-                        self._script_combo.setCurrentIndex(i)
-                        break
-        except Exception:
-            pass
-        self._script_combo.blockSignals(False)
-        self._on_script_changed()  # update runner + desc to match selection
-
-    def _on_script_changed(self):
-        data = self._script_combo.currentData() or {}
-        path = data.get("path", str(D.UNIVERSE_SCRIPT))
-        # Swap the runner's script pointer in-place. BotProcessWidget
-        # stores it as `script_path`; also update the visible script
-        # filename label inside the runner so the user can confirm at
-        # a glance which script will execute on next RUN click.
-        try:
-            self.runner.script_path = Path(path)
+            self._pub_worker = _PublicUniWorker()
+            self._pub_worker.done.connect(self._on_public_loaded)
+            self._pub_worker.start()
         except Exception as e:
-            print(f"[universe-tab] could not swap runner script_path: {e}")
-        # Update the in-widget script filename label (if present)
-        try:
-            for child in self.runner.findChildren(QLabel):
-                txt = child.text()
-                # The label is set to the .name of the script (e.g.
-                # "universe_manager.py"). Replace any label whose text
-                # looks like a .py filename.
-                if txt.endswith(".py"):
-                    child.setText(Path(path).name)
-                    break
-        except Exception:
-            pass
-        # Persist selection so it sticks across app restarts
-        try:
-            s = D.load_settings()
-            s["universe_script_selection"] = str(path)
-            import json as _j
-            with open(D.SETTINGS_FILE, "w", encoding="utf-8") as f:
-                _j.dump(s, f, indent=2)
-        except Exception:
-            pass
-        # Update the description label (defensive: may not exist
-        # yet on first call from inside _build before the label is
-        # added to the layout — _build's order is fixed but a future
-        # refactor could reintroduce the gap).
-        try:
-            self._desc_lbl.setText(
-                f"▸ {data.get('description', '')}")
-        except (AttributeError, RuntimeError):
-            pass
+            self._pub_status.setText(f"Could not load public universes: {e}")
+
+    def _on_public_loaded(self, universes: list):
+        # Clear any existing cards
+        while self._pub_grid.count():
+            item = self._pub_grid.takeAt(0)
+            w = item.widget()
+            if w is not None:
+                w.setParent(None)
+                w.deleteLater()
+        if not universes:
+            self._pub_status.setText(
+                "No public universes available (offline or not signed in). "
+                "They appear once you're connected to the APEX server.")
+            return
+        self._pub_status.setText(f"{len(universes)} public universes available:")
+        for i, u in enumerate(sorted(universes, key=lambda x: x["name"])):
+            row, col = divmod(i, 2)
+            card = PublicUniverseCard(
+                u["name"], u.get("total", 0), u.get("blurb", ""),
+                u.get("tickers", []))
+            self._pub_grid.addWidget(card, row, col)
+
+    # ── your bots' universes ─────────────────────────────────────
 
     def refresh(self):
-        # Refresh both the script combo (new universe bots may have
-        # been created since last paint) and the breakdown grid.
-        try:
-            self._populate_script_combo()
-        except Exception as e:
-            print(f"[universe-tab] script combo refresh failed: {e}")
         bd = D.read_universe_breakdown()
         sides = bd.get("sides", []) or ["LONG", "SHORT", "DAY"]
-
-        # ── Rebuild the grid if the set of sides changed (e.g. user
-        # added a custom bot since last refresh) ───────────────────
         if set(sides) != set(self._cards.keys()):
             self._rebuild_grid(sides)
-
         for side in sides:
             card = self._cards.get(side)
             if card is None:
@@ -287,17 +241,11 @@ class UniverseTab(QWidget):
             card.load(bd.get(side, []))
 
     def _rebuild_grid(self, sides: list[str]):
-        """Tear down + re-add UniverseCards into the 2-wide grid in
-        the order returned by read_universe_breakdown() (built-ins
-        first, custom bots alphabetical after)."""
-        # Remove old cards from the layout & memory
         for card in list(self._cards.values()):
             self._grid.removeWidget(card)
             card.setParent(None)
             card.deleteLater()
         self._cards.clear()
-
-        # Re-insert in row-major order, 2 per row
         for i, side in enumerate(sides):
             row, col = divmod(i, 2)
             card = UniverseCard(side)
