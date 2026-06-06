@@ -903,6 +903,34 @@ class ToolsTab(QWidget):
                 entry.get("client_id", ""),
                 entry.get("allocation", ""))
 
+        # V4.6.75 (#4) — fixed, unremovable MANUAL reserve row. Reserves a
+        # slice of IBKR cash for your own hand-placed trades so bots leave it
+        # alone. Stored separately from the bots list (`manual_reserve`), so
+        # it never becomes a runnable bot. Default 0 = no reserve.
+        man_w = QWidget()
+        man_l = QHBoxLayout(man_w)
+        man_l.setContentsMargins(0, 4, 0, 0)
+        man_l.setSpacing(6)
+        man_lbl = QLabel("✋ MANUAL (reserve)")
+        man_lbl.setStyleSheet(
+            f"color:{C['orange']};font-size:11px;font-weight:700;")
+        man_lbl.setFixedWidth(155)
+        man_cid = QLabel("—")
+        man_cid.setStyleSheet(f"color:{C['muted']};font-size:11px;")
+        man_cid.setFixedWidth(80)
+        self._ibkr_manual_edit = QLineEdit(str(cur.get("manual_reserve", "") or ""))
+        self._ibkr_manual_edit.setPlaceholderText("0")
+        self._ibkr_manual_edit.setFixedWidth(70)
+        self._ibkr_manual_edit.textChanged.connect(self._update_ibkr_remaining)
+        man_hint = QLabel("reserved for your manual trades")
+        man_hint.setStyleSheet(f"color:{C['muted']};font-size:10px;")
+        man_l.addWidget(man_lbl)
+        man_l.addWidget(man_cid)
+        man_l.addWidget(self._ibkr_manual_edit)
+        man_l.addWidget(man_hint)
+        man_l.addStretch()
+        self._ibkr_rows_layout.addWidget(man_w)
+
         s.add(self._ibkr_rows_frame)
 
         # V4.6.51 — populate each row's live allocation (current value + share).
@@ -1314,6 +1342,15 @@ class ToolsTab(QWidget):
                     allocated += float(txt)
                 except ValueError:
                     pass
+        # V4.6.75 (#4) — the MANUAL reserve counts against the 100% pool too.
+        man_edit = getattr(self, "_ibkr_manual_edit", None)
+        if man_edit is not None:
+            mtxt = man_edit.text().strip().rstrip("%")
+            if mtxt:
+                try:
+                    allocated += float(mtxt)
+                except ValueError:
+                    pass
         remaining = 100.0 - allocated
         color = C["green"] if remaining >= 0 else C["red"]
         self._ibkr_remaining_lbl.setText(
@@ -1342,10 +1379,16 @@ class ToolsTab(QWidget):
             # run_on_oracle) written by the Cloud-24/7 section. Overwriting them
             # silently disabled cloud mode → bots fell back to the local gateway
             # and showed "IB Gateway not reachable".
+            # V4.6.75 (#4) — persist the MANUAL reserve % (separate from bots).
+            man_reserve = ""
+            man_edit = getattr(self, "_ibkr_manual_edit", None)
+            if man_edit is not None:
+                man_reserve = man_edit.text().strip().rstrip("%")
             _prev.update({
                 "host":    self._ibkr_host.text().strip() or "127.0.0.1",
                 "port":    self._ibkr_port.text().strip() or "7497",
                 "account": self._ibkr_account.text().strip(),
+                "manual_reserve": man_reserve,
                 "bots": [
                     {
                         "id":         r["id"],
@@ -1372,12 +1415,19 @@ class ToolsTab(QWidget):
             try:
                 from core import ibkr_data, ibkr_lifecycle
                 cash = ibkr_data.available_cash()
-                if cash > 0:
+                # V4.6.75 (#4) — hold back the MANUAL reserve so bot
+                # sub-portfolios are seeded from cash NET of the reserve.
+                try:
+                    _mr = float(man_reserve or 0)
+                except ValueError:
+                    _mr = 0.0
+                cash_for_bots = cash * max(0.0, 1.0 - _mr / 100.0)
+                if cash_for_bots > 0:
                     seeded = ibkr_lifecycle.seed_all(
                         [{"id": r["id"],
                           "allocation": r["alloc_edit"].text()}
                          for r in self._ibkr_bot_rows],
-                        cash)
+                        cash_for_bots)
             except Exception as e:
                 print(f"[ibkr] ledger seed skipped: {e}")
             # V4.6.51 — if the user LOWERED a bot's allocation, ask that bot to

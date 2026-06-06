@@ -80,6 +80,9 @@ def init_marketplace_table() -> None:
             "ALTER TABLE public_bots ADD COLUMN creator_ai TEXT NOT NULL DEFAULT ''",
             "ALTER TABLE public_bots ADD COLUMN runner_ai  TEXT NOT NULL DEFAULT ''",
             "ALTER TABLE public_bots ADD COLUMN broker     TEXT NOT NULL DEFAULT ''",
+            # V4.6.75 (#8) — which universe the bot trades (public theme name
+            # like 'long_term', or '' / '(ai-selected)' for own picks)
+            "ALTER TABLE public_bots ADD COLUMN universe   TEXT NOT NULL DEFAULT ''",
         ):
             try:
                 c.execute(ddl)
@@ -99,7 +102,7 @@ def upload_bot(*, owner_id: int, name: str, description: str,
                philosophy: str = "", price_credits: int = 0,
                visibility: str = "public",
                creator_ai: str = "", runner_ai: str = "",
-               broker: str = "") -> dict:
+               broker: str = "", universe: str = "") -> dict:
     """Persist a new bot in the marketplace. Returns the row dict."""
     if len(file_bytes) > 1_000_000:           # 1 MB cap
         raise ValueError("Bot script too large (max 1 MB).")
@@ -127,13 +130,14 @@ def upload_bot(*, owner_id: int, name: str, description: str,
             """INSERT INTO public_bots
                (owner_id, name, slug, description, tags, size_bytes,
                 sha256, created_at, philosophy, price_credits, visibility,
-                creator_ai, runner_ai, broker)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                creator_ai, runner_ai, broker, universe)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (owner_id, name, slug, description,
              ",".join(t.strip() for t in tags if t.strip()),
              len(file_bytes), sha, now,
              philosophy.strip(), max(0, int(price_credits)), visibility,
-             creator_ai.strip(), runner_ai.strip(), broker.strip()),
+             creator_ai.strip(), runner_ai.strip(), broker.strip(),
+             (universe or "").strip()),
         )
         c.commit()
         return _row(c.execute(

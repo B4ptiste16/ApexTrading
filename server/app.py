@@ -495,6 +495,7 @@ async def upload_public_bot(
     creator_ai:  str = Form(""),     # V4.1.0 — AI used to generate the bot
     runner_ai:   str = Form(""),     # V4.1.0 — AI used to run/score candidates
     broker:      str = Form(""),     # V4.1.0 — compatible broker (alpaca/ibkr/both)
+    universe:    str = Form(""),     # V4.6.75 (#8) — public universe name or ''
     file:        UploadFile = File(...),
     authorization: str | None = Header(default=None),
 ):
@@ -547,6 +548,7 @@ async def upload_public_bot(
             creator_ai=creator_ai,
             runner_ai=runner_ai,
             broker=broker,
+            universe=universe,
         )
     except ValueError as e:
         raise HTTPException(400, str(e))

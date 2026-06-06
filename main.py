@@ -1150,6 +1150,15 @@ class MoreBotsTab(QWidget):
 
         pf = prefill or {}
         blob = Path(path).read_bytes()
+        # V4.6.75 (#8) — read the bot's universe from its META so the
+        # marketplace can badge it (public universe vs own AI picks).
+        bot_universe = ""
+        try:
+            from core.bot_meta import parse_meta
+            bot_universe = (parse_meta(blob.decode("utf-8", "replace"))
+                            or {}).get("universe", "").strip()
+        except Exception:
+            bot_universe = ""
         # V3.3.0 — similarity gate. Run a pre-flight check against
         # every existing published bot. Block ≥85%, warn ≥60%.
         try:
@@ -1260,12 +1269,14 @@ class MoreBotsTab(QWidget):
         class _UpWorker(QThread):
             done = _Sig(bool, str)
 
-            def __init__(self, base, tok, n, d, t, b, ph, pr, cai, rai, brk):
+            def __init__(self, base, tok, n, d, t, b, ph, pr, cai, rai, brk,
+                         uni=""):
                 super().__init__()
                 self.base, self.tok, self.n, self.d, self.t, self.b = \
                     base, tok, n, d, t, b
                 self.ph, self.pr = ph, pr
                 self.cai, self.rai, self.brk = cai, rai, brk
+                self.uni = uni
 
             def run(self):
                 import requests
@@ -1279,7 +1290,8 @@ class MoreBotsTab(QWidget):
                               "price_credits": self.pr,
                               "creator_ai": self.cai,
                               "runner_ai":  self.rai,
-                              "broker":     self.brk},
+                              "broker":     self.brk,
+                              "universe":   self.uni},
                         files={"file": ("bot.py", self.b, "text/x-python")},
                         timeout=20,
                     )
@@ -1299,7 +1311,7 @@ class MoreBotsTab(QWidget):
             tags.strip(), blob,
             philos if philos != "other" else "",
             int(price),
-            creator_ai, runner_ai, broker)
+            creator_ai, runner_ai, broker, bot_universe)
         def _on_pub(ok, msg):
             box = QMessageBox.information if ok else QMessageBox.warning
             box(self, "Publish bot", msg)

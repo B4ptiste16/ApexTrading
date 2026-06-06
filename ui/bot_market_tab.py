@@ -407,6 +407,23 @@ class BotMarketTab(QWidget):
                     f"font-weight:700;padding:3px 7px;"
                     f"border:none;border-radius:4px;")
                 head.addWidget(badge)
+        # V4.6.75 (#8) — universe provenance badge: does this bot trade a
+        # curated PUBLIC universe, or its own AI-picked tickers?
+        uni = (b.get("universe") or "").strip()
+        if uni and uni.lower() not in ("(ai-selected)", "ai-selected",
+                                       "none", "default"):
+            uni_txt, uni_col = f"🌐 {uni.upper()}", C["purple"]
+        else:
+            uni_txt, uni_col = "🎯 OWN PICKS", C["green"]
+        uni_badge = QLabel(uni_txt)
+        uni_badge.setStyleSheet(
+            f"color:{uni_col};font-size:8px;letter-spacing:1px;"
+            f"font-weight:700;padding:3px 7px;border:none;border-radius:4px;")
+        uni_badge.setToolTip(
+            "Trades a curated public universe regenerated weekly on the "
+            "APEX server." if uni_col == C["purple"]
+            else "The bot picks its own tickers (no fixed public universe).")
+        head.addWidget(uni_badge)
         hw = QWidget(); hw.setLayout(head)
         v.addWidget(hw)
 
