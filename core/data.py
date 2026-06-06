@@ -1465,6 +1465,7 @@ def discover_universe_files() -> dict:
     the Universe tab so a new crypto bot appears immediately."""
     found: dict[str, Path] = dict(UNIVERSE_FILES)
     # Custom bots from the per-broker registry
+    known_sides = {s.upper() for s in UNIVERSE_FILES}
     try:
         reg = load_bot_registry()
         for c in reg.get("custom", []):
@@ -1472,11 +1473,15 @@ def discover_universe_files() -> dict:
             if not slug:
                 continue
             side = slug.upper()
+            known_sides.add(side)
             if side not in found:
                 found[side] = universe_path_for(side)
     except Exception:
         pass
-    # Any free-floating *_universe.txt left on disk
+    # Any free-floating *_universe.txt left on disk — but ONLY for sides that
+    # belong to a real built-in or registered bot. V4.6.77: this stops stale
+    # leftover files (e.g. crypto_universe.txt from a deleted crypto bot) from
+    # surfacing a phantom universe card with no bot behind it.
     try:
         for p in ROOT.glob("*_universe.txt"):
             stem = p.stem
@@ -1486,7 +1491,7 @@ def discover_universe_files() -> dict:
             stem_map = {"longbot": "LONG", "shortbot": "SHORT",
                         "daybot":  "DAY"}
             side = stem_map.get(stem, stem.upper())
-            if side not in found:
+            if side not in found and side in known_sides:
                 found[side] = p
     except Exception:
         pass

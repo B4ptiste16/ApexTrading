@@ -529,20 +529,36 @@ class MoreBotsTab(QWidget):
         broker   = D.load_settings().get("broker_mode", "alpaca")
 
         def _broker_ok(side: str) -> bool:
-            """Return True if this bot is compatible with the current broker."""
+            """Return True if this bot is compatible with the current broker.
+            V4.6.77 — robust: prefer the registry `brokers` list; for older
+            entries that only have the buggy singular `broker` (which always
+            defaulted to 'alpaca'), RE-PARSE the bot file's META.brokers so a
+            bot the user marked IBKR-only doesn't leak into the Alpaca tab
+            (and vice-versa)."""
             info = BUILTIN_BOTS.get(side)
             if info:
                 return broker in info.get("brokers", ["alpaca"])
-            # Custom bots: V4.6.29 stores a singular 'broker' string in
-            # the registry entry; older entries may have a 'brokers'
-            # list. Normalize both. Missing → compatible with all.
             for c in custom:
-                if c.get("id") == side:
-                    if "brokers" in c:
-                        return broker in c.get("brokers", [broker])
-                    if "broker" in c:
-                        return c.get("broker", broker) == broker
-                    return True  # untagged custom bot — show everywhere
+                if c.get("id") != side:
+                    continue
+                brokers = c.get("brokers")
+                if not brokers:
+                    # Re-read the actual bot file's META.brokers (authoritative).
+                    script = c.get("script", "")
+                    if script:
+                        try:
+                            from core.bot_meta import parse_meta
+                            src = open(script, encoding="utf-8").read()
+                            brokers = (parse_meta(src) or {}).get("brokers")
+                        except Exception:
+                            brokers = None
+                if not brokers:
+                    b = str(c.get("broker", "")).strip().lower()
+                    brokers = [b] if b else []
+                brokers = [str(x).strip().lower() for x in (brokers or [])]
+                if not brokers:
+                    return True  # genuinely untagged → show everywhere
+                return any(broker == x or x == "both" for x in brokers)
             return True
 
         # ACTIVE section — only broker-compatible, non-silenced bots
@@ -563,7 +579,11 @@ class MoreBotsTab(QWidget):
             k for k, v in BUILTIN_BOTS.items()
             if broker in v.get("brokers", ["alpaca"])
         ]
-        all_known = compatible_builtins + [c["id"] for c in custom]
+        # V4.6.77 — custom bots must ALSO pass the broker filter here; the
+        # old code added every custom bot to AVAILABLE regardless of broker,
+        # so an IBKR-only bot showed up under Alpaca too (and vice-versa).
+        all_known = compatible_builtins + [
+            c["id"] for c in custom if _broker_ok(c["id"])]
         available = [b for b in all_known if b not in active]
         # V4.6.7 — wrap every placeholder-label access in a guard that
         # transparently re-creates the QLabel if _rebuild_grid wiped

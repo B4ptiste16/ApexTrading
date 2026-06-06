@@ -1523,17 +1523,33 @@ class MakeBotTab(QWidget):
             # ALWAYS defaulted to 'alpaca' — which wrongly hid dual-broker
             # bots from the IBKR tab. Store both the list and a derived
             # singular string for backward-compatible consumers.
-            bot_brokers = ["alpaca", "ibkr"]
+            # V4.6.77 — the user's broker CHECKBOXES are authoritative (the AI
+            # sometimes stamps both brokers in META even when the user picked
+            # only one). Fall back to META.brokers only if the checkboxes
+            # aren't available (e.g. pasted code path).
+            bot_brokers = []
             try:
-                from core.bot_meta import parse_meta
-                m = parse_meta(code) or {}
-                bl = m.get("brokers")
-                if isinstance(bl, list) and bl:
-                    bot_brokers = [str(x).strip().lower() for x in bl if str(x).strip()]
-                elif isinstance(bl, str) and bl.strip():
-                    bot_brokers = [bl.strip().lower()]
+                if getattr(self, "_broker_alpaca_check", None) and \
+                        self._broker_alpaca_check.isChecked():
+                    bot_brokers.append("alpaca")
+                if getattr(self, "_broker_ibkr_check", None) and \
+                        self._broker_ibkr_check.isChecked():
+                    bot_brokers.append("ibkr")
             except Exception:
-                pass
+                bot_brokers = []
+            if not bot_brokers:
+                try:
+                    from core.bot_meta import parse_meta
+                    m = parse_meta(code) or {}
+                    bl = m.get("brokers")
+                    if isinstance(bl, list) and bl:
+                        bot_brokers = [str(x).strip().lower() for x in bl if str(x).strip()]
+                    elif isinstance(bl, str) and bl.strip():
+                        bot_brokers = [bl.strip().lower()]
+                except Exception:
+                    pass
+            if not bot_brokers:
+                bot_brokers = ["alpaca", "ibkr"]
             bot_broker = ("alpaca,ibkr" if len(bot_brokers) > 1
                           else (bot_brokers[0] if bot_brokers else "alpaca"))
             existing = [c["id"] for c in reg.get("custom", [])]
