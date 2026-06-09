@@ -540,28 +540,33 @@ class OverviewTab(QWidget):
         # Bot started today AFTER market open → DAY P/L = since first
         # tick today. Bot started yesterday → DAY P/L = since last tick
         # before today's UTC midnight.
-        from datetime import datetime as _dt, timezone as _tz
+        # V4.6.80 — DAY P/L is the change since the LAST MARKET CLOSE (16:00
+        # ET of the most recent trading day), the way every broker shows daily
+        # variation — NOT since UTC midnight (which mislabelled IBKR's daily
+        # move). Baseline = the bot's equity as of that close (last snapshot
+        # at/before it).
+        from datetime import datetime as _dt, timezone as _tz, timedelta as _td
         now_utc = _dt.now(_tz.utc)
-        midnight = now_utc.replace(hour=0, minute=0, second=0, microsecond=0)
+        _off = -4 if 3 <= now_utc.month <= 11 else -5     # EDT/EST approx
+        _et = now_utc + _td(hours=_off)
+        _close_et = _et.replace(hour=16, minute=0, second=0, microsecond=0)
+        if _et < _close_et:                                # before today's close
+            _close_et -= _td(days=1)
+        while _close_et.weekday() >= 5:                    # skip Sat/Sun
+            _close_et -= _td(days=1)
+        last_close_utc = (_close_et - _td(hours=_off)).replace(tzinfo=_tz.utc)
         today_baseline_eq = None
-        for s in bot_hist:
+        for s in reversed(bot_hist):
             try:
                 ts = _dt.fromisoformat(s["ts"])
-                if ts >= midnight:
+                if ts <= last_close_utc:
                     today_baseline_eq = float(s.get("equity", eq))
                     break
             except Exception:
                 continue
         if today_baseline_eq is None and bot_hist:
-            # No tick yet today — use the most recent pre-midnight snapshot
-            for s in reversed(bot_hist):
-                try:
-                    ts = _dt.fromisoformat(s["ts"])
-                    if ts < midnight:
-                        today_baseline_eq = float(s.get("equity", eq))
-                        break
-                except Exception:
-                    continue
+            # Bot younger than the last close — anchor to its earliest snapshot
+            today_baseline_eq = float(bot_hist[0].get("equity", eq))
         if today_baseline_eq is None:
             # Brand-new bot, no snapshots yet — 0 P/L (just appended above)
             today_baseline_eq = eq
