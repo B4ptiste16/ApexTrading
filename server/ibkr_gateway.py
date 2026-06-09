@@ -299,12 +299,16 @@ def active_port(user_id: int, mode: str = "paper") -> int:
     try:
         if p.exists():
             v = int(p.read_text(encoding="utf-8").strip() or 0)
-            if v > 0:
+            # V4.6.82 — only trust the saved port if it's ACTUALLY listening.
+            # A stale api_port (e.g. saved 4002 while the gateway relocated to
+            # the override port 4102) otherwise sends the bot to a dead port.
+            if v > 0 and port_is_up(v):
                 return v
     except (OSError, ValueError):
         pass
     for cand in _candidate_ports(user_id, mode):
         if port_is_up(cand):
+            _save_active_port(user_id, cand)   # self-heal the stale file
             return cand
     return user_port(user_id)
 
@@ -412,9 +416,16 @@ def ensure_gateway(user_id: int, username: str, password: str,
             if port_is_up(cand):
                 _save_active_port(user_id, cand)
                 return cand
-        if proc.poll() is not None:
+        # V4.6.82 — ibcstart.sh is a WRAPPER: it commonly exits cleanly (code 0)
+        # right after launching the detached Java gateway, which then needs
+        # ~20-40 s to log in and open its API port. Treating a code-0 exit as
+        # failure aborted starts even though the gateway was coming up fine.
+        # Only a NON-zero exit is a real crash; on a clean exit we keep polling
+        # the ports until they open or the deadline passes.
+        rc = proc.poll()
+        if rc is not None and rc not in (0, None):
             raise RuntimeError(
-                f"IB Gateway exited early (code {proc.returncode}) — see "
+                f"IB Gateway exited early (code {rc}) — see "
                 f"{_log_file(user_id)}")
         time.sleep(2)
     raise RuntimeError(
