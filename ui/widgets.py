@@ -404,12 +404,13 @@ class BotProcessWidget(QWidget):
         try:
             from core import data as _D
             if self._broker_mode() == "ibkr":
-                if not self._ibkr_cloud_enabled():
-                    return False
-                # V4.6.70 — cloud IBKR LIVE is now allowed. IBKR still requires
-                # Mobile 2FA on a live login, but the user approves it on their
-                # phone when the server gateway (re)connects; the gateway is
-                # configured to WAIT for that approval rather than exit.
+                # V4.6.82 — IBKR runs on the APEX cloud (a per-user server-side
+                # gateway). When the user has enabled 'Run IBKR bots on Oracle'
+                # + saved their login, EVERY IBKR bot routes to the cloud — no
+                # local TWS/Gateway needed. (Previously this also required a
+                # per-bot cloud flag, so a freshly-added IBKR bot fell through to
+                # the local path and failed with 'IB Gateway not reachable'.)
+                return self._ibkr_cloud_enabled()
             return _D.is_cloud_bot(self.side)
         except Exception:
             return False
@@ -502,10 +503,15 @@ class BotProcessWidget(QWidget):
             except Exception as _e:
                 _QMB.warning(
                     self.window(),
-                    "IB Gateway not reachable",
-                    f"Couldn't reach {_host}:{_port} ({_e}). Start IB Gateway "
-                    f"or TWS and enable API access, then try again. "
-                    f"Settings live in <b>Tools → IBKR</b>.")
+                    "Run this bot on the cloud",
+                    f"This IBKR bot isn't set to run on the APEX cloud, and no "
+                    f"local IB Gateway is reachable at {_host}:{_port}.<br><br>"
+                    f"<b>Recommended:</b> open <b>Tools → IBKR</b>, tick "
+                    f"<b>“Run IBKR bots on Oracle”</b> and make sure your IBKR "
+                    f"login is saved — then APEX runs it on the server (no local "
+                    f"gateway needed).<br><br>"
+                    f"(Only start a local IB Gateway / TWS if you specifically "
+                    f"want to run on this computer.)")
                 return
 
         # V4.6.35 — verify META.requirements are importable in the frozen
@@ -823,10 +829,12 @@ class BotProcessWidget(QWidget):
     # ── V7.1.13: cloud-execution path ──────────────────────────────
 
     def _cloud_call(self, method: str, path: str,
-                    on_done, payload: dict | None = None):
+                    on_done, payload: dict | None = None,
+                    timeout: int = 15):
         """Spawn a QThread that calls the APEX server with the
         signed-in user's bearer token. on_done(ok: bool, data: dict)
-        runs on the main thread when finished."""
+        runs on the main thread when finished. `timeout` is the read
+        timeout (longer for bot starts, which boot the IBKR gateway)."""
         from PyQt6.QtCore import QThread, pyqtSignal as _Sig
         from ui.login import load_auth, load_server_url
         token = (load_auth() or {}).get("token")
@@ -846,16 +854,16 @@ class BotProcessWidget(QWidget):
 
         class _W(QThread):
             done = _Sig(bool, dict)
-            def __init__(self, m, u, t, p):
+            def __init__(self, m, u, t, p, to):
                 super().__init__()
-                self.m, self.u, self.t, self.p = m, u, t, p
+                self.m, self.u, self.t, self.p, self.to = m, u, t, p, to
             def run(self):
                 import requests
                 try:
                     fn = {"GET": requests.get, "POST": requests.post,
                           "PUT": requests.put}.get(self.m, requests.get)
                     r = fn(self.u, headers={"Authorization": f"Bearer {self.t}"},
-                           json=self.p, timeout=15)
+                           json=self.p, timeout=self.to)
                     try:
                         body = r.json()
                     except Exception:
@@ -864,7 +872,7 @@ class BotProcessWidget(QWidget):
                 except Exception as e:
                     self.done.emit(False, {"detail": str(e)})
 
-        worker = _W(method, url, token, payload)
+        worker = _W(method, url, token, payload, timeout)
         worker.done.connect(on_done)
         worker.start()
         # Keep a reference so the worker isn't garbage-collected
@@ -922,7 +930,12 @@ class BotProcessWidget(QWidget):
                 detail = body.get("detail") or body.get("text") or "start failed"
                 self._log(f"Cloud start failed: {detail}", C["red"])
                 self._set_running(False)
-        self._cloud_call("POST", f"/bots/{self.side}/start", _on)
+        # V4.6.82 — IBKR cold-starts boot the server-side gateway (login + API
+        # init takes up to ~90s), so give the start call a long read timeout
+        # instead of the default 15s (which surfaced as 'Read timed out').
+        self._log("☁  (IBKR cold start can take up to ~90s while the gateway "
+                  "logs in)", C["muted"])
+        self._cloud_call("POST", f"/bots/{self.side}/start", _on, timeout=150)
 
     def _cloud_upload_then_start(self):
         """Custom-bot cloud start: upload the local .py (decrypt if
@@ -1033,10 +1046,12 @@ class BotProcessWidget(QWidget):
                                 "content-type","").startswith("application/json")
                             else up.text)
                         return
-                    # 2) Start
+                    # 2) Start. V4.6.82 — long read timeout: an IBKR cold
+                    # start boots the server-side gateway (login + API init can
+                    # take up to ~90s). 15s surfaced as 'Read timed out'.
                     st = requests.post(
                         f"{base}/bots/{slug.upper()}/start",
-                        headers=hdr, timeout=15)
+                        headers=hdr, timeout=150)
                     if not st.ok:
                         self_.done.emit(False,
                             st.json().get("detail", st.text) if st.headers.get(
