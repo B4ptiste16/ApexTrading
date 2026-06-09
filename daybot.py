@@ -675,6 +675,61 @@ def force_close_stale_brackets(state: dict) -> dict:
     return state
 
 
+def flatten_all_for_eod(state: dict) -> dict:
+    """V4.6.83 — END-OF-DAY FLATTEN. The DAY bot is intraday by design and must
+    NOT carry positions overnight: once it stops at the close (asset-aware
+    lifecycle) there's no run cycle to enforce stops, so a position could drift
+    unmanaged until the next open (the bug behind 'didn't sell past stop-loss').
+    Called in the closing window while the market is STILL OPEN, so the market
+    sells fill immediately. Cancels resting exit legs first, then flattens every
+    open position and clears the bracket state. No-op when already flat."""
+    try:
+        positions = trading_client.get_all_positions()
+    except Exception as e:
+        print(f"  [eod-flatten] could not read positions: {e}", flush=True)
+        return state
+    open_pos = [p for p in positions
+                if abs(float(getattr(p, "qty", 0) or 0)) > 0]
+    if not open_pos:
+        return state
+
+    # Cancel every resting order first so the flatten isn't blocked by the
+    # protective bracket legs sitting in the book.
+    try:
+        live = trading_client.get_orders(
+            filter=GetOrdersRequest(status=QueryOrderStatus.OPEN,
+                                    limit=100, nested=False)) or []
+        for o in live:
+            try:
+                trading_client.cancel_order_by_id(str(o.id))
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    for p in open_pos:
+        sym = str(p.symbol)
+        q   = float(p.qty)
+        qty = abs(q)
+        side = OrderSide.SELL if q > 0 else OrderSide.BUY
+        try:
+            trading_client.submit_order(MarketOrderRequest(
+                symbol=sym,
+                qty=str(int(qty)) if qty == int(qty) else str(qty),
+                side=side, time_in_force=TimeInForce.DAY))
+            print(f"  [eod-flatten] {sym}: market {side.value} qty={qty:g} "
+                  f"— day bot closes everything before the bell", flush=True)
+        except Exception as e:
+            print(f"  [eod-flatten failed] {sym}: {e}", flush=True)
+
+    state["open_brackets"] = {}
+    try:
+        save_state(state)
+    except Exception:
+        pass
+    return state
+
+
 # =========================================================
 # LAYER 1  -  INDICATORS  (identical to longbot_v2)
 # =========================================================
@@ -1484,6 +1539,17 @@ def main():
             if clock.is_open:
                 can_trade, reason = is_good_trading_time()
                 ts = datetime.now().strftime("%H:%M:%S")
+
+                # V4.6.83 — flatten everything in the closing window (still
+                # open, so market sells fill now) so the day bot never carries
+                # a position overnight where no run cycle can enforce its stop.
+                try:
+                    _mins_to_close = (clock.next_close
+                                      - clock.timestamp).total_seconds() / 60
+                    if 0 < _mins_to_close <= CLOSING_SKIP_MINUTES:
+                        flatten_all_for_eod(load_state())
+                except Exception as _fe:
+                    print(f"[eod-flatten] {_fe}", flush=True)
 
                 if can_trade:
                     print(f"[{ts}] Market OPEN  -  running")
