@@ -145,10 +145,18 @@ _EXTRA_BASE = [
     "HOOD", "SOFI", "AFRM", "DKNG", "CELH", "ELF", "SMCI", "VST", "CEG",
 ]
 
+# Leveraged / inverse ETFs — inherently very high risk/reward. Priced with
+# the base pool so the leveraged_etfs theme can rank them by volatility.
+_LEVERAGED = [
+    "TQQQ", "SQQQ", "SOXL", "SOXS", "UPRO", "SPXU", "TNA", "TZA", "LABU",
+    "LABD", "FAS", "FAZ", "UVXY", "NUGT", "DUST", "YINN", "TMF", "TMV",
+    "BOIL", "GUSH",
+]
+
 
 def _all_base_stocks() -> list:
     seen = []
-    pool = list(_EXTRA_BASE)
+    pool = list(_EXTRA_BASE) + list(_LEVERAGED)
     for tickers, _blurb in _SECTORS.values():
         # ETF-only sectors still get priced; that's fine for the factor pool.
         pool.extend(tickers)
@@ -321,6 +329,21 @@ def generate_all() -> dict:
                       "DKNG", "RBLX", "CVNA", "MARA", "RIOT", "COIN", "AFRM",
                       "TSLA", "NIO", "SNAP", "U", "RDDT") if t in m]),
             "Retail-favourite high-beta movers.")
+        # V4.6.81 — aggressive / high-risk-high-reward family.
+        counts["high_risk_reward"] = _emit(
+            "high_risk_reward",
+            _rank(m, lambda v: v["vol"] * (1.0 + max(v["mom"], 0.0) / 100.0),
+                  r_momvol),
+            "High volatility WITH upside momentum — high risk, high reward.")
+        counts["moonshots"] = _emit(
+            "moonshots",
+            _rank(m, lambda v: (v["vol"] if v["mom"] > 15 else -1), r_momvol),
+            "Explosive movers — strong momentum + high volatility.")
+        counts["leveraged_etfs"] = _emit(
+            "leveraged_etfs",
+            _rank(m, lambda v: v["vol"], r_momvol,
+                  members=[t for t in _LEVERAGED if t in m], n=20),
+            "Leveraged & inverse ETFs — very high risk / high reward.")
 
         # ── Sector / industry membership themes ──
         for theme, (members, blurb) in _SECTORS.items():

@@ -449,6 +449,29 @@ def _custom_bot_path(user_id: int, side: str) -> Optional[Path]:
     return cand if cand.exists() else None
 
 
+def bot_asset_type(user_id: int, side: str) -> str:
+    """V4.6.81 — asset class of a bot ('stocks' / 'crypto' / 'etfs' / …).
+    Built-ins (LONG/SHORT/DAY) are equities. Custom bots read META.asset_type
+    from their uploaded .py. Used by the lifecycle scheduler to decide whether
+    a bot follows market hours (equities: stop at close) or runs continuously
+    (crypto: 24/7). Empty string when unknown (treated as equity)."""
+    s = side.upper()
+    if s in ("LONG", "SHORT", "DAY"):
+        return "stocks"
+    try:
+        p = _custom_bot_path(user_id, side)
+        if p and p.exists():
+            try:
+                from . import bot_meta
+            except ImportError:
+                import bot_meta  # type: ignore
+            meta = bot_meta.parse_meta(p.read_text(encoding="utf-8")) or {}
+            return str(meta.get("asset_type", "") or "").lower()
+    except Exception:
+        pass
+    return ""
+
+
 def private_bots_dir(user_id: int) -> Path:
     """Public accessor — used by the upload endpoint."""
     p = _user_data_dir(user_id) / "private_bots"

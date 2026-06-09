@@ -228,17 +228,36 @@ def _watchdog_sweep() -> None:
         from . import bot_runner as br
     except ImportError:
         import bot_runner as br  # type: ignore
+
+    # V4.6.81 — ASSET-AWARE LIFECYCLE. Each desired bot follows its market:
+    #   • crypto bots → run continuously (the crypto market is 24/7)
+    #   • equity bots → run only during US market hours; the watchdog STOPS
+    #                   them at the close and RESTARTS them at the next open.
+    # Stops use user_initiated=False so the bot STAYS in the desired registry
+    # and comes back automatically next session. Market state is fetched once
+    # per sweep; if it's unknown (clock unreachable) we never stop a bot.
+    is_open = _market_is_open()
     for uid, side, broker in br.list_all_desired():
         try:
-            if br.is_running(uid, side, broker):
-                continue
-            res = br.start_bot(uid, side, broker)
-            if res.get("ok") and not res.get("already_running"):
-                print(f"[watchdog] restarted user={uid} {side}/{broker} "
-                      f"pid={res.get('pid')}", flush=True)
-            elif not res.get("ok"):
-                print(f"[watchdog] user={uid} {side}/{broker} restart failed: "
-                      f"{res.get('detail')}", flush=True)
+            try:
+                crypto = br.bot_asset_type(uid, side) == "crypto"
+            except Exception:
+                crypto = False
+            should_run = crypto or (is_open is True)
+            running = br.is_running(uid, side, broker)
+            if should_run and not running:
+                res = br.start_bot(uid, side, broker)
+                if res.get("ok") and not res.get("already_running"):
+                    print(f"[watchdog] started user={uid} {side}/{broker} "
+                          f"pid={res.get('pid')}", flush=True)
+                elif not res.get("ok"):
+                    print(f"[watchdog] user={uid} {side}/{broker} start "
+                          f"failed: {res.get('detail')}", flush=True)
+            elif (not should_run) and running and (is_open is False):
+                # Equity bot + market confirmed CLOSED → stop until next open.
+                br.stop_bot(uid, side, broker, user_initiated=False)
+                print(f"[watchdog] stopped user={uid} {side}/{broker} at "
+                      f"market close (will restart at open)", flush=True)
         except Exception as e:
             print(f"[watchdog] user={uid} {side}/{broker} exception: {e}",
                   flush=True)
