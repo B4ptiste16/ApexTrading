@@ -300,6 +300,44 @@ def _save_registry(reg: dict):
         json.dump(s, f, indent=2)
 
 
+def bot_broker_compatible(side: str, broker: str, custom_list=None) -> bool:
+    """V4.6.79 — single source of truth for "can this bot run on `broker`?".
+    Used by BOTH the MORE BOTS list and the bot-TAB creation so a bot is
+    shown/runnable in exactly the brokers it supports.
+
+    Built-ins use BUILTIN_BOTS.brokers. Custom bots prefer the registry
+    `brokers` list; when that's missing (older entries stored a buggy
+    singular `broker='alpaca'`), the bot file's META.brokers is RE-PARSED so
+    the user's real broker choice wins. A genuinely untagged bot shows
+    everywhere."""
+    info = BUILTIN_BOTS.get(side)
+    if info:
+        return broker in info.get("brokers", ["alpaca"])
+    if custom_list is None:
+        custom_list = _load_registry().get("custom", [])
+    for c in custom_list:
+        if not isinstance(c, dict) or c.get("id") != side:
+            continue
+        brokers = c.get("brokers")
+        if not brokers:
+            script = c.get("script", "")
+            if script:
+                try:
+                    from core.bot_meta import parse_meta
+                    src = open(script, encoding="utf-8").read()
+                    brokers = (parse_meta(src) or {}).get("brokers")
+                except Exception:
+                    brokers = None
+        if not brokers:
+            b = str(c.get("broker", "")).strip().lower()
+            brokers = [b] if b else []
+        brokers = [str(x).strip().lower() for x in (brokers or [])]
+        if not brokers:
+            return True
+        return any(broker == x or x == "both" for x in brokers)
+    return True
+
+
 # ─────────────────────────────────────────
 # MORE BOTS TAB
 # ─────────────────────────────────────────
@@ -529,37 +567,8 @@ class MoreBotsTab(QWidget):
         broker   = D.load_settings().get("broker_mode", "alpaca")
 
         def _broker_ok(side: str) -> bool:
-            """Return True if this bot is compatible with the current broker.
-            V4.6.77 — robust: prefer the registry `brokers` list; for older
-            entries that only have the buggy singular `broker` (which always
-            defaulted to 'alpaca'), RE-PARSE the bot file's META.brokers so a
-            bot the user marked IBKR-only doesn't leak into the Alpaca tab
-            (and vice-versa)."""
-            info = BUILTIN_BOTS.get(side)
-            if info:
-                return broker in info.get("brokers", ["alpaca"])
-            for c in custom:
-                if c.get("id") != side:
-                    continue
-                brokers = c.get("brokers")
-                if not brokers:
-                    # Re-read the actual bot file's META.brokers (authoritative).
-                    script = c.get("script", "")
-                    if script:
-                        try:
-                            from core.bot_meta import parse_meta
-                            src = open(script, encoding="utf-8").read()
-                            brokers = (parse_meta(src) or {}).get("brokers")
-                        except Exception:
-                            brokers = None
-                if not brokers:
-                    b = str(c.get("broker", "")).strip().lower()
-                    brokers = [b] if b else []
-                brokers = [str(x).strip().lower() for x in (brokers or [])]
-                if not brokers:
-                    return True  # genuinely untagged → show everywhere
-                return any(broker == x or x == "both" for x in brokers)
-            return True
+            """V4.6.79 — delegate to the shared, robust compatibility check."""
+            return bot_broker_compatible(side, broker, custom)
 
         # ACTIVE section — only broker-compatible, non-silenced bots
         self._rebuild_grid(
@@ -895,6 +904,42 @@ class MoreBotsTab(QWidget):
         if confirm != _QMB.StandardButton.Yes:
             print(f"[delete-bot] user cancelled", flush=True)
             return
+
+        # ── Step 0a: UNPUBLISH from the bot market (V4.6.79) — deleting a
+        # personally-made bot removes it from the marketplace too. Best-effort:
+        # owner-only DELETE on the server (matches the local slug + any
+        # collision-suffixed copies). Never blocks the local delete.
+        try:
+            from ui.login import load_auth, load_server_url
+            import requests as _rq
+            _tok = (load_auth() or {}).get("token")
+            if _tok:
+                _base = load_server_url()
+                _hdr = {"Authorization": f"Bearer {_tok}"}
+                _targets = {side, side.lower()}
+                try:
+                    r = _rq.get(f"{_base}/bots/v2", params={"view": "mine"},
+                                headers=_hdr, timeout=6)
+                    if r.ok:
+                        body = r.json()
+                        mine = body.get("bots", body) if isinstance(body, dict) else body
+                        for pb in (mine or []):
+                            sl = str(pb.get("slug", ""))
+                            if sl == side or sl.startswith(side.lower() + "-"):
+                                _targets.add(sl)
+                except Exception:
+                    pass
+                for sl in _targets:
+                    try:
+                        dr = _rq.delete(f"{_base}/bots/{sl}", headers=_hdr,
+                                        timeout=6)
+                        if dr.ok:
+                            print(f"[delete-bot] unpublished '{sl}' from market",
+                                  flush=True)
+                    except Exception:
+                        pass
+        except Exception as _e:
+            print(f"[delete-bot] market unpublish skipped: {_e}", flush=True)
 
         # ── Step 0: free any IBKR allocation — sell the bot's sub-portfolio
         # and drop it from the Tools allocation table so deleted bots never
@@ -2234,14 +2279,30 @@ class ApexWindow(QMainWindow):
         if hasattr(self, "user_chip_btn"):
             self.user_chip_btn.setText(f"{display}  v")
         self.statusBar().showMessage(f"Switched to {display}")
-        # Refresh account-scoped tabs against the new user
+        # V4.6.79 — a real account switch re-fetches EVERY account-scoped view
+        # with the new token (these tabs read the token fresh per request, so
+        # refreshing them is enough). Previously only friends + account were
+        # refreshed, so the marketplace ("my bots"), credits and admin views
+        # kept showing the PREVIOUS account — making the switch look cosmetic.
+        for attr, how in (("friends_tab", "refresh"),
+                          ("account_tab", "refresh"),
+                          ("admin_tab", "refresh"),
+                          ("more_bots_tab", "refresh"),
+                          ("bot_market_tab", "_refresh_current_view"),
+                          ("tools_tab", "refresh")):
+            tab = getattr(self, attr, None)
+            fn = getattr(tab, how, None) if tab is not None else None
+            if callable(fn):
+                try:
+                    fn()
+                except Exception as e:
+                    print(f"[switch] {attr}.{how}: {e}")
+        # Refresh the user chip's credit balance / identity if shown.
         try:
-            if hasattr(self, "friends_tab"):
-                self.friends_tab.refresh()
-            if hasattr(self, "account_tab"):
-                self.account_tab.refresh()
-        except Exception as e:
-            print(f"[switch] refresh: {e}")
+            if hasattr(self, "_refresh_user_chip"):
+                self._refresh_user_chip()
+        except Exception:
+            pass
         QTimer.singleShot(500, self._refresh_all)
         QTimer.singleShot(2500, self._resume_cloud_bots)
 
@@ -2343,22 +2404,14 @@ class ApexWindow(QMainWindow):
         but no tab is created for them."""
         reg = _load_registry()
         broker = D.load_settings().get("broker_mode", "alpaca")
-        custom = {c.get("id"): c for c in reg.get("custom", [])
-                  if isinstance(c, dict)}
+        custom = reg.get("custom", [])
         for side in reg["active"]:
-            info = BUILTIN_BOTS.get(side)
-            if info and broker not in info.get("brokers", ["alpaca"]):
-                continue  # Alpaca-only bot — don't create a tab on IBKR / other brokers
-            # V4.6.29 — custom bots: skip if their declared broker
-            # doesn't match the current broker mode.
-            if not info:
-                c = custom.get(side, {})
-                cb = c.get("broker")
-                cbs = c.get("brokers")
-                if cbs is not None and broker not in cbs:
-                    continue
-                if cb is not None and cb != broker:
-                    continue
+            # V4.6.79 — use the shared broker-compatibility check (re-parses
+            # META.brokers for legacy custom entries) so a bot the user marked
+            # for one broker gets a runnable TAB only on that broker — and is
+            # never silently tab-less in the broker it DOES support.
+            if not bot_broker_compatible(side, broker, custom):
+                continue
             self._add_bot_tab(side, silenced=side in reg["silenced"])
 
     def _add_bot_tab(self, side: str, silenced: bool = False):

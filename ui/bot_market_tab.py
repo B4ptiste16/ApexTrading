@@ -262,6 +262,15 @@ class BotMarketTab(QWidget):
             f"font-weight:700;")
         return l
 
+    def _my_uid(self):
+        """Current signed-in user id (read fresh so it follows account
+        switches). None if not signed in."""
+        try:
+            from ui.login import load_auth
+            return ((load_auth() or {}).get("user") or {}).get("id")
+        except Exception:
+            return None
+
     def _pill_css(self) -> str:
         return f"""
             QPushButton {{
@@ -361,8 +370,13 @@ class BotMarketTab(QWidget):
         self._status.setStyleSheet(
             f"color:{C['muted']};font-size:11px;padding:8px 0;")
         # Render in a 2-column grid
+        my_uid = self._my_uid()
         for i, b in enumerate(bots):
-            card = self._make_card(b, owned=(self._current_view == "mine"))
+            # V4.6.79 — a bot you UPLOADED is "owned" no matter which view it
+            # appears in, so you never see an Install button for your own bot.
+            owned = (self._current_view == "mine") or (
+                my_uid is not None and b.get("owner_id") == my_uid)
+            card = self._make_card(b, owned=owned)
             row = i // 2
             col = i % 2
             self._results_layout.addWidget(card, row, col)

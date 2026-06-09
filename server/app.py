@@ -572,6 +572,19 @@ async def upload_public_bot(
     return row
 
 
+@app.delete("/bots/{slug}")
+def api_delete_own_bot(slug: str,
+                       authorization: str | None = Header(default=None)):
+    """V4.6.79 — owner unpublishes their OWN public bot. Used when the user
+    deletes a personally-made bot in the desktop app, so it disappears from
+    the market too. Only the owner can delete; admins use /admin/.../remove."""
+    user = _current_user(authorization)
+    ok = marketplace.delete_bot(slug=slug, owner_id=user["id"])
+    if not ok:
+        raise HTTPException(404, "No published bot by that slug that you own.")
+    return {"ok": True, "deleted": slug}
+
+
 @app.post("/bots/check-similarity")
 async def check_similarity(
     file: UploadFile = File(...),
