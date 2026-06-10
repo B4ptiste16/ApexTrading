@@ -104,8 +104,12 @@ class OverviewTab(QWidget):
         # grid (max 3 columns) so users with 4+ bots see them all.
         self._blocks_row = QGridLayout()
         self._blocks_row.setSpacing(10)
-        for col in range(3):
-            self._blocks_row.setColumnStretch(col, 1)
+        # V4.6.92 — only TWO stretch columns. The old code stretched 3 columns
+        # but blocks are laid out 2-per-row, so the always-empty 3rd column ate
+        # a third of the width and shoved every card to the left.
+        self._blocks_row.setColumnStretch(0, 1)
+        self._blocks_row.setColumnStretch(1, 1)
+        self._blocks_row.setColumnStretch(2, 0)
         self.blocks = {}
         self._last_metrics: dict[str, dict] = {}
         self._blocks_container = QWidget()
@@ -277,6 +281,7 @@ class OverviewTab(QWidget):
         # and stacks additional bots underneath.
         self._blocks_row.setColumnStretch(0, 1)
         self._blocks_row.setColumnStretch(1, 1)
+        self._blocks_row.setColumnStretch(2, 0)  # V4.6.92 — kill phantom 3rd col
         for idx, meta in enumerate(bots):
             block = self._account_block(meta["side"],
                                         label_text=meta["label"],
@@ -1092,9 +1097,9 @@ class ToolsTab(QWidget):
 
         # V4.6.51 — live current allocation (value share that grows/shrinks
         # with the bot's performance), filled in by _refresh_ibkr_live_alloc().
-        live_lbl = QLabel("")
-        live_lbl.setStyleSheet(f"color:{C['muted']};font-size:10px;")
-        live_lbl.setFixedWidth(150)
+        live_lbl = QLabel("live: …")
+        live_lbl.setStyleSheet(f"color:{C['muted']};font-size:11px;")
+        live_lbl.setFixedWidth(190)
 
         # Replace button — opens picker to swap this slot to another bot
         repl_btn = QPushButton("Replace")
@@ -1547,7 +1552,15 @@ class ToolsTab(QWidget):
         except Exception:
             pass
 
-        def _apply(cloud_ledgers):
+        def _apply(cloud_ledgers, seeded=None):
+            # V4.6.92 — precedence: cloud ledger (exact sub-portfolio) > cached
+            # account value (seeded) > local ledger. The seeded values come from
+            # D.get_account(side) — the SAME warm cache the Overview cards read —
+            # so the live share shows even when the /ibkr/ledgers fetch is slow
+            # or times out on a degraded network.
+            for sid, v in (seeded or {}).items():
+                if v > 0:
+                    values[sid] = v
             for L in (cloud_ledgers or []):
                 v = float(L.get("value", 0) or 0)
                 if v > 0:
@@ -1559,10 +1572,11 @@ class ToolsTab(QWidget):
                     continue
                 v = values.get(str(r["id"]).upper(), 0.0)
                 if v > 0 and total > 0:
-                    lbl.setText(f"now ${v:,.0f} · {v / total * 100:.1f}%")
-                    lbl.setStyleSheet(f"color:{C['green']};font-size:10px;")
+                    lbl.setText(f"live: {v / total * 100:.1f}%  ·  ${v:,.0f}")
+                    lbl.setStyleSheet(f"color:{C['green']};font-size:11px;")
                 else:
-                    lbl.setText("")
+                    lbl.setText("live: …")
+                    lbl.setStyleSheet(f"color:{C['muted']};font-size:11px;")
             # V4.6.90 — surface the LIVE allocated dollar total (sum of every
             # bot's current sub-portfolio value) so the allocated amount visibly
             # tracks growth, alongside the target-% remaining indicator.
@@ -1583,7 +1597,20 @@ class ToolsTab(QWidget):
                 _apply([])
                 return
 
+            row_ids = [str(r["id"]) for r in getattr(self, "_ibkr_bot_rows", [])]
+
             def _fetch():
+                # V4.6.92 — reliable per-bot value from the warm account cache,
+                # off the UI thread so a cold/slow lookup never freezes the UI.
+                seeded: dict[str, float] = {}
+                for sid in row_ids:
+                    try:
+                        a = D.get_account(sid) or {}
+                        pv = float(a.get("portfolio_value") or 0)
+                        if pv > 0:
+                            seeded[sid.upper()] = pv
+                    except Exception:
+                        pass
                 try:
                     rr = requests.get(f"{load_server_url()}/ibkr/ledgers",
                                       headers={"Authorization": f"Bearer {tok}"},
@@ -1591,7 +1618,7 @@ class ToolsTab(QWidget):
                     led = rr.json().get("ledgers", []) if rr.ok else []
                 except Exception:
                     led = []
-                _QT.singleShot(0, lambda: _apply(led))
+                _QT.singleShot(0, lambda: _apply(led, seeded))
             threading.Thread(target=_fetch, daemon=True).start()
         except Exception:
             _apply([])
