@@ -1095,10 +1095,30 @@ def estimate_daily_cost_at_delay(side: str, delay_seconds: int) -> dict:
 BOT_DEFAULT_POS = {"LONG": 5}
 
 
-def get_bot_min_positions(side: str = "LONG") -> int:
+def get_bot_min_positions(side: str = "LONG", broker: str | None = None) -> int:
+    """V4.6.91 — PER-BROKER minimum-positions floor. Resolution order:
+      1. APEX_MIN_POSITIONS_<SIDE> env — set per (side, broker) by the cloud
+         runner, so a cloud bot reads ITS broker's value.
+      2. settings[side]['min_positions_<broker>'] (broker defaults to the
+         active broker) — the desktop/local path.
+      3. legacy settings[side]['min_positions'] (pre-4.6.91, side-only).
+      4. the built-in default.
+    Previously this was side-only, so the Alpaca and IBKR copies of a bot
+    shared one value."""
     default = BOT_DEFAULT_POS.get(side, 5)
+    ev = os.environ.get(f"APEX_MIN_POSITIONS_{side.upper()}")
+    if ev not in (None, ""):
+        try:
+            iv = int(ev)
+            return iv if 0 <= iv <= 50 else default
+        except (TypeError, ValueError):
+            pass
     try:
-        v = load_settings().get(side, {}).get("min_positions")
+        broker = (broker or current_broker() or "alpaca").lower()
+        sd = load_settings().get(side, {})
+        v = sd.get(f"min_positions_{broker}")
+        if v is None:
+            v = sd.get("min_positions")   # legacy side-only fallback
         if v is None:
             return default
         v = int(v)
@@ -1107,9 +1127,10 @@ def get_bot_min_positions(side: str = "LONG") -> int:
         return default
 
 
-def set_bot_min_positions(side: str, value: int) -> None:
+def set_bot_min_positions(side: str, value: int, broker: str | None = None) -> None:
+    broker = (broker or current_broker() or "alpaca").lower()
     s = load_settings()
-    s.setdefault(side, {})["min_positions"] = int(value)
+    s.setdefault(side, {})[f"min_positions_{broker}"] = int(value)
     with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
         json.dump(s, f, indent=2)
 

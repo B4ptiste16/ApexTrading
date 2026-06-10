@@ -603,7 +603,19 @@ def _build_env(user_id: int, side: str,
             env[f"APEX_CALL_DELAY_{s}"] = str(max(30, int(float(cd))))
         except (TypeError, ValueError):
             pass
+    # V4.6.91 — per-bot, PER-BROKER minimum-positions floor. The desktop syncs
+    # APEX_MIN_POSITIONS_<SIDE>_<BROKER>; inject this broker's value as the
+    # plain APEX_MIN_POSITIONS_<SIDE> the framework/bots read.
+    _bk = (broker or "alpaca").upper()
+    mp = (blob.get(f"APEX_MIN_POSITIONS_{s}_{_bk}")
+          or blob.get(f"APEX_MIN_POSITIONS_{s}"))
+    if mp not in (None, ""):
+        try:
+            env[f"APEX_MIN_POSITIONS_{s}"] = str(int(float(mp)))
+        except (TypeError, ValueError):
+            pass
     return env
+
 
 
 # ── Public API ──────────────────────────────────────────────────────

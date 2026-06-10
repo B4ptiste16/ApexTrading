@@ -137,9 +137,22 @@ def live_min_positions() -> int:
     at least this many top-ranked names instead of sitting in cash, even
     if the AI says HOLD. 0 = fully cautious (original behaviour).
     Falls back to MIN_POSITIONS."""
+    # V4.6.91 — cloud bots get it via env (per-broker, injected by the server);
+    # local reads the per-broker setting, then the legacy side-only key.
+    import os as _os
+    _ev = _os.environ.get("APEX_MIN_POSITIONS_LONG")
+    if _ev not in (None, ""):
+        try:
+            _iv = int(_ev)
+            if 0 <= _iv <= MAX_POSITIONS:
+                return _iv
+        except (TypeError, ValueError):
+            pass
     try:
+        _bk = (_os.environ.get("APEX_BROKER", "alpaca") or "alpaca").lower()
         with open("apex_settings.json", "r", encoding="utf-8") as _f:
-            _v = json.load(_f).get("LONG", {}).get("min_positions")
+            _sd = json.load(_f).get("LONG", {})
+        _v = _sd.get(f"min_positions_{_bk}", _sd.get("min_positions"))
         if _v is not None:
             _v = int(_v)
             if 0 <= _v <= MAX_POSITIONS:

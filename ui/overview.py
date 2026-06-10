@@ -2390,6 +2390,20 @@ class ToolsTab(QWidget):
                         payload[f"APEX_MIN_CONFIDENCE_{k.upper()}"] = str(float(v["min_confidence"]))
                     except (TypeError, ValueError):
                         pass
+                # V4.6.91 — sync each bot's PER-BROKER min-positions floor so
+                # cloud bots deploy at least N names. Exported per broker as
+                # APEX_MIN_POSITIONS_<SIDE>_<BROKER>; the server picks this
+                # broker's value for the running instance.
+                if isinstance(v, dict):
+                    for _bk in ("alpaca", "ibkr"):
+                        _mp = v.get(f"min_positions_{_bk}")
+                        if _mp is None and _bk == "alpaca":
+                            _mp = v.get("min_positions")  # legacy side-only
+                        if _mp is not None:
+                            try:
+                                payload[f"APEX_MIN_POSITIONS_{k.upper()}_{_bk.upper()}"] = str(int(_mp))
+                            except (TypeError, ValueError):
+                                pass
                 # V4.6.66 — sync each bot's call delay so cloud bots honor it.
                 if isinstance(v, dict) and v.get("call_delay"):
                     try:

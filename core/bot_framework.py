@@ -504,6 +504,10 @@ class BotRunner:
                       f"=== cycle {cycle} === equity=${account['equity']:.2f}  "
                       f"cash=${account['cash']:.2f}  "
                       f"universe={len(symbols)}", flush=True)
+                # V4.6.91 — collect held-back BUY candidates this cycle so the
+                # min-positions floor can deploy into them WITHOUT re-running
+                # decide() (no extra AI calls).
+                self._cycle_candidates = []
                 for sym in symbols:
                     try:
                         self._step(client, sym, decide, account)
@@ -511,6 +515,14 @@ class BotRunner:
                         print(f"  ERROR {sym}: {e}", flush=True)
                         traceback.print_exc()
                     time.sleep(1)  # tiny gap between symbols
+                # V4.6.91 — minimum-positions floor: if we hold fewer than the
+                # user's floor, deploy into the highest-confidence candidates
+                # that the confidence gate held back, so the bot stays invested.
+                try:
+                    self._enforce_min_positions(client, account)
+                except Exception as e:
+                    print(f"[{self.name}] min-positions enforcement: {e}",
+                          flush=True)
                 print(f"[{self.name}] cycle {cycle} done — "
                       f"next tick in {self.tick_seconds}s", flush=True)
             except Exception as e:
@@ -521,6 +533,85 @@ class BotRunner:
                       f"— continuing", flush=True)
                 traceback.print_exc()
             self._heartbeat_sleep(self._call_delay(), cycle)
+
+    def _record_floor_candidate(self, symbol, alpaca_sym, bars, conf,
+                                buy_intent):
+        """V4.6.91 — remember a flat symbol the strategy didn't open this cycle
+        so the min-positions floor can deploy into it (no extra decide() call)."""
+        try:
+            c = float(conf) if conf is not None else 0.0
+        except (TypeError, ValueError):
+            c = 0.0
+        if not hasattr(self, "_cycle_candidates"):
+            self._cycle_candidates = []
+        self._cycle_candidates.append({
+            "symbol": symbol, "alpaca_sym": alpaca_sym, "bars": bars,
+            "conf": c, "buy_intent": bool(buy_intent)})
+
+    def _enforce_min_positions(self, client, account):
+        """V4.6.91 — keep at least `min positions` open. After the normal pass,
+        if we hold fewer than the user's per-bot/per-broker floor, deploy free
+        cash into the best held-back candidates (those the confidence gate
+        blocked first, then highest confidence) with equal sizing. Honors the
+        SAME setting the bot tab edits, resolved per broker."""
+        side = (os.environ.get("APEX_BOT_SIDE", "") or str(self.name)).upper()
+        try:
+            from core import data as _D
+            floor_n = int(_D.get_bot_min_positions(side))
+        except Exception:
+            floor_n = 0
+        if floor_n <= 0:
+            return
+        try:
+            positions = client.get_all_positions()
+            held = sum(1 for p in positions
+                       if abs(float(getattr(p, "qty", 0) or 0)) > 0)
+        except Exception:
+            return
+        need = floor_n - held
+        if need <= 0:
+            return
+        cands = getattr(self, "_cycle_candidates", []) or []
+        if not cands:
+            print(f"[{self.name}] min-positions floor: want {floor_n}, hold "
+                  f"{held}, but no candidates this cycle", flush=True)
+            return
+        cands = sorted(cands, key=lambda d: (d["buy_intent"], d["conf"]),
+                       reverse=True)
+        try:
+            cash = float(account.get("cash", 0) or 0)
+        except Exception:
+            cash = 0.0
+        if cash <= 1:
+            print(f"[{self.name}] min-positions floor: need {need} more but "
+                  f"no free cash", flush=True)
+            return
+        per = (cash / max(need, 1)) * 0.95   # small buffer for fees/slippage
+        bought = 0
+        for d in cands:
+            if bought >= need:
+                break
+            sym, asym, bars = d["symbol"], d["alpaca_sym"], d["bars"]
+            try:
+                px = float(bars["Close"].squeeze().iloc[-1])
+            except Exception:
+                continue
+            if px <= 0:
+                continue
+            raw = per / px
+            qty = raw if self.asset_type == "crypto" else float(int(raw))
+            if qty <= 0:
+                continue
+            try:
+                order = _submit(client, asym, "BUY", qty)
+                bought += 1
+                print(f"  FLOOR  {sym:<10}  qty={qty}  id={order.id}  "
+                      f"(min-positions floor → reach {floor_n})", flush=True)
+            except Exception as e:
+                print(f"  FLOOR-FAIL {sym}: {e}", flush=True)
+        if bought:
+            print(f"[{self.name}] min-positions floor: opened {bought} "
+                  f"position(s) to reach {floor_n}", flush=True)
 
     def _heartbeat_sleep(self, total_seconds: int, cycle: int):
         """V4.6.27 — sleep with periodic 'alive' prints. Without
@@ -638,8 +729,13 @@ class BotRunner:
         if d is None:
             return
         action = d["action"]
+        _flat = str(position.get("side", "flat")).lower() == "flat" \
+            or abs(float(position.get("qty", 0) or 0)) < 1e-9
         if action == "HOLD":
             print(f"  HOLD   {symbol:<10}  {d['reason']}", flush=True)
+            if _flat:
+                self._record_floor_candidate(
+                    symbol, alpaca_sym, bars, d.get("confidence"), buy_intent=False)
             return
         # V4.6.48 — universal minimum-confidence gate. If the strategy reports
         # a confidence (0..1), skip the trade when it's below the user's
@@ -651,6 +747,11 @@ class BotRunner:
             if conf < min_conf:
                 print(f"  SKIP   {symbol:<10}  confidence {conf:.0%} < "
                       f"min {min_conf:.0%}", flush=True)
+                if _flat and action == "BUY":
+                    # Wanted to buy but the gate blocked it → prime candidate
+                    # for the min-positions floor.
+                    self._record_floor_candidate(
+                        symbol, alpaca_sym, bars, conf, buy_intent=True)
                 return
         # V4.6.43 — cash-safety clamp. A strategy may size a BUY off equity
         # (total account value) rather than free cash, so when most of the
