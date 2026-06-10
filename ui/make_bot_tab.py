@@ -235,7 +235,7 @@ compatible_models:  {{provider, others}}
 asset_type:         {{stocks|crypto|etfs|futures|options}}
 brokers:            {{alpaca, ibkr}}
 universe:           {{public universe name, or (ai-selected)}}
-requirements:       {{pip pkgs beyond APEX bundle, comma-sep, or empty}}
+requirements:       {{leave EMPTY — never list core/pandas/numpy/framework}}
 """
 
 # YOU MAY EDIT ONLY THE decide(...) FUNCTION BELOW.
@@ -371,10 +371,16 @@ _SYSTEM_PROMPT_TRADE = (
     "sentences in plain English) are shown to the user on the bot's "
     "card and in the marketplace — write them for a human, not as "
     "placeholders. Make them accurate to the strategy you wrote.\n"
-    "• If your strategy needs an extra pip package (e.g. scikit-learn, "
-    "ccxt, ta), declare it in requirements: AND import it inside "
-    "decide() — never at module level (so a missing dep doesn't kill "
-    "the bot before the preflight installer can fix it).\n"
+    "• `requirements:` lists ONLY third-party PyPI packages that are NOT "
+    "already bundled. It must be EMPTY for almost every bot. NEVER put "
+    "in requirements: the APEX framework or any stdlib/bundled lib — "
+    "specifically NEVER list `core` (that's APEX's own package — "
+    "`from core.bot_framework import BotRunner` is always importable; "
+    "listing it makes the server run `pip install core`, which fails). "
+    "Also never list pandas, numpy, requests, ib_async, alpaca, "
+    "anthropic, openai, yfinance, matplotlib (all bundled). Only a "
+    "genuinely extra package (e.g. ta) belongs here — and import it "
+    "INSIDE decide(), never at module level.\n"
     "• asset_type='crypto' bots must NEVER emit SHORT or COVER — "
     "Alpaca disallows shorting crypto. Use BUY / SELL only.\n"
     "• Size qty defensively: `int(account['buying_power'] * pct / price)` "

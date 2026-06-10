@@ -62,6 +62,19 @@ BUNDLED_PACKAGES = {
     "matplotlib",
     "openai",
     "google", "google.generativeai",
+    "ib_async", "ib_insync",      # IBKR libs ship in the build
+    "scipy", "sklearn", "scikit-learn", "ta",
+}
+
+# APEX's OWN local packages/modules. A bot imports these
+# (`from core.bot_framework import BotRunner`) but they are NOT on PyPI — an
+# AI sometimes mis-lists them in META.requirements, which made the preflight
+# run `pip install core` → "No matching distribution found for core". These
+# must NEVER be sent to pip; they're always importable from the APEX tree.
+FRAMEWORK_MODULES = {
+    "core", "ui", "main", "apex", "server",
+    "bot_framework", "broker_client", "ledger", "charts", "data",
+    "secure", "paths", "transition", "ibkr_data", "ibkr_lifecycle",
 }
 
 # Mapping from importable module name → pip-installable name.
@@ -166,16 +179,39 @@ def required_pip_packages(source: str) -> list[str]:
     Each name is normalized to its pip-installable form via
     IMPORT_TO_PIP, then deduplicated."""
     meta = parse_meta(source)
-    explicit = list(meta.get("requirements") or [])
-    out: dict[str, None] = {p.strip(): None for p in explicit if p.strip()}
-
-    # Scan imports for anything missing
     bundled_lower = {p.lower() for p in BUNDLED_PACKAGES}
+    framework_lower = {p.lower() for p in FRAMEWORK_MODULES}
+
+    def _skip(name: str) -> bool:
+        """True if `name` must NOT be pip-installed: blank, stdlib, bundled,
+        or an APEX framework/local package (e.g. 'core')."""
+        n = (name or "").strip()
+        if not n:
+            return True
+        # root token, ignoring any version specifier or submodule path
+        root = n.lower().replace("-", "_")
+        for sep in ("==", ">=", "<=", "~=", ">", "<", "=", "[", " "):
+            root = root.split(sep)[0]
+        root = root.split(".")[0].strip()
+        if root in framework_lower or n.lower() in framework_lower:
+            return True
+        if n in STDLIB_MODULES or n.lower() in STDLIB_MODULES \
+                or root in STDLIB_MODULES:
+            return True
+        if n.lower() in bundled_lower or n in BUNDLED_PACKAGES \
+                or root in bundled_lower:
+            return True
+        return False
+
+    out: dict[str, None] = {}
+    # Explicit META.requirements — now FILTERED the same way as scanned imports
+    # (previously they were trusted verbatim, which let 'core' reach pip).
+    for p in (meta.get("requirements") or []):
+        if not _skip(p):
+            out[p.strip()] = None
+    # Plus imports the AST scanner found that aren't already covered.
     for mod in scan_imports(source):
-        m_lower = mod.lower()
-        if mod in STDLIB_MODULES or m_lower in STDLIB_MODULES:
-            continue
-        if m_lower in bundled_lower or mod in BUNDLED_PACKAGES:
+        if _skip(mod):
             continue
         pip_name = IMPORT_TO_PIP.get(mod, mod)
         out.setdefault(pip_name, None)
