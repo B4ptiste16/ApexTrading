@@ -1373,6 +1373,29 @@ def _bot_snapshot_path(side: str):
     return broker_data_dir() / f"{side.lower()}_lifetime.jsonl"
 
 
+def delete_bot_snapshots(side: str) -> None:
+    """V4.6.90 — wipe a bot's lifetime snapshot log (both broker paths). Called
+    when a bot is removed/re-allocated so its LIFETIME / period P&L baseline
+    starts fresh at the new allocation — otherwise the equity jump from a
+    re-allocation is mis-counted as 'profit' against the old, lower baseline."""
+    paths = {ROOT / f"{side.lower()}_lifetime.jsonl"}
+    try:
+        paths.add(broker_data_dir() / f"{side.lower()}_lifetime.jsonl")
+    except Exception:
+        pass
+    # Also cover the other broker's dir so a re-add on either broker is clean.
+    try:
+        for sub in ("ibkr", "alpaca"):
+            paths.add(ROOT / sub / f"{side.lower()}_lifetime.jsonl")
+    except Exception:
+        pass
+    for p in paths:
+        try:
+            Path(p).unlink(missing_ok=True)
+        except Exception:
+            pass
+
+
 def append_bot_snapshot(side: str, *, equity: float = 0.0,
                         portfolio_value: float = 0.0,
                         positions_count: int = 0) -> None:

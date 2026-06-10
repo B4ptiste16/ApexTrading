@@ -957,9 +957,15 @@ class ToolsTab(QWidget):
         s.add(self._ibkr_rows_frame)
 
         # V4.6.51 — populate each row's live allocation (current value + share).
+        # V4.6.90 — and keep it auto-updating every 30s so the live % + live
+        # allocated $ track each bot's value as it grows/shrinks, without the
+        # user re-opening the tab.
         try:
             from PyQt6.QtCore import QTimer as _QT
             _QT.singleShot(300, self._refresh_ibkr_live_alloc)
+            self._ibkr_live_timer = _QT(self)
+            self._ibkr_live_timer.timeout.connect(self._refresh_ibkr_live_alloc)
+            self._ibkr_live_timer.start(30_000)
         except Exception:
             pass
 
@@ -1557,6 +1563,16 @@ class ToolsTab(QWidget):
                     lbl.setStyleSheet(f"color:{C['green']};font-size:10px;")
                 else:
                     lbl.setText("")
+            # V4.6.90 — surface the LIVE allocated dollar total (sum of every
+            # bot's current sub-portfolio value) so the allocated amount visibly
+            # tracks growth, alongside the target-% remaining indicator.
+            try:
+                if hasattr(self, "_ibkr_remaining_lbl") and total > 0:
+                    base = self._ibkr_remaining_lbl.text().split("  ·  live")[0]
+                    self._ibkr_remaining_lbl.setText(
+                        f"{base}  ·  live allocated ${total:,.0f}")
+            except Exception:
+                pass
 
         try:
             from ui.login import load_auth, load_server_url

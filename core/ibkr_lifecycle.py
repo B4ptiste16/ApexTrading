@@ -191,6 +191,13 @@ def liquidate_and_remove(side: str, mode: str | None = None) -> tuple[bool, str]
         return False, ("Some positions could not be liquidated "
                        f"({'; '.join(failures)}). Ledger kept — retry.")
     led.delete()
+    # V4.6.90 — also wipe the lifetime snapshots so a future re-allocation
+    # doesn't book the new grant as 'profit' against the old baseline.
+    try:
+        from core import data as _D
+        _D.delete_bot_snapshots(side)
+    except Exception:
+        pass
     return True, (f"Liquidated {len(holdings)} position(s); "
                   f"cash freed for redistribution.")
 
@@ -252,6 +259,13 @@ def free_ibkr_allocation(side: str) -> tuple[bool, str]:
                 _json.dump(s, f, indent=2)
     except Exception as e:
         msg = (msg + f"  (allocation cleanup error: {e})").strip()
+    # V4.6.90 — reset the lifetime baseline so re-allocating this bot later
+    # doesn't show the new grant as profit (cloud path too — the desktop keeps
+    # a local lifetime snapshot file per bot).
+    try:
+        _D.delete_bot_snapshots(side_u)
+    except Exception:
+        pass
     return True, (msg or f"{side_u} removed from IBKR allocation.")
 
 

@@ -280,6 +280,11 @@ class BotProcessWidget(QWidget):
         self.log = QTextEdit()
         self.log.setReadOnly(True)
         self.log.setFixedHeight(160)
+        # V4.6.90 — cap the log to the last 800 lines. Previously it grew
+        # unbounded; after a few hours of streaming a cloud bot's output the
+        # QTextEdit held tens of thousands of lines and made the whole app
+        # lag/freeze. setMaximumBlockCount auto-drops the oldest lines.
+        self.log.document().setMaximumBlockCount(800)
         self.log.setPlaceholderText("Bot output will appear here...")
         # V4.6.5 — pin alignment to left + disable line wrapping so a
         # long ASCII header (e.g. daybot's `=` * 65 banner) does NOT
@@ -1098,7 +1103,7 @@ class BotProcessWidget(QWidget):
             return
         self._cloud_poll_timer = QTimer(self)
         self._cloud_poll_timer.timeout.connect(self._cloud_poll_tick)
-        self._cloud_poll_timer.start(30_000)
+        self._cloud_poll_timer.start(60_000)   # V4.6.90 — 60s (was 30s)
         self._cloud_last_log_len = 0
         # Immediate first tick so the log starts populating fast
         QTimer.singleShot(2000, self._cloud_poll_tick)
@@ -1122,18 +1127,28 @@ class BotProcessWidget(QWidget):
                     self._log("☁  Bot exited on Oracle", C["yellow"])
         self._cloud_call("GET", f"/bots/{self.side}/status", _on_status)
 
-        # Log tail — append the part we haven't seen yet
+        # Log tail — append the part we haven't seen yet. V4.6.90 — fetch a
+        # SMALL tail (was 8000 lines every 30s, which flooded the UI thread and
+        # the diff drifted as the 8000-line window slid). 250 lines is plenty
+        # for live streaming; the full log is only pulled when the tab opens.
         def _on_logs(ok, body):
             if not ok: return
             text = body.get("log", "") or ""
-            prev = getattr(self, "_cloud_last_log_len", 0)
-            if len(text) > prev:
-                new = text[prev:]
+            prev = getattr(self, "_cloud_last_log_text", "")
+            if text and text != prev:
+                # Append only the suffix that's genuinely new (robust to the
+                # sliding tail window — compare on text, not a stale offset).
+                if prev and text.startswith(prev):
+                    new = text[len(prev):]
+                elif prev and prev in text:
+                    new = text[text.rindex(prev) + len(prev):]
+                else:
+                    new = text
                 for line in new.splitlines():
                     if line.strip():
                         self._log(line)
-                self._cloud_last_log_len = len(text)
-        self._cloud_call("GET", f"/bots/{self.side}/logs?tail=8000", _on_logs)
+                self._cloud_last_log_text = text
+        self._cloud_call("GET", f"/bots/{self.side}/logs?tail=250", _on_logs)
 
     def restart_bot(self):
         self.stop_bot()
