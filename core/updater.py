@@ -326,10 +326,17 @@ def launch_downloaded_installer(local_path: str) -> None:
     #
     # /VERYSILENT          → no UI at all (no wizard, no progress bar)
     # /SUPPRESSMSGBOXES    → no Yes/No/Retry dialogs either
-    # /CLOSEAPPLICATIONS   → if any APEX file is locked, ask Restart Mgr
-    #                        to close it (belt + suspenders to taskkill)
-    # /RESTARTAPPLICATIONS → relaunch APEX after install completes
+    # /NORESTART           → never reboot
     # /LOG=...             → write install log so we can diagnose failures
+    #
+    # V4.6.85 — REMOVED /CLOSEAPPLICATIONS /RESTARTAPPLICATIONS. Those engage
+    # the Windows Restart Manager, which HUNG the silent install on ARM64 /
+    # Windows 11 (the Inno log stopped right after "Created temporary
+    # directory" and never finished → the app reopened at the old version and
+    # the updater kept prompting = the "update loop"). We don't need Restart
+    # Manager: the batch force-kills APEX.exe below AND the installer's own
+    # PrepareToInstall [Code] taskkills it again before copying, and we
+    # relaunch APEX ourselves at Step 5. No locked files, no RM, no hang.
     bat.write_text(
         "@echo off\r\n"
         "set LOG=%TEMP%\\apex_update.log\r\n"
@@ -343,7 +350,7 @@ def launch_downloaded_installer(local_path: str) -> None:
         "echo Step 3: launch installer (silent) >> \"%LOG%\"\r\n"
         f"echo Installer: \"{local_path}\" >> \"%LOG%\"\r\n"
         f"\"{local_path}\" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART "
-        f"/CLOSEAPPLICATIONS /RESTARTAPPLICATIONS \"/LOG=%ILOG%\"\r\n"
+        f"\"/LOG=%ILOG%\"\r\n"
         "echo Step 4: installer exit code: %ERRORLEVEL% >> \"%LOG%\"\r\n"
         # Always relaunch APEX, even if /RESTARTAPPLICATIONS didn't fire
         # (Restart Manager only relaunches apps it was tracking, and we
