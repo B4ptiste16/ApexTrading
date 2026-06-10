@@ -125,6 +125,40 @@ def _make_alpaca_client(key: str = "", sec: str = ""):
 
 # ── IBKR (ib_async) ────────────────────────────────────────────────────
 
+_IB_LOG_FILTER_INSTALLED = False
+
+
+def _install_ib_log_filter() -> None:
+    """Drop ib_async's handled contract-not-found chatter (Error 200 / 'No
+    security definition' / 'Unknown contract') from the log. Installed once,
+    on the ib_async/ib_insync loggers. Other errors pass through untouched."""
+    global _IB_LOG_FILTER_INSTALLED
+    if _IB_LOG_FILTER_INSTALLED:
+        return
+    import logging
+
+    _NOISE = ("No security definition has been found",
+              "Unknown contract",
+              "Error 200")
+
+    class _QuietContractErrors(logging.Filter):
+        def filter(self, record):
+            try:
+                msg = record.getMessage()
+            except Exception:
+                return True
+            return not any(n in msg for n in _NOISE)
+
+    flt = _QuietContractErrors()
+    for name in ("ib_async", "ib_async.wrapper", "ib_async.client",
+                 "ib_insync", "ib_insync.wrapper", "ib_insync.client"):
+        try:
+            logging.getLogger(name).addFilter(flt)
+        except Exception:
+            pass
+    _IB_LOG_FILTER_INSTALLED = True
+
+
 def _make_ibkr_client(asset_type: str):
     """Open a persistent IB Gateway/TWS connection for this bot's lifetime.
     Retries a few times so a slow gateway start doesn't kill the bot."""
@@ -147,6 +181,12 @@ def _make_ibkr_client(asset_type: str):
         asyncio.set_event_loop(asyncio.new_event_loop())
 
     ib = IB()
+    # V4.6.86 — quiet ib_async's handled "Error 200 / No security definition /
+    # Unknown contract" log spam. These fire while we probe SMART + each
+    # primaryExchange to qualify a symbol; APEX handles the outcome (trade the
+    # resolved contract, or skip the symbol with one clean line), so the raw
+    # library errors are just noise that looked like a failure to the user.
+    _install_ib_log_filter()
     last_err = None
     for attempt in range(3):
         try:
@@ -828,32 +868,67 @@ class _IBKRShim:
     def _require_contract(self, symbol: str):
         """Qualify the contract; raise UnsupportedSymbol (cached) if IBKR has
         no security definition for it, so the bot skips it cleanly instead of
-        spamming 'no security definition' / price-failure every tick."""
+        spamming 'no security definition' / price-failure every tick.
+
+        V4.6.86 — returns a QUALIFIED, cached contract and, for US equities,
+        retries SMART qualification with an explicit primaryExchange. Some
+        valid tickers (e.g. CTRA) fail bare SMART qualification with Error 200
+        unless their listing exchange is named; trying the common ones rescues
+        them so the bot can actually trade them instead of skipping."""
         sym = normalize_symbol(symbol)
+        if not hasattr(self, "_contract_cache"):
+            self._contract_cache = {}
+        if sym in self._contract_cache:
+            return self._contract_cache[sym]
         if sym in self._unsupported:
             raise UnsupportedSymbol(sym)
         self._ensure_connected()
-        c = self._contract(sym)
+
+        qualified = self._qualify_any(sym)
+        if qualified is not None and getattr(qualified, "conId", 0):
+            self._contract_cache[sym] = qualified
+            return qualified
+
+        # V4.6.62 — only flag a symbol as permanently unsupported when we're
+        # actually CONNECTED and IBKR has no security definition. If the
+        # socket is down, qualification fails transiently — don't poison the
+        # cache (a tradeable stock like SNOW was being marked 'not tradeable'
+        # with the misleading crypto message and skipped forever).
         try:
-            self.ib.qualifyContracts(c)
+            connected = self.ib.isConnected()
         except Exception:
-            c = None
-        if not c or not getattr(c, "conId", 0):
-            # V4.6.62 — only flag a symbol as permanently unsupported when we're
-            # actually CONNECTED and IBKR has no security definition. If the
-            # socket is down, qualification fails transiently — don't poison the
-            # cache (a tradeable stock like SNOW was being marked 'not tradeable'
-            # with the misleading crypto message and skipped forever).
+            connected = False
+        if not connected:
+            raise RuntimeError(
+                f"IBKR not connected — could not qualify {sym} (will retry)")
+        self._unsupported.add(sym)
+        print(f"  [ibkr] skipping {sym} — IBKR has no tradeable contract for it",
+              flush=True)
+        raise UnsupportedSymbol(sym)
+
+    def _qualify_any(self, sym: str):
+        """Return a qualified contract for `sym`, or None. Crypto → PAXOS.
+        Equities → SMART first, then SMART with a primaryExchange fallback so
+        symbols that need their listing venue named still resolve."""
+        from ib_async import Stock, Crypto
+        if self.asset_type == "crypto":
+            c = Crypto(sym, "PAXOS", "USD")
             try:
-                connected = self.ib.isConnected()
+                self.ib.qualifyContracts(c)
             except Exception:
-                connected = False
-            if not connected:
-                raise RuntimeError(
-                    f"IBKR not connected — could not qualify {sym} (will retry)")
-            self._unsupported.add(sym)
-            raise UnsupportedSymbol(sym)
-        return c
+                return None
+            return c if getattr(c, "conId", 0) else None
+        for primary in (None, "NYSE", "NASDAQ", "ARCA", "AMEX", "BATS"):
+            c = Stock(sym, "SMART", "USD")
+            if primary:
+                c.primaryExchange = primary
+            try:
+                self.ib.qualifyContracts(c)
+            except Exception:
+                continue
+            if getattr(c, "conId", 0):
+                return c
+        return None
 
     def _round_qty(self, qty: float) -> float:
         """Equities trade in whole shares; crypto is fractional."""
@@ -873,11 +948,12 @@ class _IBKRShim:
                         return mp
         except Exception:
             pass
-        # 2) request a fresh snapshot
+        # 2) request a fresh snapshot. V4.6.86 — qualify via the multi-exchange
+        # helper; if IBKR has no contract (e.g. Error 200) just fall through to
+        # yfinance quietly instead of logging a price-lookup failure every tick.
         try:
-            c = self._contract(sym)
-            self.ib.qualifyContracts(c)
-            tks = self.ib.reqTickers(c)
+            c = self._qualify_any(sym)
+            tks = self.ib.reqTickers(c) if c is not None else None
             if tks:
                 t = tks[0]
                 # Include delayed-data fields (V4.6.55) — paper accounts get
@@ -893,8 +969,8 @@ class _IBKRShim:
                             return v
                     except (TypeError, ValueError):
                         continue
-        except Exception as e:
-            print(f"  [ibkr] price lookup {sym} failed: {e}", flush=True)
+        except Exception:
+            pass
         # 3) V4.6.56 — fall back to yfinance when IBKR has no market data for
         # this symbol (common for crypto without an IBKR data subscription).
         # Good enough to size an order; the fill still happens at the market.
@@ -929,11 +1005,9 @@ class _IBKRShim:
     def _market_order(self, symbol: str, action: str, qty: float):
         from ib_async import MarketOrder
         sym = normalize_symbol(symbol)
-        contract = self._contract(sym)
-        try:
-            self.ib.qualifyContracts(contract)
-        except Exception as e:
-            raise RuntimeError(f"IBKR could not qualify {symbol}: {e}")
+        # V4.6.86 — multi-exchange qualify + skip-cache: an unqualifiable symbol
+        # (Error 200) raises UnsupportedSymbol so the framework skips it cleanly.
+        contract = self._require_contract(sym)
         order = MarketOrder(action, qty)
         # V4.6.56 — IBKR CRYPTO orders must be IOC, and a BUY must be sized by
         # cash amount (cashQty in USD), not coin quantity — otherwise IBKR
@@ -975,11 +1049,7 @@ class _IBKRShim:
         legs in a one-cancels-all group. The protective legs live on IBKR's
         servers, so they execute even when the user's computer is off."""
         from ib_async import MarketOrder, LimitOrder, StopOrder
-        contract = self._contract(normalize_symbol(symbol))
-        try:
-            self.ib.qualifyContracts(contract)
-        except Exception as e:
-            raise RuntimeError(f"IBKR could not qualify {symbol}: {e}")
+        contract = self._require_contract(normalize_symbol(symbol))  # V4.6.86
         exit_action = self._exit_action(action)
         oca = f"apex_{symbol}_{int(time.time()*1000)}"
 
@@ -1018,11 +1088,7 @@ class _IBKRShim:
         """Resting take-profit + stop-loss on an EXISTING position (no entry),
         one-cancels-all. `action` is the exit side (SELL to protect a long)."""
         from ib_async import LimitOrder, StopOrder
-        contract = self._contract(normalize_symbol(symbol))
-        try:
-            self.ib.qualifyContracts(contract)
-        except Exception as e:
-            raise RuntimeError(f"IBKR could not qualify {symbol}: {e}")
+        contract = self._require_contract(normalize_symbol(symbol))  # V4.6.86
         oca = f"apex_{symbol}_{int(time.time()*1000)}"
 
         tp = LimitOrder(action, qty, self._round_px(tp_price))
