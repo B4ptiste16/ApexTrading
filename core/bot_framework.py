@@ -90,12 +90,30 @@ _BOT_ASSET_TYPE_TO_ALPACA_CLASS = {
 }
 
 
-def liquidate_off_strategy_positions(client, asset_type: str) -> list:
-    """Close any open position whose Alpaca asset_class doesn't match
-    this bot's declared asset_type. Returns list of (symbol, action)
-    tuples for logging. Safe to call multiple times — if no positions
-    mismatch, no orders are sent."""
+def liquidate_off_strategy_positions(client, asset_type: str,
+                                     universe: Optional[list] = None) -> list:
+    """Close any open position that doesn't belong to this bot's strategy:
+      • wrong Alpaca asset_class for the bot's asset_type, OR
+      • (V4.6.88) when `universe` is provided and non-empty, any symbol NOT in
+        that universe — so a bot taking over an account only keeps & trades the
+        tickers IT knows, and sells off whatever else was sitting in the
+        account.
+    Returns a list of (symbol, action) tuples for logging. Safe to call
+    repeatedly — if nothing is off-strategy, no orders are sent."""
     asset_type = (asset_type or "").lower()
+    # Normalised set of symbols this bot is allowed to hold (empty = no
+    # universe filter, keep the legacy asset-class-only behaviour).
+    def _norm(x) -> str:
+        # Compare on a broker-agnostic form: upper-case, strip a crypto
+        # '-USD'/'/USD' suffix so 'BTC-USD' and 'BTC' match.
+        t = str(x or "").upper().replace("/", "").strip()
+        for suf in ("-USD", "USD"):
+            if t.endswith(suf) and len(t) > len(suf):
+                t = t[: -len(suf)]
+                break
+        return t
+
+    uni_set = {_norm(s) for s in (universe or []) if s}
     expected = _BOT_ASSET_TYPE_TO_ALPACA_CLASS.get(asset_type)
     if expected is None:
         print(f"[startup-cleanup] unknown asset_type='{asset_type}', "
@@ -128,13 +146,16 @@ def liquidate_off_strategy_positions(client, asset_type: str) -> list:
         # alpaca-py may expose as enum; coerce to string
         pos_class = str(pos_class).lower().split(".")[-1]
         sym = getattr(p, "symbol", "?")
-        if pos_class == expected:
+        # V4.6.88 — keep only same-asset-class AND in-universe symbols.
+        in_universe = (not uni_set) or (_norm(sym) in uni_set)
+        if pos_class == expected and in_universe:
             kept.append(sym)
             continue
-        # Liquidate — symbol's asset_class doesn't fit our strategy
-        print(f"[startup-cleanup] {sym} (asset_class={pos_class}) "
-              f"doesn't match bot asset_type={asset_type} — "
-              f"liquidating", flush=True)
+        # Liquidate — wrong asset class, or not a ticker this bot knows.
+        why = (f"asset_class={pos_class} != {asset_type}"
+               if pos_class != expected
+               else "not in this bot's universe")
+        print(f"[startup-cleanup] {sym} ({why}) — liquidating", flush=True)
         try:
             client.close_position(sym)
             actions.append((sym, "liquidated"))
@@ -429,18 +450,22 @@ class BotRunner:
                               f"automatically (no restart needed).", flush=True)
                         self._heartbeat_sleep(self._call_delay(), cycle)
                         continue
+                # Load the bot's universe up-front so startup cleanup can keep
+                # ONLY the tickers this bot knows.
+                symbols = _load_universe(self.universe_path,
+                                         self.default_symbols)
                 if not did_startup_cleanup:
                     # Initial portfolio cleanup runs ONCE, after the client is
                     # live: liquidate positions whose asset_class doesn't match
-                    # this bot's strategy. Failure here must never kill the bot.
+                    # this bot's strategy OR aren't in its universe. Failure
+                    # here must never kill the bot.
                     try:
-                        liquidate_off_strategy_positions(client, self.asset_type)
+                        liquidate_off_strategy_positions(
+                            client, self.asset_type, universe=symbols)
                     except Exception as e:
                         print(f"[{self.name}] startup cleanup error: {e}",
                               flush=True)
                     did_startup_cleanup = True
-                symbols = _load_universe(self.universe_path,
-                                         self.default_symbols)
                 # V4.6.48 — read the FULL universe but skip symbols the active
                 # broker can't trade (e.g. IBKR lists only major cryptos). The
                 # broker client exposes tradeable_symbols() when it filters;
