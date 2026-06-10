@@ -234,16 +234,17 @@ class BotTab(QWidget):
         s.add(drw)
         self._update_delay_cost()
 
-        # Minimum positions floor (LONG only): deploy at least N names
-        # even when the AI is cautious. 0 = fully cautious.
-        if self.side == "LONG":
+        # V4.6.89 — Minimum positions floor for EVERY bot (was LONG-only):
+        # deploy at least N names even when the AI is cautious. 0 = fully
+        # cautious; per-bot setting keyed by this bot's side.
+        if True:
             mp_row = QHBoxLayout()
             mp_lbl = QLabel("Min positions to hold:")
             mp_lbl.setStyleSheet(f"color:{C['muted']};font-size:11px;")
             self.minpos_spin = QSpinBox()
             self.minpos_spin.setRange(0, 20)
             self.minpos_spin.setFixedWidth(70)
-            self.minpos_spin.setValue(D.get_bot_min_positions("LONG"))
+            self.minpos_spin.setValue(D.get_bot_min_positions(self.side))
             self.minpos_spin.valueChanged.connect(self._on_minpos_changed)
             self.minpos_saved = QLabel("")
             self.minpos_saved.setStyleSheet(f"color:{C['green']};font-size:10px;")
@@ -841,7 +842,7 @@ class BotTab(QWidget):
         QTimer.singleShot(2000, lambda: self.minscore_saved.setText(""))
 
     def _on_minpos_changed(self, val: int):
-        D.set_bot_min_positions("LONG", val)
+        D.set_bot_min_positions(self.side, val)
         self.minpos_saved.setText("saved ✓")
         QTimer.singleShot(2000, lambda: self.minpos_saved.setText(""))
 

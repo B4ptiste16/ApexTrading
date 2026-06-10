@@ -77,10 +77,10 @@ class OverviewTab(QWidget):
         # doesn't shadow the existing _period_combo() method that builds
         # the PORTFOLIO VALUE chart's period selector below.
         self._pl_period_combo = NoScrollComboBox()
-        self._pl_period_combo.addItems(["1D", "1W", "1M", "3M", "6M", "1Y"])
-        self._pl_period_combo.setFixedWidth(56)
+        self._pl_period_combo.addItems(["ALL", "1D", "1W", "1M", "3M", "6M", "1Y"])
+        self._pl_period_combo.setFixedWidth(64)
         try:
-            saved_period = D.load_settings().get("overview_period", "1D")
+            saved_period = D.load_settings().get("overview_period", "ALL")
             self._pl_period_combo.setCurrentText(saved_period)
         except Exception:
             pass
@@ -243,9 +243,9 @@ class OverviewTab(QWidget):
 
     def _current_period(self) -> str:
         try:
-            return self._pl_period_combo.currentText() or "1D"
+            return self._pl_period_combo.currentText() or "ALL"
         except Exception:
-            return "1D"
+            return "ALL"
 
     def _rebuild_account_blocks(self):
         """Tear down and rebuild the row of bot blocks based on the
@@ -281,8 +281,17 @@ class OverviewTab(QWidget):
             block = self._account_block(meta["side"],
                                         label_text=meta["label"],
                                         color=meta["color"])
+            # V4.6.89 — let each block stretch to fill its half of the row so
+            # the cards spread evenly across the width instead of crowding the
+            # left. A lone block on the last row spans the full width.
+            block.setSizePolicy(QSizePolicy.Policy.Expanding,
+                                QSizePolicy.Policy.Preferred)
             self.blocks[meta["side"]] = block
-            self._blocks_row.addWidget(block, idx // 2, idx % 2)
+            last_alone = (idx == len(bots) - 1) and (len(bots) % 2 == 1)
+            if last_alone:
+                self._blocks_row.addWidget(block, idx // 2, 0, 1, 2)
+            else:
+                self._blocks_row.addWidget(block, idx // 2, idx % 2)
 
     # Public alias for main.py to call after registry mutations.
     def refresh_active_bots(self):
@@ -389,7 +398,8 @@ class OverviewTab(QWidget):
 
     def _period_combo(self) -> QComboBox:
         self.period_combo = NoScrollComboBox()
-        self.period_combo.addItems(["1D","1W","1M","3M","6M","1Y"])
+        self.period_combo.addItems(["ALL","1D","1W","1M","3M","6M","1Y"])
+        self.period_combo.setCurrentText("ALL")   # V4.6.89 — default lifetime
         self.period_combo.setFixedWidth(80)
         self.period_combo.currentTextChanged.connect(
             lambda _: self._reload_combined())
@@ -588,6 +598,10 @@ class OverviewTab(QWidget):
         if period == "1D":
             # 1D delta-from-last-close is identical to DAY P/L by definition.
             period_baseline_eq = today_baseline_eq
+        elif period in ("ALL", "LIFE", "LIFETIME"):
+            # V4.6.89 — lifetime return of THIS bot: since its first snapshot.
+            period_baseline_eq = (float(bot_hist[0].get("equity", eq))
+                                  if bot_hist else eq)
         else:
             period_days = {"1W": 7, "1M": 30, "3M": 90,
                            "6M": 180, "1Y": 365}.get(period, 7)
@@ -618,8 +632,9 @@ class OverviewTab(QWidget):
         else:
             p_arrow = "▲" if p_pl >= 0 else "▼"
             p_color = C["green"] if p_pl >= 0 else C["red"]
+            _plabel = "lifetime" if period in ("ALL", "LIFE", "LIFETIME") else period
             period_txt = (f"{p_arrow} ${abs(p_pl):,.2f} ({p_pct:+.1f}%) "
-                          f"· {period}")
+                          f"· {_plabel}")
 
         block._cards["PORTFOLIO"].update_value(f"${pv:,.2f}", block_color)
         if len(bot_hist) < 2:
