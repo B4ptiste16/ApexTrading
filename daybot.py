@@ -380,14 +380,24 @@ def get_sleep(clock) -> int:
     # market hours. (Closed = cheap 60s clock re-check, no AI calls.)
     try:
         import core.data as _D
-        return _D.resolve_call_delay("DAY")
+        base = int(_D.resolve_call_delay("DAY"))
+    except Exception:
+        base = SLEEP_SECONDS
+    # V4.6.87 — NEVER sleep past the start of the closing window. The bot
+    # flattens (and enforces stops) in the last CLOSING_SKIP_MINUTES; a plain
+    # 30-min cadence could skip clean over that 15-min window and leave a
+    # position to carry overnight. So: inside the window poll every 60s, and
+    # otherwise cap the sleep so we wake exactly when the window opens.
+    try:
+        mins_to_close = (clock.next_close - clock.timestamp).total_seconds() / 60.0
+        if mins_to_close <= CLOSING_SKIP_MINUTES:
+            return 60
+        secs_to_window = int((mins_to_close - CLOSING_SKIP_MINUTES) * 60)
+        if 0 < secs_to_window < base:
+            return max(30, secs_to_window)
     except Exception:
         pass
-    mkt_open = clock.next_close - timedelta(hours=6, minutes=30)
-    elapsed  = (clock.timestamp - mkt_open).total_seconds()
-    if elapsed < OPENING_BURST_DURATION:
-        return OPENING_BURST_SECONDS
-    return SLEEP_SECONDS
+    return max(30, base)
 
 
 # =========================================================
@@ -1555,7 +1565,22 @@ def main():
                     print(f"[{ts}] Market OPEN  -  running")
                     run_once()
                 else:
-                    print(f"[{ts}] Waiting: {reason}")
+                    # V4.6.87 — the open/close "skip" window only blocks NEW
+                    # entries (wide spreads). EXISTING positions must still be
+                    # managed: enforce stop-loss / take-profit every cycle so a
+                    # holding that gapped past its stop at the open is sold
+                    # immediately instead of waiting out the window.
+                    try:
+                        _st = load_state()
+                        _st = sync_brackets_with_alpaca(_st)
+                        _st = force_close_stale_brackets(_st)
+                        save_state(_st)
+                        _open = count_open_brackets(_st)
+                    except Exception as _me:
+                        print(f"[manage] {_me}", flush=True)
+                        _open = 0
+                    print(f"[{ts}] Waiting: {reason}  "
+                          f"(managing {_open} open position(s) — stops still active)")
 
                 s = get_sleep(clock)
                 print(f"  Next run in {s}s")
