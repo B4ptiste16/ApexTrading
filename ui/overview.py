@@ -1094,12 +1094,21 @@ class ToolsTab(QWidget):
         alloc_edit.setPlaceholderText("e.g. 30")
         alloc_edit.setFixedWidth(70)
         alloc_edit.textChanged.connect(self._update_ibkr_remaining)
+        # V4.6.93 — the field now DISPLAYS each bot's live share of the IBKR
+        # portfolio (auto-refreshed), but stays editable. textEdited fires only
+        # on real keystrokes (not on our programmatic setText), so we use it to
+        # mark the row "dirty" — only dirty rows are treated as a new manual
+        # target on Save (preventing the live display from causing sell-downs).
+        try:
+            _saved_target = float(str(allocation).rstrip("%") or 0)
+        except ValueError:
+            _saved_target = 0.0
 
-        # V4.6.51 — live current allocation (value share that grows/shrinks
-        # with the bot's performance), filled in by _refresh_ibkr_live_alloc().
-        live_lbl = QLabel("live: …")
+        # V4.6.51/93 — shows the bot's live sub-portfolio $ value next to its
+        # share %, filled in by _refresh_ibkr_live_alloc().
+        live_lbl = QLabel("…")
         live_lbl.setStyleSheet(f"color:{C['muted']};font-size:11px;")
-        live_lbl.setFixedWidth(190)
+        live_lbl.setFixedWidth(110)
 
         # Replace button — opens picker to swap this slot to another bot
         repl_btn = QPushButton("Replace")
@@ -1135,9 +1144,17 @@ class ToolsTab(QWidget):
             "cid_edit": cid_edit, "alloc_edit": alloc_edit,
             "live_lbl": live_lbl,
             "lbl_widget": lbl_w, "row_widget": row_w,
+            "target_pct": _saved_target,   # V4.6.93 — manual allocation target
+            "user_dirty": False,           # V4.6.93 — user typed a new target
         }
         self._ibkr_bot_rows.append(entry)
         self._ibkr_rows_layout.addWidget(row_w)
+
+        # V4.6.93 — a real keystroke marks this row dirty so Save uses the typed
+        # value as the new target (not the auto-displayed live share).
+        def _mark_dirty(_t, _e=entry):
+            _e["user_dirty"] = True
+        alloc_edit.textEdited.connect(_mark_dirty)
 
         def _remove(_e=entry):
             from PyQt6.QtWidgets import QMessageBox, QApplication
@@ -1399,13 +1416,25 @@ class ToolsTab(QWidget):
             next_cid += 1
         self._ibkr_add_bot_row(bot_id, str(next_cid), "")
 
+    def _row_target(self, r) -> str:
+        """V4.6.93 — the row's MANUAL allocation target as a string. The
+        editable field now auto-displays the bot's live share, so the saved
+        target is the typed value only when the user actually edited it
+        (user_dirty); otherwise it's the stored target_pct. Used by Save / seed
+        / rebalance so the live display never gets mistaken for a new target."""
+        if r.get("user_dirty"):
+            return r["alloc_edit"].text().strip().rstrip("%")
+        return f"{float(r.get('target_pct', 0) or 0):g}"
+
     def _update_ibkr_remaining(self):
         """Recompute and display allocated / remaining % across all IBKR bot rows."""
         if not hasattr(self, "_ibkr_remaining_lbl"):
             return
         allocated = 0.0
         for r in getattr(self, "_ibkr_bot_rows", []):
-            txt = r["alloc_edit"].text().strip().rstrip("%")
+            # V4.6.93 — sum the MANUAL targets (caps), not the live-display %, so
+            # "Remaining" tells you how much you can still allocate.
+            txt = self._row_target(r)
             if txt:
                 try:
                     allocated += float(txt)
@@ -1462,7 +1491,7 @@ class ToolsTab(QWidget):
                     {
                         "id":         r["id"],
                         "client_id":  r["cid_edit"].text().strip() or str(i + 1),
-                        "allocation": r["alloc_edit"].text().strip().rstrip("%"),
+                        "allocation": self._row_target(r),
                     }
                     for i, r in enumerate(self._ibkr_bot_rows)
                 ],
@@ -1494,7 +1523,7 @@ class ToolsTab(QWidget):
                 if cash_for_bots > 0:
                     seeded = ibkr_lifecycle.seed_all(
                         [{"id": r["id"],
-                          "allocation": r["alloc_edit"].text()}
+                          "allocation": self._row_target(r)}
                          for r in self._ibkr_bot_rows],
                         cash_for_bots)
             except Exception as e:
@@ -1507,13 +1536,22 @@ class ToolsTab(QWidget):
             for r in self._ibkr_bot_rows:
                 sid = str(r["id"]).upper()
                 try:
-                    new_pct = float(r["alloc_edit"].text().strip().rstrip("%") or 0)
+                    new_pct = float(self._row_target(r) or 0)
                 except ValueError:
                     continue
                 old_pct = _old_alloc.get(sid)
                 if old_pct is not None and new_pct < old_pct - 1e-9:
                     self._trigger_ibkr_rebalance(sid, new_pct)
                     rebalanced += 1
+                # V4.6.93 — persist the saved target and clear the dirty flag so
+                # the field reverts to auto-displaying the live share.
+                r["target_pct"] = new_pct
+                r["user_dirty"] = False
+            # Re-pull the live share into the (now clean) fields immediately.
+            try:
+                self._refresh_ibkr_live_alloc()
+            except Exception:
+                pass
             msg = "✓ Saved"
             if seeded:
                 msg = f"✓ Saved · seeded {seeded} sub-portfolio(s)"
@@ -1565,26 +1603,47 @@ class ToolsTab(QWidget):
                 v = float(L.get("value", 0) or 0)
                 if v > 0:
                     values[str(L.get("bot_id", "")).upper()] = v
-            total = sum(values.values())
-            for r in getattr(self, "_ibkr_bot_rows", []):
-                lbl = r.get("live_lbl")
-                if lbl is None:
-                    continue
+            rows = getattr(self, "_ibkr_bot_rows", [])
+            # V4.6.93 — the Alloc % FIELD now shows each bot's LIVE share of the
+            # IBKR portfolio. We distribute the saved allocation pool (Σ targets,
+            # which leaves room for the reserve + free cash, so the shown values
+            # stay under 100%) across the bots by their current value weight:
+            #     share_i = (value_i / Σ values) × Σ targets
+            # As a bot grows relative to the others its % rises automatically;
+            # the column always sums to your allocated total.
+            sum_v = sum(values.get(str(r["id"]).upper(), 0.0) for r in rows)
+            sum_tgt = sum(float(r.get("target_pct", 0) or 0) for r in rows)
+            for r in rows:
                 v = values.get(str(r["id"]).upper(), 0.0)
-                if v > 0 and total > 0:
-                    lbl.setText(f"live: {v / total * 100:.1f}%  ·  ${v:,.0f}")
-                    lbl.setStyleSheet(f"color:{C['green']};font-size:11px;")
-                else:
-                    lbl.setText("live: …")
-                    lbl.setStyleSheet(f"color:{C['muted']};font-size:11px;")
-            # V4.6.90 — surface the LIVE allocated dollar total (sum of every
-            # bot's current sub-portfolio value) so the allocated amount visibly
-            # tracks growth, alongside the target-% remaining indicator.
+                lbl = r.get("live_lbl")
+                if lbl is not None:
+                    if v > 0:
+                        lbl.setText(f"${v:,.0f}")
+                        lbl.setStyleSheet(f"color:{C['green']};font-size:11px;")
+                    else:
+                        lbl.setText("…")
+                        lbl.setStyleSheet(f"color:{C['muted']};font-size:11px;")
+                # Write the live share into the editable field — but never while
+                # the user is editing it (has focus) or has typed a pending value
+                # (user_dirty). blockSignals avoids a redundant remaining-recalc.
+                ae = r.get("alloc_edit")
+                if (ae is not None and sum_v > 0 and sum_tgt > 0 and v > 0
+                        and not ae.hasFocus() and not r.get("user_dirty")):
+                    share = (v / sum_v) * sum_tgt
+                    ae.blockSignals(True)
+                    ae.setText(f"{share:.1f}")
+                    ae.blockSignals(False)
             try:
-                if hasattr(self, "_ibkr_remaining_lbl") and total > 0:
+                self._update_ibkr_remaining()
+            except Exception:
+                pass
+            # V4.6.90/93 — surface the LIVE allocated dollar total (sum of every
+            # bot's current sub-portfolio value) next to the remaining indicator.
+            try:
+                if hasattr(self, "_ibkr_remaining_lbl") and sum_v > 0:
                     base = self._ibkr_remaining_lbl.text().split("  ·  live")[0]
                     self._ibkr_remaining_lbl.setText(
-                        f"{base}  ·  live allocated ${total:,.0f}")
+                        f"{base}  ·  live ${sum_v:,.0f} in bots")
             except Exception:
                 pass
 
