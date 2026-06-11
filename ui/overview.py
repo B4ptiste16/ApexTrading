@@ -98,6 +98,11 @@ class OverviewTab(QWidget):
         cl.addWidget(self._pl_period_combo)
         cl.addSpacing(16)
         cl.addWidget(self._sort_combo)
+
+        # V4.6.94 — combined per-broker performance summary at the very top:
+        # one headline card aggregating EVERY bot on the active broker.
+        s.add(self._build_broker_summary())
+
         s.add(SectionHeader("ALL ACCOUNTS", C["text"], controls=controls_w))
 
         # V4.0.0 — switched from a single horizontal row to a wrapping
@@ -424,6 +429,103 @@ class OverviewTab(QWidget):
     def _on_combined(self, df):
         period = self.period_combo.currentText()
         self.combined_chart.load_chart(CH.combined_history_chart(df, period))
+        # V4.6.94 — feed the combined TOTAL P/L into the broker-summary card so
+        # it matches the chart's series exactly.
+        try:
+            if df is not None and not df.empty and "profit_loss" in df.columns:
+                pl = float(df["profit_loss"].iloc[-1] - df["profit_loss"].iloc[0])
+                eq0 = float(df["equity"].iloc[0]) or 0.0
+                pct = (pl / eq0 * 100) if eq0 else 0.0
+                card = self._broker_cards.get("TOTAL P/L")
+                if card is not None:
+                    col = C["green"] if pl >= 0 else C["red"]
+                    card.update_value(f"{'+' if pl>=0 else ''}${pl:,.0f} ({pct:+.1f}%)", col)
+        except Exception:
+            pass
+
+    # ── V4.6.94 — combined per-broker performance summary ──────────────
+    def _build_broker_summary(self) -> QWidget:
+        """A headline card at the top of the Overview that aggregates EVERY
+        bot running on the active broker: total value, day P/L, total P/L and
+        open positions. The broker is shown as its logo."""
+        from PyQt6.QtGui import QPixmap
+        frame = QFrame()
+        frame.setStyleSheet(
+            f"background:{C['panel']};border:none;border-radius:12px;")
+        outer = QVBoxLayout(frame)
+        outer.setContentsMargins(18, 14, 18, 14)
+        outer.setSpacing(12)
+
+        # Header: broker logo + "ALL BOTS"
+        head = QHBoxLayout()
+        head.setSpacing(10)
+        self._broker_logo_lbl = QLabel()
+        self._broker_logo_lbl.setFixedHeight(26)
+        self._broker_name_lbl = QLabel("ALL BOTS")
+        self._broker_name_lbl.setStyleSheet(
+            f"font-family:'Syne',sans-serif;font-size:13px;font-weight:800;"
+            f"letter-spacing:2px;color:{C['text']};")
+        head.addWidget(self._broker_logo_lbl)
+        head.addWidget(self._broker_name_lbl)
+        head.addStretch()
+        outer.addLayout(head)
+
+        # Metric cards
+        cards_row = QHBoxLayout()
+        cards_row.setSpacing(10)
+        self._broker_cards = {}
+        for lbl in ("TOTAL VALUE", "DAY P/L", "TOTAL P/L", "POSITIONS"):
+            card = MetricCard(lbl, "—", C["text"])
+            card.setFixedHeight(74)
+            self._broker_cards[lbl] = card
+            cards_row.addWidget(card)
+        outer.addLayout(cards_row)
+        return frame
+
+    def _refresh_broker_summary(self):
+        """Aggregate self._last_metrics across every displayed bot and update
+        the headline broker-summary card. Called from refresh()."""
+        try:
+            from ui.bot_card import broker_icon
+            broker = D.current_broker()
+            # Logo / name
+            pm = broker_icon(broker, 24)
+            if pm is not None and hasattr(self, "_broker_logo_lbl"):
+                self._broker_logo_lbl.setPixmap(pm)
+                self._broker_logo_lbl.setText("")
+            elif hasattr(self, "_broker_logo_lbl"):
+                self._broker_logo_lbl.setText(broker.upper())
+                self._broker_logo_lbl.setStyleSheet(
+                    f"color:{C['text']};font-size:13px;font-weight:800;")
+
+            sides = [b["side"] for b in self._displayable_bots()]
+            tot_val = 0.0
+            day_pl = 0.0
+            prev_eq = 0.0
+            positions = 0
+            have = False
+            for sid in sides:
+                m = self._last_metrics.get(sid)
+                if not m:
+                    continue
+                have = True
+                pv = float(m.get("portfolio", 0) or 0)
+                dp = float(m.get("day_pl", 0) or 0)
+                tot_val += pv
+                day_pl += dp
+                prev_eq += (pv - dp)            # equity at start of day
+                positions += int(m.get("positions", 0) or 0)
+            if not have:
+                return
+            day_pct = (day_pl / prev_eq * 100) if prev_eq else 0.0
+            self._broker_cards["TOTAL VALUE"].update_value(
+                f"${tot_val:,.0f}", C["text"])
+            dcol = C["green"] if day_pl >= 0 else C["red"]
+            self._broker_cards["DAY P/L"].update_value(
+                f"{'+' if day_pl>=0 else ''}${day_pl:,.0f} ({day_pct:+.1f}%)", dcol)
+            self._broker_cards["POSITIONS"].update_value(str(positions), C["text"])
+        except Exception as e:
+            print(f"[overview] broker summary: {e}")
 
     def refresh(self):
         """V7.1.1: freeze repaints around the whole refresh sweep so Qt
@@ -455,6 +557,11 @@ class OverviewTab(QWidget):
                     self._refresh_block(side, block)
                 except Exception as e:
                     print(f"[overview] block {side}: {e}")
+            # V4.6.94 — combined per-broker headline
+            try:
+                self._refresh_broker_summary()
+            except Exception as e:
+                print(f"[overview] broker summary: {e}")
         finally:
             self.setUpdatesEnabled(True)
 
@@ -764,6 +871,13 @@ class ToolsTab(QWidget):
         banner_lbl.setWordWrap(True)
         banner_row.addWidget(banner_lbl)
         s.add(banner)
+
+        # V4.6.94 — collapsible "how to create & link an IBKR account" guide.
+        try:
+            from ui.onboarding import InstructionsPanel
+            s.add(InstructionsPanel("ibkr"))
+        except Exception as _e:
+            print(f"[tools] ibkr instructions: {_e}")
 
         # ── Gateway connection ────────────────────────────────────────────
         s.add(SectionHeader("IBKR  ·  GATEWAY CONNECTION", C["green"]))
@@ -1953,6 +2067,12 @@ class ToolsTab(QWidget):
         _refresh.clicked.connect(self.refresh_alpaca_slot_assignments)
         s.add(SectionHeader("ALPACA  ·  API KEYS", C["green"],
                             controls=_refresh))
+        # V4.6.94 — collapsible "how to create & link an Alpaca account" guide.
+        try:
+            from ui.onboarding import InstructionsPanel
+            s.add(InstructionsPanel("alpaca"))
+        except Exception as _e:
+            print(f"[tools] alpaca instructions: {_e}")
         # V4.6.58 — the slots are mode-aware. When the header Paper/Live toggle
         # is in LIVE mode, the slots read/write LIVE-namespaced keys
         # (ALPACA_API_KEY_LIVE_<SIDE>) so you enter your REAL Alpaca keys once

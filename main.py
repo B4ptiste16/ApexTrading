@@ -1634,6 +1634,8 @@ class ApexWindow(QMainWindow):
         # V4.0.1 — show the T&C acceptance modal if the user hasn't
         # ticked it yet. Defer so the main window has time to paint.
         QTimer.singleShot(2000, self._check_tos_acceptance)
+        # V4.6.94 — first-run welcome wizard (after T&C so it doesn't stack).
+        QTimer.singleShot(2600, self._maybe_show_onboarding)
         # V4.0.0 — apply the saved broker mode AFTER the tabs are wired
         # so the stack is fully populated before we switch pages.
         QTimer.singleShot(0, lambda: self._apply_broker_mode(
@@ -1996,10 +1998,19 @@ class ApexWindow(QMainWindow):
         tb.setTabVisible(self._manual_idx, on)
 
         # ── Corner buttons ─────────────────────────────────────────────
-        if hasattr(self, "_corner_universe"):
-            self._corner_universe.setVisible(not on)
-        if hasattr(self, "_corner_makebot"):
-            self._corner_makebot.setVisible(not on)
+        # V4.6.94 — MANUAL mode is a fully separate workspace: hide EVERY
+        # auto-mode nav button so the only thing shared with auto is the broker
+        # chip. The manual tab is self-contained (connect + trade + positions).
+        for attr in ("_corner_universe", "_corner_makebot", "_corner_friends",
+                     "_corner_account", "_corner_tools"):
+            btn = getattr(self, attr, None)
+            if btn is not None:
+                btn.setVisible(not on)
+        # Admin button: only ever visible to admins — hide in manual, and on the
+        # way back restore it to the admin-status flag (default hidden).
+        if hasattr(self, "_corner_admin"):
+            self._corner_admin.setVisible(
+                (not on) and bool(getattr(self, "_is_admin_user", False)))
 
         # ── Navigate to the right tab ──────────────────────────────────
         if on:
@@ -2781,6 +2792,24 @@ class ApexWindow(QMainWindow):
 
     # ── V4.0.1 — Terms of Service acceptance ─────────────────
 
+    def _maybe_show_onboarding(self):
+        """V4.6.94 — first time on a fresh account, show the welcome wizard
+        (intro → pick broker → connect steps). Marks itself done so it only
+        ever appears once. If the user picked a broker, reflect it in the UI."""
+        try:
+            from ui.onboarding import needs_onboarding, WelcomeWizard
+            if not needs_onboarding():
+                return
+            dlg = WelcomeWizard(self)
+            dlg.exec()
+            # The wizard may have changed broker_mode — re-sync the header/tabs.
+            try:
+                self._set_broker_mode(self._current_broker_mode())
+            except Exception:
+                pass
+        except Exception as e:
+            print(f"[onboarding] wizard failed: {e}")
+
     def _check_tos_acceptance(self):
         """Hit /auth/tos and pop a modal if the user hasn't accepted yet.
         The modal blocks (modal exec) until the user explicitly clicks
@@ -2965,8 +2994,9 @@ class ApexWindow(QMainWindow):
         # Admin corner button — show only for admin roles
         role = (me or {}).get("role", "USER")
         is_admin = role in ("ADMIN", "SUB_BOSS_ADMIN", "BOSS_ADMIN")
+        self._is_admin_user = is_admin   # V4.6.94 — manual-mode restore needs it
         if hasattr(self, "_corner_admin"):
-            self._corner_admin.setVisible(is_admin)
+            self._corner_admin.setVisible(is_admin and not self._is_manual_mode())
             if is_admin:
                 self._corner_admin.setToolTip(f"Admin dashboard · role: {role}")
 

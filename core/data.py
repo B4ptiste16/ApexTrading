@@ -631,18 +631,34 @@ def _get_history_uncached(side: str, period: str,
         return pd.DataFrame()
 
 
+def active_bot_sides() -> list[str]:
+    """V4.6.94 — every active (non-silenced) bot side for the CURRENT
+    broker/mode: built-ins + custom bots. Used so the combined portfolio chart
+    reflects ALL bots (e.g. a custom 'energy' bot), not just LONG/SHORT/DAY.
+    Falls back to the three built-ins if the registry can't be read."""
+    try:
+        reg = load_bot_registry()
+        active   = list(reg.get("active", ["LONG", "SHORT", "DAY"]))
+        silenced = set(reg.get("silenced", []))
+        sides = [s for s in active if s not in silenced]
+        return sides or ["LONG", "SHORT", "DAY"]
+    except Exception:
+        return ["LONG", "SHORT", "DAY"]
+
+
 def get_combined_history(period: str) -> pd.DataFrame:
     """
-    Total portfolio value over time = LONG + SHORT + DAY equity, aligned on
-    Alpaca's portfolio-history timestamps. Works 24/7 (Alpaca returns the
-    equity series whether or not the market is open), independent of whether
-    any bot is running.
+    Total portfolio value over time = sum of EVERY active bot's equity,
+    aligned on each bot's recorded timestamps. Works 24/7, independent of
+    whether any bot is running.
 
     v3.1.2 — also sums profit_loss across all sides so the overview chart
     can show deposit-adjusted performance.
+    V4.6.94 — now sums ALL active bots (incl. custom bots like 'energy'),
+    not just the three built-ins, so the curve matches the live total.
     """
     frames = []
-    for side in ("LONG", "SHORT", "DAY"):
+    for side in active_bot_sides():
         df = get_history(side, period)
         if df is not None and not df.empty:
             frames.append(df.rename(columns={
@@ -651,13 +667,26 @@ def get_combined_history(period: str) -> pd.DataFrame:
             }).set_index("time"))
     if not frames:
         return pd.DataFrame()
-    merged = pd.concat(frames, axis=1).sort_index().ffill().fillna(0.0)
+    # V4.6.94 — ffill then bfill (not fillna(0)): a bot that started mid-period
+    # otherwise dragged the combined equity down to a bogus 0 at the start,
+    # producing a flat/spiky curve. bfill carries its first known value back.
+    merged = pd.concat(frames, axis=1).sort_index().ffill().bfill().fillna(0.0)
     eq_cols = [c for c in merged.columns if c.startswith("eq_")]
     pl_cols = [c for c in merged.columns if c.startswith("pl_")]
+    eq_series = (merged[eq_cols].sum(axis=1)
+                 if eq_cols else pd.Series(0.0, index=merged.index))
+    if pl_cols:
+        pl_series = merged[pl_cols].sum(axis=1)
+    else:
+        # V4.6.94 — IBKR / custom bots record EQUITY only (no profit_loss). The
+        # overview chart plots P/L, so derive it from the equity baseline,
+        # otherwise the line is flat at $0 even though equity is moving.
+        base = float(eq_series.iloc[0]) if len(eq_series) else 0.0
+        pl_series = eq_series - base
     return pd.DataFrame({
         "time":        merged.index,
-        "equity":      merged[eq_cols].sum(axis=1).values if eq_cols else 0,
-        "profit_loss": merged[pl_cols].sum(axis=1).values if pl_cols else 0,
+        "equity":      eq_series.values,
+        "profit_loss": pl_series.values,
     }).reset_index(drop=True)
 
 

@@ -166,8 +166,55 @@ def ai_logo_chip(provider: str, active: bool = False) -> QWidget:
     return lbl
 
 
+# ── Broker logos (V4.6.94) ───────────────────────────────────────────────
+# Real PNGs live at assets/<broker>_logo.png; we show the logo instead of a
+# text chip. Falls back to a branded text chip if the file is missing.
+_BROKER_DIR = Path(__file__).resolve().parent.parent / "assets"
+_BROKER_FILES = {
+    "alpaca": ["alpaca_logo", "Alpaca", "alpaca"],
+    "ibkr":   ["ibkr_logo", "IBKR", "ibkr"],
+}
+_BROKER_BRAND = {"alpaca": ("Alpaca", "#00b67a"), "ibkr": ("IBKR", "#d6231f")}
+
+
+def _broker_logo_path(broker: str):
+    for stem in _BROKER_FILES.get(broker.lower(), [broker]):
+        for ext in (".png", ".PNG", ".svg"):
+            p = _BROKER_DIR / f"{stem}{ext}"
+            if p.exists():
+                return p
+    return None
+
+
+def broker_icon(broker: str, height: int = 18) -> QPixmap | None:
+    ck = ("broker", broker.lower(), height)
+    if ck in _ICON_CACHE:
+        return _ICON_CACHE[ck]
+    png = _broker_logo_path(broker)
+    if png is not None:
+        try:
+            pm = QPixmap(str(png)).scaledToHeight(
+                height, Qt.TransformationMode.SmoothTransformation)
+            if not pm.isNull():
+                _ICON_CACHE[ck] = pm
+                return pm
+        except Exception:
+            pass
+    return None
+
+
 def _broker_chip(broker: str) -> QLabel:
-    name = {"alpaca": "Alpaca", "ibkr": "IBKR"}.get(broker.lower(), broker)
+    """V4.6.94 — show the broker's LOGO (name in tooltip). Falls back to a
+    branded text chip when no logo file is bundled."""
+    name = _BROKER_BRAND.get(broker.lower(), (broker, C["muted"]))[0]
+    pm = broker_icon(broker, 18)
+    if pm is not None:
+        lbl = QLabel()
+        lbl.setPixmap(pm)
+        lbl.setFixedHeight(22)
+        lbl.setToolTip(name)
+        lbl.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
+        return lbl
     col = C["green"] if broker.lower() == "alpaca" else C["purple"]
     lbl = QLabel(name)
     lbl.setStyleSheet(

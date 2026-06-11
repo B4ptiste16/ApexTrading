@@ -29,13 +29,21 @@ class _FetchWorker(QThread):
 
     def run(self):
         try:
-            from core import data as D
-            positions = D.get_positions(MANUAL_SIDE) or []
-            account   = D.get_account(MANUAL_SIDE)
-            self.done.emit(True, {
-                "positions": positions,
-                "account":   account.__dict__ if hasattr(account, "__dict__") else {},
-            })
+            client = _manual_client()
+            if client is None:
+                self.done.emit(False, {"error": "no manual key"})
+                return
+            a = client.get_account()
+            eq = float(getattr(a, "equity", 0) or 0)
+            account = {
+                "portfolio_value": float(getattr(a, "portfolio_value", eq) or eq),
+                "equity":          eq,
+                "last_equity":     float(getattr(a, "last_equity", eq) or eq),
+                "buying_power":    float(getattr(a, "buying_power", 0) or 0),
+                "cash":            float(getattr(a, "cash", 0) or 0),
+            }
+            positions = client.get_all_positions() or []
+            self.done.emit(True, {"positions": positions, "account": account})
         except Exception as e:
             self.done.emit(False, {"error": str(e)})
 
@@ -52,8 +60,10 @@ class _OrderWorker(QThread):
 
     def run(self):
         try:
-            from core import data as D
-            client = D.get_client(MANUAL_SIDE)
+            client = _manual_client()
+            if client is None:
+                self.done.emit(False, "No manual account configured.")
+                return
             from alpaca.trading.requests import MarketOrderRequest, LimitOrderRequest
             from alpaca.trading.enums    import OrderSide, TimeInForce
             side_enum = OrderSide.BUY if self.direction == "BUY" else OrderSide.SELL
@@ -82,9 +92,29 @@ def _has_manual_key() -> bool:
     try:
         from core import data as D
         keys = D.read_env_keys()
-        return bool(keys.get("ALPACA_API_KEY_MANUAL", "").strip())
+        return bool(keys.get("ALPACA_API_KEY_MANUAL", "").strip()
+                    and keys.get("ALPACA_SECRET_KEY_MANUAL", "").strip())
     except Exception:
         return False
+
+
+def _manual_client():
+    """V4.6.94 — build the dedicated MANUAL Alpaca client DIRECTLY from its
+    keys, independent of the app's active broker. Manual trading always runs
+    on its own Alpaca paper account, so it must keep working even while the
+    rest of the app is set to IBKR (where D.get_client returns None)."""
+    try:
+        from core import data as D
+        keys = D.read_env_keys()
+        key = keys.get("ALPACA_API_KEY_MANUAL", "").strip()
+        sec = keys.get("ALPACA_SECRET_KEY_MANUAL", "").strip()
+        if not key or not sec:
+            return None
+        from alpaca.trading.client import TradingClient
+        return TradingClient(key, sec, paper=True)
+    except Exception as e:
+        print(f"[manual] client build failed: {e}")
+        return None
 
 
 class ManualTradingTab(QWidget):
@@ -173,12 +203,45 @@ class ManualTradingTab(QWidget):
         v.addWidget(title)
 
         desc = QLabel(
-            "Manual trading needs its own dedicated Alpaca paper account.\n"
-            "Create a separate Alpaca account, copy its API key pair, then go to:\n"
-            "TOOLS  →  MANUAL TRADING ACCOUNT  →  paste key + secret  →  Save.")
+            "Manual trading uses its own dedicated Alpaca paper account, kept "
+            "completely separate from your bots. Create a separate Alpaca "
+            "account, then paste its API key + secret below and Save.")
         desc.setStyleSheet(f"color:{C['muted']};font-size:11px;line-height:1.7;")
         desc.setWordWrap(True)
         v.addWidget(desc)
+
+        # V4.6.94 — inline key entry so manual mode is self-contained (the Tools
+        # tab is hidden in manual mode).
+        from ui.widgets import NoScrollComboBox  # noqa: F401 (kept for parity)
+        self._mk_key_edit = QLineEdit()
+        self._mk_key_edit.setPlaceholderText("Alpaca API Key ID")
+        self._mk_sec_edit = QLineEdit()
+        self._mk_sec_edit.setPlaceholderText("Alpaca Secret Key")
+        self._mk_sec_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        for e in (self._mk_key_edit, self._mk_sec_edit):
+            e.setStyleSheet(
+                f"QLineEdit{{background:{C['bg']};color:{C['text']};border:1px "
+                f"solid {C['border']};border-radius:6px;padding:7px 10px;"
+                f"font-size:11px;}}")
+            v.addWidget(e)
+        save_row = QHBoxLayout()
+        save_btn = QPushButton("Save manual keys")
+        save_btn.setObjectName("addBotBtn")
+        save_btn.clicked.connect(self._save_manual_keys_inline)
+        save_row.addWidget(save_btn)
+        self._mk_msg = QLabel("")
+        self._mk_msg.setStyleSheet(f"color:{C['green']};font-size:10px;")
+        save_row.addWidget(self._mk_msg)
+        save_row.addStretch()
+        srw = QWidget(); srw.setLayout(save_row)
+        v.addWidget(srw)
+
+        # Collapsible "how to create & link an Alpaca account" guide.
+        try:
+            from ui.onboarding import InstructionsPanel
+            v.addWidget(InstructionsPanel("alpaca"))
+        except Exception as _e:
+            print(f"[manual] instructions: {_e}")
 
         why = QLabel(
             "Why separate?  Bot accounts have active orders managed by algorithms. "
@@ -190,6 +253,26 @@ class ManualTradingTab(QWidget):
         v.addWidget(why)
 
         return frame
+
+    def _save_manual_keys_inline(self):
+        try:
+            from core import data as D
+            key = self._mk_key_edit.text().strip()
+            sec = self._mk_sec_edit.text().strip()
+            if not key or not sec:
+                self._mk_msg.setText("Enter both key and secret.")
+                self._mk_msg.setStyleSheet(f"color:{C['red']};font-size:10px;")
+                return
+            D.write_env_keys({
+                "ALPACA_API_KEY_MANUAL":    key,
+                "ALPACA_SECRET_KEY_MANUAL": sec,
+            })
+            self._mk_msg.setText("✓ Saved")
+            self._mk_msg.setStyleSheet(f"color:{C['green']};font-size:10px;")
+            self._refresh_key_state()
+        except Exception as e:
+            self._mk_msg.setText(f"Save failed: {e}")
+            self._mk_msg.setStyleSheet(f"color:{C['red']};font-size:10px;")
 
     def _build_main_content(self, layout: QVBoxLayout):
         # Metrics row
@@ -371,22 +454,27 @@ class ManualTradingTab(QWidget):
     def _on_data(self, ok: bool, data: dict):
         if not ok:
             return
-        acct = data.get("account", {})
+        acct = data.get("account", {}) or {}
         try:
-            self._m_equity.update_value(
-                f"${float(acct.get('equity', 0) or 0):,.2f}")
+            pv = float(acct.get("portfolio_value", acct.get("equity", 0)) or 0)
+            self._m_equity.update_value(f"${pv:,.2f}")
         except Exception:
             pass
         try:
-            daypl = float(acct.get("unrealized_intraday_pl", 0) or 0)
+            # V4.6.94 — the account dict has equity + last_equity, not Alpaca's
+            # raw unrealized_intraday_pl; derive the day P/L from them.
+            eq = float(acct.get("equity", 0) or 0)
+            le = float(acct.get("last_equity", eq) or eq)
+            daypl = eq - le
+            dpct  = (daypl / le * 100) if le else 0.0
             self._m_daypl.update_value(
-                f"{'+'if daypl>=0 else ''}{daypl:,.2f}",
+                f"{'+'if daypl>=0 else ''}${daypl:,.2f} ({dpct:+.1f}%)",
                 C["green"] if daypl >= 0 else C["red"])
         except Exception:
             pass
         try:
             self._m_bp.update_value(
-                f"${float(acct.get('buying_power', 0) or 0):,.2f}")
+                f"${float(acct.get('buying_power', acct.get('cash', 0)) or 0):,.2f}")
         except Exception:
             pass
 
