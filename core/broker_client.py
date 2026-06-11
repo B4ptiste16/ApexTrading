@@ -239,6 +239,16 @@ class UnsupportedSymbol(Exception):
             f"for full coin coverage.")
 
 
+class _GatewaySlow(Exception):
+    """V4.6.97 — raised when an IBKR request times out because the gateway is
+    slow / not answering (NOT because the symbol is invalid). The caller backs
+    off and trades by name instead of hammering more blocking requests, which
+    used to hang the bot for minutes right after startup cleanup."""
+    def __init__(self, symbol: str = ""):
+        self.symbol = symbol
+        super().__init__(f"IBKR gateway slow qualifying {symbol or 'contracts'}")
+
+
 class _IBKRShim:
     """alpaca-py TradingClient look-alike backed by ib_async.
 
@@ -848,8 +858,16 @@ class _IBKRShim:
         if not hasattr(self, "_supported_cache"):
             self._supported_cache = set()
         out = []
+        gateway_slow = False
         for s in symbols:
             sym = normalize_symbol(s)
+            # V4.6.97 — once the gateway shows it's slow to qualify, stop hammering
+            # it for the rest of the universe (that's what hung bots after the
+            # startup cleanup). Keep the remaining symbols and trade by name;
+            # actual order placement re-qualifies (with its own skip-cache).
+            if gateway_slow:
+                out.append(s)
+                continue
             if sym in self._unsupported:
                 continue
             if sym in self._supported_cache:
@@ -861,8 +879,15 @@ class _IBKRShim:
                 out.append(s)
             except UnsupportedSymbol:
                 continue
+            except _GatewaySlow:
+                gateway_slow = True
+                out.append(s)   # keep this one + everything after it
             except Exception:
                 out.append(s)   # transient — don't drop the symbol
+        if gateway_slow:
+            print("[broker] IBKR slow to qualify contracts — skipping the "
+                  "universe filter this cycle and trading by name (no hang)",
+                  flush=True)
         return out
 
     def _require_contract(self, symbol: str):
@@ -906,27 +931,46 @@ class _IBKRShim:
               flush=True)
         raise UnsupportedSymbol(sym)
 
+    def _qualify_timeout(self, c, timeout: float = 5.0) -> str:
+        """V4.6.97 — qualify a contract with a HARD timeout. Returns:
+          'ok'      — resolved (c.conId set)
+          'no'      — IBKR has no definition (fast Error 200) / other error
+          'timeout' — the gateway didn't answer in time (it's slow/degraded)
+        qualifyContracts() is otherwise unbounded: on a degraded gateway it
+        blocked, and tradeable_symbols() qualifies the whole universe (up to 6
+        exchanges × N symbols) on the first cycle — which hung bots for minutes
+        right after the startup cleanup."""
+        import asyncio
+        try:
+            self.ib.run(asyncio.wait_for(
+                self.ib.qualifyContractsAsync(c), timeout))
+            return "ok" if getattr(c, "conId", 0) else "no"
+        except asyncio.TimeoutError:
+            return "timeout"
+        except Exception:
+            return "no"
+
     def _qualify_any(self, sym: str):
         """Return a qualified contract for `sym`, or None. Crypto → PAXOS.
         Equities → SMART first, then SMART with a primaryExchange fallback so
-        symbols that need their listing venue named still resolve."""
+        symbols that need their listing venue named still resolve. Raises
+        _GatewaySlow when the gateway times out (so callers back off instead of
+        hammering five more exchanges that will also time out). V4.6.97."""
         from ib_async import Stock, Crypto
         if self.asset_type == "crypto":
             c = Crypto(sym, "PAXOS", "USD")
-            try:
-                self.ib.qualifyContracts(c)
-            except Exception:
-                return None
-            return c if getattr(c, "conId", 0) else None
+            r = self._qualify_timeout(c)
+            if r == "timeout":
+                raise _GatewaySlow(sym)
+            return c if (r == "ok" and getattr(c, "conId", 0)) else None
         for primary in (None, "NYSE", "NASDAQ", "ARCA", "AMEX", "BATS"):
             c = Stock(sym, "SMART", "USD")
             if primary:
                 c.primaryExchange = primary
-            try:
-                self.ib.qualifyContracts(c)
-            except Exception:
-                continue
-            if getattr(c, "conId", 0):
+            r = self._qualify_timeout(c)
+            if r == "timeout":
+                raise _GatewaySlow(sym)   # gateway slow — don't try 5 more venues
+            if r == "ok" and getattr(c, "conId", 0):
                 return c
         return None
 
@@ -953,7 +997,17 @@ class _IBKRShim:
         # yfinance quietly instead of logging a price-lookup failure every tick.
         try:
             c = self._qualify_any(sym)
-            tks = self.ib.reqTickers(c) if c is not None else None
+            tks = None
+            if c is not None:
+                # V4.6.97 — bound the market-data request too; an unbounded
+                # reqTickers on a degraded gateway hangs the bot. On timeout we
+                # fall through to yfinance below.
+                import asyncio
+                try:
+                    tks = self.ib.run(asyncio.wait_for(
+                        self.ib.reqTickersAsync(c), 5))
+                except Exception:
+                    tks = None
             if tks:
                 t = tks[0]
                 # Include delayed-data fields (V4.6.55) — paper accounts get
