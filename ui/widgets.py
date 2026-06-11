@@ -1034,6 +1034,13 @@ class BotProcessWidget(QWidget):
         from ui.login import load_auth, load_server_url
 
         slug = self.side.lower()
+        # V4.6.100 — tag the start with the desktop's ACTIVE broker. The custom-
+        # bot upload-then-start path previously POSTed /bots/<slug>/start with NO
+        # ?broker=, so the server fell back to the per-user DEFAULT broker — which
+        # made a custom bot launched in Alpaca mode run on IBKR (and uselessly
+        # boot the IB gateway, then fail "gateway not ready"). Built-in bots
+        # already pass this via _cloud_call; custom bots now do too.
+        _start_broker = self._broker_mode()
 
         # V4.6.19 — resolve the universe file the user assigned to
         # this bot (via the bot-tab dropdown) so we can ship its
@@ -1118,7 +1125,8 @@ class BotProcessWidget(QWidget):
                     # start boots the server-side gateway (login + API init can
                     # take up to ~90s). 15s surfaced as 'Read timed out'.
                     st = requests.post(
-                        f"{base}/bots/{slug.upper()}/start",
+                        f"{base}/bots/{slug.upper()}/start"
+                        f"?broker={_start_broker}",
                         headers=hdr, timeout=150)
                     if not st.ok:
                         self_.done.emit(False,
