@@ -926,15 +926,10 @@ class BotProcessWidget(QWidget):
         self._log("☁  Asking Oracle to start bot…", C["muted"])
         def _on(ok, body):
             if ok:
-                self._cloud_running = True
-                self._log(f"☁  Running on Oracle  ·  pid {body.get('pid','?')}",
-                          C["green"])
-                self._set_running(True)
-                self._start_cloud_polling()
+                self._on_cloud_started(body)
             else:
                 detail = body.get("detail") or body.get("text") or "start failed"
-                self._log(f"Cloud start failed: {detail}", C["red"])
-                self._set_running(False)
+                self._recover_or_fail_start(detail)
         # V4.6.82 — IBKR cold-starts boot the server-side gateway (login + API
         # init takes up to ~90s), so give the start call a long read timeout
         # instead of the default 15s (which surfaced as 'Read timed out').
@@ -1072,15 +1067,68 @@ class BotProcessWidget(QWidget):
         self._upload_worker = _UploadStart()
         def _on_done(ok, msg):
             if ok:
-                self._cloud_running = True
-                self._log(f"☁  Running on Oracle  ·  pid {msg}", C["green"])
-                self._set_running(True)
-                self._start_cloud_polling()
+                self._on_cloud_started({"pid": msg})
             else:
-                self._log(f"Cloud start failed: {msg}", C["red"])
-                self._set_running(False)
+                self._recover_or_fail_start(msg)
         self._upload_worker.done.connect(_on_done)
         self._upload_worker.start()
+
+    # ── Cloud-start success + resilient recovery (V4.6.95) ─────────────
+    def _on_cloud_started(self, body: dict):
+        """Mark the bot as running on the cloud and begin status/log polling."""
+        self._cloud_running = True
+        self._log(f"☁  Running on Oracle  ·  pid {body.get('pid','?')}",
+                  C["green"])
+        self._set_running(True)
+        self._start_cloud_polling()
+
+    def _recover_or_fail_start(self, detail):
+        """V4.6.95 — an IBKR cold start boots the gateway SYNCHRONOUSLY inside
+        the /start request (~90s), so the connection is sometimes reset by the
+        network mid-boot (ConnectionReset 10054 / read timeout). That does NOT
+        mean the bot failed: the server keeps booting the gateway and spawns the
+        bot anyway. So on a TRANSIENT connection error we poll /status until the
+        bot reports running instead of declaring failure. start_bot is
+        idempotent + lock-serialised server-side, so this is always safe.
+
+        A genuine server error (bad keys, unknown bot, gateway refused) is
+        surfaced immediately."""
+        import time
+        text = str(detail).lower()
+        transient = any(k in text for k in (
+            "aborted", "reset", "forcibly closed", "timed out", "timeout",
+            "remotedisconnected", "remote disconnected", "connection broken",
+            "connection aborted", "connectionerror", "connection error",
+            "max retries", "broken pipe", "econnreset", "10054",
+            "read timed out", "connection refused by", "temporarily")) \
+            or "10054" in str(detail)
+        if not transient:
+            self._log(f"Cloud start failed: {detail}", C["red"])
+            self._set_running(False)
+            return
+        self._log("☁  Connection dropped during start — but the gateway keeps "
+                  "booting on Oracle. Waiting for it to come up (up to ~2 min)…",
+                  C["yellow"])
+        self._recover_deadline = time.time() + 135
+        self._poll_recover_start()
+
+    def _poll_recover_start(self):
+        """Poll /status every 6s until the cloud bot is running or we give up."""
+        import time
+        def _on(ok, body):
+            if ok and body.get("running"):
+                self._log("☁  Gateway is up — bot is running.", C["green"])
+                self._on_cloud_started(body)
+                return
+            if time.time() < getattr(self, "_recover_deadline", 0):
+                QTimer.singleShot(6000, self._poll_recover_start)
+            else:
+                self._log(
+                    "Cloud start didn't confirm in time. The gateway may still "
+                    "be finishing login — tap Start again (IBKR is usually fast "
+                    "on the 2nd try once it's warm).", C["red"])
+                self._set_running(False)
+        self._cloud_call("GET", f"/bots/{self.side}/status", _on)
 
     def _cloud_stop(self):
         self._log("☁  Asking Oracle to stop bot…", C["muted"])
