@@ -203,8 +203,28 @@ def _make_ibkr_client(asset_type: str):
             f"Could not reach IB Gateway/TWS at {host}:{port} after 3 attempts "
             f"({last_err}).  Make sure the gateway is running and API access "
             f"is enabled.")
-    print(f"[broker] IBKR connected — managed accounts: {ib.managedAccounts()}",
-          flush=True)
+    # V4.6.99 — ZOMBIE-GATEWAY GUARD. A hung gateway still accepts the TCP
+    # connection but its API is dead: every request times out and it reports no
+    # managed accounts. Returning this client would make the bot run blind
+    # (equity=$0, no positions) or stall. Raise instead, so the framework's
+    # "broker not ready" path sleeps and RETRIES next tick — by then the
+    # watchdog/ensure_gateway has relaunched a healthy gateway. The bot never
+    # dies; it just waits for a working gateway.
+    accts = []
+    try:
+        accts = list(ib.managedAccounts() or [])
+    except Exception:
+        accts = []
+    if not accts:
+        try:
+            ib.disconnect()
+        except Exception:
+            pass
+        raise RuntimeError(
+            "IBKR gateway connected but returned no managed accounts — it is "
+            "unresponsive (zombie). Will retry next tick once a healthy gateway "
+            "is up.")
+    print(f"[broker] IBKR connected — managed accounts: {accts}", flush=True)
     # V4.6.58 — request REAL-TIME data now that the user can hold a live
     # market-data subscription (US Securities Snapshot + US Equity/Options
     # Streaming bundles). reqMarketDataType: 1=live, 2=frozen (last live value
