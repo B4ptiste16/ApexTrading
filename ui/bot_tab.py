@@ -12,7 +12,7 @@ from PyQt6.QtCore import Qt, QTimer
 
 from ui.styles  import COLORS, BOT_COLOR
 from ui.widgets import (
-    ChartView, MetricCard, SectionHeader,
+    ChartView, LazyChartView, MetricCard, SectionHeader,
     BotProcessWidget, ScrollContent, DataTable, ClosedTradesFeed,
     NoScrollComboBox,
 )
@@ -352,15 +352,15 @@ class BotTab(QWidget):
         title = ("OPEN BRACKETS — LIVE" if self.side=="DAY"
                  else "POSITION GAUGE — vs ATR LEVELS")
         s.add(SectionHeader(title, self.color))
-        self.gauge_chart = ChartView(height=260)
+        self.gauge_chart = LazyChartView(height=260)
         s.add(self.gauge_chart)
 
         # 6. EQUITY CURVES
         s.add(SectionHeader("EQUITY CURVES", self.color,
                             controls=self._period_combo()))
         cr = QHBoxLayout()
-        self.equity_chart   = ChartView(height=260)
-        self.lifetime_chart = ChartView(height=260)
+        self.equity_chart   = LazyChartView(height=260)
+        self.lifetime_chart = LazyChartView(height=260)
         cr.addWidget(self.equity_chart)
         cr.addWidget(self.lifetime_chart)
         cw = QWidget(); cw.setLayout(cr)
@@ -368,7 +368,7 @@ class BotTab(QWidget):
 
         # 7. TRADE HISTORY
         s.add(SectionHeader("TRADE HISTORY", self.color))
-        self.timeline_chart = ChartView(height=260)
+        self.timeline_chart = LazyChartView(height=260)
         s.add(self.timeline_chart)
         s.add(QLabel("Trade Summary",
                       styleSheet=f"color:{C['muted']};font-size:10px;margin-top:6px;"))
@@ -379,8 +379,8 @@ class BotTab(QWidget):
         # 8. P/L & ALLOCATION
         s.add(SectionHeader("P/L & ALLOCATION", self.color))
         pr = QHBoxLayout()
-        self.pl_chart  = ChartView(height=220)
-        self.pie_chart = ChartView(height=220)
+        self.pl_chart  = LazyChartView(height=220)
+        self.pie_chart = LazyChartView(height=220)
         pr.addWidget(self.pl_chart)
         pr.addWidget(self.pie_chart)
         pw = QWidget(); pw.setLayout(pr)
@@ -390,7 +390,7 @@ class BotTab(QWidget):
         s.add(SectionHeader("RISK METRICS & STATS", self.color))
         rr = QHBoxLayout()
         rr.setSpacing(14)
-        self.dd_chart = ChartView(height=180)
+        self.dd_chart = LazyChartView(height=180)
         rr.addWidget(self.dd_chart)
         self.risk_cards_frame = QFrame()
         rcl = QGridLayout(self.risk_cards_frame)

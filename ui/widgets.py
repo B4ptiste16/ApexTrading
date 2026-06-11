@@ -91,6 +91,65 @@ class ChartView(QWebEngineView):
         self._do_load(html)
 
 
+class LazyChartView(QWidget):
+    """V4.6.96 — a featherweight stand-in for ChartView.
+
+    A ChartView is a full QWebEngineView (a Chromium web view): constructing one
+    spawns a render process. A bot tab has ~7 of them, and with several bots the
+    app built 30-plus web views up-front — which froze the UI on startup and
+    every broker switch (all tabs are torn down + rebuilt), and churned on every
+    refresh cycle.
+
+    LazyChartView shows a cheap placeholder and only materialises the real
+    ChartView the first time it actually becomes visible (its tab is opened).
+    While hidden it just caches the latest html, so background refreshes of
+    off-screen tabs cost nothing. Drop-in: same load_chart(html) API."""
+
+    def __init__(self, height=280, parent=None):
+        super().__init__(parent)
+        self._height = height
+        self.setFixedHeight(height)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self._lay = QVBoxLayout(self)
+        self._lay.setContentsMargins(0, 0, 0, 0)
+        self._chart = None
+        self._pending_html = None
+        self._placeholder = QLabel("Loading…")
+        self._placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._placeholder.setStyleSheet(
+            f"color:{C['muted']};font-family:'JetBrains Mono';font-size:12px;"
+            f"background:{C['bg']};border-radius:8px;")
+        self._lay.addWidget(self._placeholder)
+
+    def _materialize(self):
+        if self._chart is not None:
+            return
+        self._chart = ChartView(height=self._height)
+        self._lay.removeWidget(self._placeholder)
+        self._placeholder.hide()
+        self._placeholder.deleteLater()
+        self._placeholder = None
+        self._lay.addWidget(self._chart)
+        if self._pending_html is not None:
+            self._chart.load_chart(self._pending_html)
+            self._pending_html = None
+
+    def showEvent(self, e):
+        super().showEvent(e)
+        if self._chart is None:
+            # Defer so opening the tab paints first, then the heavy view builds.
+            QTimer.singleShot(0, self._materialize)
+
+    def load_chart(self, html: str):
+        if self._chart is not None:
+            self._chart.load_chart(html)
+            return
+        # Hidden: just remember the newest html (no web view created).
+        self._pending_html = html
+        if self.isVisible():
+            QTimer.singleShot(0, self._materialize)
+
+
 # ─────────────────────────────────────────
 # METRIC CARD
 # ─────────────────────────────────────────
@@ -900,19 +959,28 @@ class BotProcessWidget(QWidget):
         alone — that's the whole point of dual-broker support. (This replaces
         the v4.6.39/40 'stop the stray Alpaca cloud bot' hack, which is no
         longer needed now that Alpaca and IBKR cloud bots coexist.)"""
+        attempt = getattr(self, "_resume_attempt", 0)
         def _on(ok, body):
-            if not ok:
+            if ok and body.get("running", False):
+                self._resume_attempt = 0
+                self._cloud_running = True
+                self._set_running(True)
+                brk = str(body.get("broker", self._broker_mode())).upper()
+                self._log(
+                    f"☁  Already running on Oracle [{brk}] (resumed) · pid "
+                    f"{body.get('pid','?')}",
+                    C["green"])
+                self._start_cloud_polling()
                 return
-            if not body.get("running", False):
-                return
-            self._cloud_running = True
-            self._set_running(True)
-            brk = str(body.get("broker", self._broker_mode())).upper()
-            self._log(
-                f"☁  Already running on Oracle [{brk}] (resumed) · pid "
-                f"{body.get('pid','?')}",
-                C["green"])
-            self._start_cloud_polling()
+            # V4.6.96 — not running / call failed. Right after a desktop
+            # crash/update or a server restart the bot may still be coming back
+            # up (the server watchdog restarts desired bots) or the network may
+            # be briefly flaky. Retry a few times so we re-attach to a bot that
+            # IS still trading on Oracle instead of wrongly showing it stopped
+            # (which led users to kill a live bot).
+            if attempt < 6:
+                self._resume_attempt = attempt + 1
+                QTimer.singleShot(10000, self.cloud_resume_if_running)
         self._cloud_call("GET", f"/bots/{self.side}/status", _on)
 
     def _cloud_start(self):

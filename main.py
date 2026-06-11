@@ -2405,6 +2405,16 @@ class ApexWindow(QMainWindow):
                 b.setChecked(False)
                 b.style().unpolish(b)
                 b.style().polish(b)
+        # V4.6.96 — bot tabs now refresh on demand (not every cycle), so pull
+        # fresh data for the tab we just opened. Deferred so the switch paints
+        # first, then the (lazy) charts build + load.
+        try:
+            w = self.tabs.widget(idx)
+            if (w is not None and hasattr(w, "refresh")
+                    and w in self._bot_tabs.values()):
+                QTimer.singleShot(0, w.refresh)
+        except Exception:
+            pass
 
     # ── BOT TAB MANAGEMENT ──────────────────────────────────
 
@@ -3226,14 +3236,15 @@ class ApexWindow(QMainWindow):
             # tab), not just the visible one, so every tab is preloaded and
             # switching is instant instead of loading-on-click. Bot-tab refresh
             # is async (spawns a worker), so this never blocks the UI.
+            # V4.6.96 — only refresh the OVERVIEW + the VISIBLE tab. The old code
+            # refreshed EVERY bot tab each cycle, which regenerated ~7 Plotly
+            # charts per bot on the UI thread (× every bot) and made the app lag
+            # and freeze. Hidden bot tabs now refresh on demand when opened
+            # (see _on_tab_changed), and their charts are lazy (LazyChartView).
             targets = []
             ov = getattr(self, "overview_tab", None)
             if ov is not None:
                 targets.append(ov)
-            try:
-                targets += list(self._bot_tabs.values())
-            except Exception:
-                pass
             cur = self.tabs.widget(self.tabs.currentIndex())
             if cur is not None and cur not in targets:
                 targets.append(cur)
