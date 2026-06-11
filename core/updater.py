@@ -337,13 +337,34 @@ def launch_downloaded_installer(local_path: str) -> None:
     # Manager: the batch force-kills APEX.exe below AND the installer's own
     # PrepareToInstall [Code] taskkills it again before copying, and we
     # relaunch APEX ourselves at Step 5. No locked files, no RM, no hang.
+    # V4.6.98 — ARM64 UPDATE-LOOP FIX. On Windows-on-ARM `taskkill /F /IM
+    # APEX.exe` fails with "The operation attempted is not supported" for the
+    # x64-emulated APEX.exe, so the running app was NEVER killed: it kept its
+    # files locked, the installer couldn't replace the version-bearing bundle,
+    # the app relaunched at the OLD version, and the updater offered the same
+    # update forever (the diagnostic log showed the version frozen at 4.6.95
+    # across every relaunch). PowerShell Stop-Process uses TerminateProcess
+    # (the same call Task Manager uses) and DOES kill emulated processes on
+    # ARM. We Stop-Process in a loop until every APEX.exe is gone (up to 30s)
+    # BEFORE installing, with taskkill kept only as a secondary backup.
+    ps_kill = (
+        "$d=(Get-Date).AddSeconds(30); "
+        "while((Get-Process APEX -ErrorAction SilentlyContinue) "
+        "-and (Get-Date) -lt $d){ "
+        "Get-Process APEX -ErrorAction SilentlyContinue | "
+        "Stop-Process -Force -ErrorAction SilentlyContinue; "
+        "Start-Sleep -Milliseconds 400 }"
+    )
     bat.write_text(
         "@echo off\r\n"
         "set LOG=%TEMP%\\apex_update.log\r\n"
         "set ILOG=%TEMP%\\apex_install.log\r\n"
         "echo. >> \"%LOG%\"\r\n"
         "echo === APEX Update %DATE% %TIME% === >> \"%LOG%\"\r\n"
-        "echo Step 1: kill APEX.exe instances >> \"%LOG%\"\r\n"
+        "echo Step 1: stop APEX.exe via PowerShell (ARM-reliable) >> \"%LOG%\"\r\n"
+        f"powershell -NoProfile -ExecutionPolicy Bypass -Command \"{ps_kill}\" "
+        ">> \"%LOG%\" 2>&1\r\n"
+        "echo Step 1b: taskkill backup >> \"%LOG%\"\r\n"
         "taskkill /F /IM APEX.exe >> \"%LOG%\" 2>&1\r\n"
         "echo Step 2: settle (2s) >> \"%LOG%\"\r\n"
         "timeout /t 2 /nobreak >nul\r\n"
@@ -352,9 +373,6 @@ def launch_downloaded_installer(local_path: str) -> None:
         f"\"{local_path}\" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART "
         f"\"/LOG=%ILOG%\"\r\n"
         "echo Step 4: installer exit code: %ERRORLEVEL% >> \"%LOG%\"\r\n"
-        # Always relaunch APEX, even if /RESTARTAPPLICATIONS didn't fire
-        # (Restart Manager only relaunches apps it was tracking, and we
-        # taskkilled before install).
         "echo Step 5: relaunch APEX >> \"%LOG%\"\r\n"
         "start \"\" \"%LOCALAPPDATA%\\APEX Trading Platform\\APEX.exe\"\r\n"
         "echo Step 6: done >> \"%LOG%\"\r\n"

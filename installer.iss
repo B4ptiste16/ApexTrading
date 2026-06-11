@@ -10,7 +10,7 @@
 ; -----------------------------------------------------
 
 #define MyAppName      "APEX Trading Platform"
-#define MyAppVersion   "4.6.97"
+#define MyAppVersion   "4.6.98"
 #define MyAppPublisher "APEX"
 #define MyAppExeName   "APEX.exe"
 
@@ -102,8 +102,17 @@ function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
   ResultCode: Integer;
 begin
+  // v4.6.98 — kill via PowerShell Stop-Process FIRST. On Windows-on-ARM
+  // `taskkill /F` fails ("operation not supported") for the x64-emulated
+  // APEX.exe, so the running app stayed alive, locked its files, and the
+  // bundle was never replaced -> the app relaunched at the old version and the
+  // updater looped. Stop-Process uses TerminateProcess (like Task Manager) and
+  // works on ARM. Loop until APEX is gone (up to 20s), then taskkill as backup.
+  Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+       '-NoProfile -ExecutionPolicy Bypass -Command "$d=(Get-Date).AddSeconds(20); while((Get-Process APEX -ErrorAction SilentlyContinue) -and (Get-Date) -lt $d){ Get-Process APEX -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue; Start-Sleep -Milliseconds 400 }"',
+       '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   Exec(ExpandConstant('{sys}\taskkill.exe'),
-       '/F /IM APEX.exe /T',
+       '/F /IM APEX.exe',
        '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   // brief pause so Windows releases handles before we start copying
   Sleep(800);
