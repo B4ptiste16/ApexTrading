@@ -3741,6 +3741,7 @@ def main():
             import core.account_store as _AS
             from core.paths import ACCOUNT_DIR as _ACC
             _AS.migrate_legacy_if_needed()
+            _AS.repair_registry_paths()   # heal stale absolute script paths
             _have_local_cfg = (_ACC / "apex_settings.json").exists()
             if not _have_local_cfg:
                 _AS.fetch_config_from_server()      # one-time, splash is up

@@ -83,13 +83,76 @@ def migrate_legacy_if_needed() -> None:
           flush=True)
 
 
+def repair_registry_paths() -> None:
+    """V4.6.101 — the bot registry stores ABSOLUTE script paths; after the
+    per-account migration moved bots/ into accounts/<id>/, old entries pointed
+    at files that no longer exist (which crashed the bot-tab build:
+    'NoneType' has no attribute 'name'). Rewrite any stale script path whose
+    basename exists under this account's bots dir. Idempotent; runs every
+    launch (cheap), so it also heals registries restored from the server."""
+    if ACCOUNT_DIR == DATA_DIR:
+        return
+    sf = ACCOUNT_DIR / "apex_settings.json"
+    if not sf.exists():
+        return
+    try:
+        s = json.loads(sf.read_text(encoding="utf-8"))
+    except Exception:
+        return
+    bots = ACCOUNT_DIR / "bots"
+    changed = False
+    for key, reg in list(s.items()):
+        if not (key.startswith("bot_registry") and isinstance(reg, dict)):
+            continue
+        for c in reg.get("custom", []) or []:
+            try:
+                p = Path(str(c.get("script", "")))
+                if not str(p) or p.exists():
+                    continue
+                for ext in (p.suffix or ".py", ".py", ".apex"):
+                    cand = bots / (p.stem + ext)
+                    if cand.exists():
+                        c["script"] = str(cand)
+                        changed = True
+                        break
+            except Exception:
+                continue
+    if changed:
+        try:
+            sf.write_text(json.dumps(s, indent=2), encoding="utf-8")
+            print("[migrate] repaired stale bot-script paths", flush=True)
+        except Exception:
+            pass
+
+
 # ── server-backed config ─────────────────────────────────────────────────
+def _log(msg: str) -> None:
+    """V4.6.101 — config-sync diagnostics. The frozen GUI app has no console,
+    so failures in the sync threads were invisible; append them to a small log
+    at the shared root (capped) so they're debuggable from disk."""
+    try:
+        f = DATA_DIR / "apex_config_sync.log"
+        prev = f.read_text(encoding="utf-8") if f.exists() else ""
+        if len(prev) > 20_000:
+            prev = prev[-10_000:]
+        import datetime as _dt
+        f.write_text(prev + f"{_dt.datetime.now().isoformat(timespec='seconds')} "
+                     f"{msg}\n", encoding="utf-8")
+    except Exception:
+        pass
+    try:
+        print(f"[config-sync] {msg}", flush=True)
+    except Exception:
+        pass
+
+
 def _auth():
     try:
         from ui.login import load_auth, load_server_url
         a = load_auth() or {}
         return a.get("token"), load_server_url()
-    except Exception:
+    except Exception as e:
+        _log(f"auth resolve failed: {e!r}")
         return None, None
 
 

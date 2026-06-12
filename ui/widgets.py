@@ -322,8 +322,10 @@ class BotProcessWidget(QWidget):
         self.restart_btn.setEnabled(False)
         self.restart_btn.clicked.connect(self.restart_bot)
 
-        # Script path display
-        script_lbl = QLabel(str(self.script_path.name))
+        # Script path display. V4.6.101 — script_path can be None (e.g. a custom
+        # bot whose file moved); never let that crash the whole window build.
+        script_lbl = QLabel(
+            str(self.script_path.name) if self.script_path else "(script missing)")
         script_lbl.setStyleSheet(f"color:{C['muted']};font-size:10px;")
 
         ctrl.addWidget(self.status_dot)

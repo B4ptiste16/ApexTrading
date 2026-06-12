@@ -110,6 +110,24 @@ class BotTab(QWidget):
                         alt = p.with_suffix(ext)
                         if alt.exists():
                             return alt
+                    # V4.6.101 — registry paths can go stale (the per-account
+                    # migration moved bots/ into accounts/<id>/). Resolve by
+                    # BASENAME inside this account's bots dir so old absolute
+                    # paths keep working, and heal the registry entry.
+                    from core.paths import ACCOUNT_DIR
+                    for ext in (p.suffix or ".py", ".py", ".apex"):
+                        cand = ACCOUNT_DIR / "bots" / (p.stem + ext)
+                        if cand.exists():
+                            try:
+                                c["script"] = str(cand)
+                                s[key] = reg
+                                import json as _json
+                                with open(D.SETTINGS_FILE, "w",
+                                          encoding="utf-8") as f:
+                                    _json.dump(s, f, indent=2)
+                            except Exception:
+                                pass
+                            return cand
         except Exception:
             pass
         return None
