@@ -39,7 +39,11 @@ except ImportError:
 # CONFIG
 # ─────────────────────────────────────────
 
-from core.paths import DATA_DIR as ROOT  # project root (source) or %LocalAppData% (frozen)
+from core.paths import ACCOUNT_DIR as ROOT  # V4.6.101 — per-account data dir
+# (DATA_DIR/accounts/<uid> on desktop; == DATA_DIR on the server). All
+# account-scoped data — apex_settings.json, .env, ledgers, snapshots, per-bot
+# state, universes — now lives under the signed-in account's folder so two
+# accounts on one machine never share anything.
 
 # In a frozen build the working dir is not the data dir, so load the
 # user's API keys explicitly from the data folder.

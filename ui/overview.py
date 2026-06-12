@@ -1281,7 +1281,7 @@ class ToolsTab(QWidget):
             # work whether the bot ran locally or on the cloud.
             try:
                 from core.ledger import ledger_path, Ledger
-                from core.paths import DATA_DIR
+                from core.paths import ACCOUNT_DIR as DATA_DIR
                 _local_led = Ledger.load(ledger_path(side, "ibkr", mode, DATA_DIR))
             except Exception:
                 _local_led = None
@@ -1688,7 +1688,7 @@ class ToolsTab(QWidget):
         values: dict[str, float] = {}
         try:
             import json as _json
-            from core.paths import DATA_DIR
+            from core.paths import ACCOUNT_DIR as DATA_DIR
             mode = D.load_settings().get("alpaca_mode", "paper")
             ld = DATA_DIR / "ibkr" / "ledgers"
             if ld.exists():
@@ -1825,7 +1825,7 @@ class ToolsTab(QWidget):
         # 1) local request file next to the ledger
         try:
             import json as _json
-            from core.paths import DATA_DIR
+            from core.paths import ACCOUNT_DIR as DATA_DIR
             from core.ledger import ledger_path
             lp = ledger_path(side, "ibkr", mode, DATA_DIR)
             req = lp.with_name(lp.stem + ".rebalance.json")

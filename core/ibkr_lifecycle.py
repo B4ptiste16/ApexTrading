@@ -25,7 +25,7 @@ from __future__ import annotations
 import time
 
 import core.data as D
-from core.paths import DATA_DIR
+from core.paths import ACCOUNT_DIR as DATA_DIR   # V4.6.101 — ledgers are account-scoped
 from core.ledger import Ledger, ledger_path, normalize_symbol
 
 _EPS = 1e-9

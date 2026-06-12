@@ -388,7 +388,7 @@ def _ledger_for(mode: str, side: str):
     """This bot's sub-portfolio ledger, or None when isolation isn't in use."""
     try:
         from core.ledger import ledger_path, Ledger
-        from core.paths import DATA_DIR
+        from core.paths import ACCOUNT_DIR as DATA_DIR   # V4.6.101 account-scoped
         return Ledger.load(ledger_path(side, "ibkr", mode, DATA_DIR))
     except Exception:
         return None

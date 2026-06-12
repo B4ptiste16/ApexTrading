@@ -535,7 +535,7 @@ class BotMarketTab(QWidget):
     def _install(self, slug: str, name: str):
         from PyQt6.QtCore import QThread as _QT, pyqtSignal as _Sig
         from ui.login   import load_server_url
-        from core.paths import DATA_DIR
+        from core.paths import ACCOUNT_DIR as DATA_DIR  # V4.6.101 account-scoped
 
         url = load_server_url()
 
@@ -587,7 +587,7 @@ class BotMarketTab(QWidget):
         """Open the file picker, then hand the chosen .py to MoreBotsTab's
         publish flow (which captures name + philosophy + price + uploads)."""
         from PyQt6.QtWidgets import QFileDialog
-        from core.paths import DATA_DIR
+        from core.paths import ACCOUNT_DIR as DATA_DIR  # V4.6.101 account-scoped
         path, _ = QFileDialog.getOpenFileName(
             self, "Select a bot to publish",
             str(DATA_DIR / "bots"), "Python Files (*.py)")

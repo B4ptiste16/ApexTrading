@@ -820,7 +820,7 @@ class _FriendProfileView(QWidget):
         register the bot in the local registry (same as MoreBotsTab does)."""
         from PyQt6.QtCore import QThread as _QT, pyqtSignal as _Sig
         from ui.login import load_server_url
-        from core.paths import DATA_DIR
+        from core.paths import ACCOUNT_DIR as DATA_DIR  # V4.6.101 account-scoped
         import shutil
 
         url = load_server_url()

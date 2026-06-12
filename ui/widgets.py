@@ -22,7 +22,9 @@ from PyQt6.QtGui import QColor, QFont, QTextCursor
 from PyQt6.QtWebEngineWidgets import QWebEngineView
 
 from ui.styles import COLORS, BOT_COLOR
-from core.paths import DATA_DIR
+from core.paths import ACCOUNT_DIR as DATA_DIR   # V4.6.101 — account-scoped
+# (local bot subprocess APEX_DATA_DIR, working dir, bots/ and universe files all
+# belong to the signed-in account)
 
 C = COLORS
 

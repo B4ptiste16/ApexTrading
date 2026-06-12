@@ -665,7 +665,7 @@ class MoreBotsTab(QWidget):
                 f"color:{C['muted']};font-size:10px;letter-spacing:2px;")
 
     def _toggle_lock(self):
-        from core.paths import DATA_DIR
+        from core.paths import ACCOUNT_DIR as DATA_DIR   # V4.6.101 account-scoped
         from core       import secure
         bots_dir = DATA_DIR / "bots"
         if not secure.HAS_CRYPTO:
@@ -968,7 +968,7 @@ class MoreBotsTab(QWidget):
         # a file matching the slug in case the registry script path
         # was wrong / stale.
         try:
-            from core.paths import DATA_DIR
+            from core.paths import ACCOUNT_DIR as DATA_DIR   # V4.6.101 account-scoped
             for base in (DATA_DIR / "bots",
                          DATA_DIR / "universe_scripts"):
                 if not base.exists():
@@ -1643,6 +1643,12 @@ class ApexWindow(QMainWindow):
         # V4.3.0 — restore manual mode UI state after all tabs exist
         QTimer.singleShot(0, lambda: self._apply_manual_mode_ui(
             self._is_manual_mode()))
+        # V4.6.101 — keep this account's desktop config (bot registry + settings,
+        # secrets stripped) backed up to the server every 10 min so a switched
+        # account / fresh machine can re-fetch it. Local dir stays authoritative.
+        self._cfg_push_timer = QTimer(self)
+        self._cfg_push_timer.timeout.connect(self._push_desktop_config)
+        self._cfg_push_timer.start(600_000)
 
         # V7.1.1: accept .py drops anywhere in the window so a user can
         # drag a bot script in and we'll offer to install it locally or
@@ -2275,47 +2281,27 @@ class ApexWindow(QMainWindow):
         menu.exec(pos)
 
     def _switch_to_saved_account(self, user_id: int):
-        """One-click switch to a previously-saved account — no login
-        prompt. The saved token is reused; if it has expired the next
-        API call will 401 and TokenVerifyWorker boots us to the login
-        screen as usual."""
+        """V4.6.101 — switch accounts by RESTARTING the app into the other
+        account. Each account's data (bots, keys, settings, ledgers) lives in
+        its own folder (DATA_DIR/accounts/<id>), resolved once at process start,
+        so an in-place token swap would keep reading the previous account's
+        data. We persist the chosen account as active, then restart_app() — the
+        fresh process loads ONLY the selected account, with nothing shared.
+        Cloud bots keep trading on Oracle throughout."""
         from ui.login import activate_saved_account
         acc = activate_saved_account(int(user_id))
         if not acc:
-            self.statusBar().showMessage(
-                "Could not switch to that account.")
+            self.statusBar().showMessage("Could not switch to that account.")
             return
-        self._user = acc["user"]
-        display = self._user.get("display_name") or self._user.get("username", "")
-        if hasattr(self, "user_chip_btn"):
-            self.user_chip_btn.setText(f"{display}  v")
-        self.statusBar().showMessage(f"Switched to {display}")
-        # V4.6.79 — a real account switch re-fetches EVERY account-scoped view
-        # with the new token (these tabs read the token fresh per request, so
-        # refreshing them is enough). Previously only friends + account were
-        # refreshed, so the marketplace ("my bots"), credits and admin views
-        # kept showing the PREVIOUS account — making the switch look cosmetic.
-        for attr, how in (("friends_tab", "refresh"),
-                          ("account_tab", "refresh"),
-                          ("admin_tab", "refresh"),
-                          ("more_bots_tab", "refresh"),
-                          ("bot_market_tab", "_refresh_current_view"),
-                          ("tools_tab", "refresh")):
-            tab = getattr(self, attr, None)
-            fn = getattr(tab, how, None) if tab is not None else None
-            if callable(fn):
-                try:
-                    fn()
-                except Exception as e:
-                    print(f"[switch] {attr}.{how}: {e}")
-        # Refresh the user chip's credit balance / identity if shown.
+        display = (acc.get("user", {}).get("display_name")
+                   or acc.get("user", {}).get("username", ""))
+        self.statusBar().showMessage(f"Switching to {display} — restarting…")
         try:
-            if hasattr(self, "_refresh_user_chip"):
-                self._refresh_user_chip()
-        except Exception:
-            pass
-        QTimer.singleShot(500, self._refresh_all)
-        QTimer.singleShot(2500, self._resume_cloud_bots)
+            from core.updater import restart_app
+            from PyQt6.QtCore import QTimer as _QT
+            _QT.singleShot(300, restart_app)
+        except Exception as e:
+            self.statusBar().showMessage(f"Switch failed: {e}")
 
     # ── CORNER WIDGET ────────────────────────────────────────
 
@@ -2802,6 +2788,14 @@ class ApexWindow(QMainWindow):
 
     # ── V4.0.1 — Terms of Service acceptance ─────────────────
 
+    def _push_desktop_config(self):
+        """V4.6.101 — background-push this account's desktop config to the server."""
+        try:
+            import threading, core.account_store as _AS
+            threading.Thread(target=_AS.push_config_to_server, daemon=True).start()
+        except Exception:
+            pass
+
     def _maybe_show_onboarding(self):
         """V4.6.94 — first time on a fresh account, show the welcome wizard
         (intro → pick broker → connect steps). Marks itself done so it only
@@ -2949,7 +2943,7 @@ class ApexWindow(QMainWindow):
     def _apply_revocations(self, slugs: list):
         if not slugs:
             return
-        from core.paths import DATA_DIR
+        from core.paths import ACCOUNT_DIR as DATA_DIR   # V4.6.101 account-scoped
         from pathlib import Path as _P
         # Remove from filesystem
         for slug in slugs:
@@ -3718,6 +3712,22 @@ def main():
         except Exception:
             splash = None
 
+        # V4.6.101 — per-account data init (before the window reads settings):
+        #  • migrate pre-v4.6.101 shared data into the primary account's folder
+        #  • a fresh/switched account with no local config pulls its config + keys
+        #    from the server; an account that HAS local config pushes it up so the
+        #    server stays the source of truth.
+        _have_local_cfg = True
+        try:
+            import core.account_store as _AS
+            from core.paths import ACCOUNT_DIR as _ACC
+            _AS.migrate_legacy_if_needed()
+            _have_local_cfg = (_ACC / "apex_settings.json").exists()
+            if not _have_local_cfg:
+                _AS.fetch_config_from_server()      # one-time, splash is up
+        except Exception as _e:
+            print(f"[account] init failed: {_e}", flush=True)
+
         w = ApexWindow(user=user)
         app._main_window = w
 
@@ -3777,9 +3787,35 @@ def main():
         # Hard timeout — the app ALWAYS opens even if preload stalls.
         _QT.singleShot(15000, _reveal)
 
+        # V4.6.101 — if this account had local config, sync it UP to the server
+        # (background, after the window is up) so the server stays the source of
+        # truth and the OTHER machine / a cleared cache can re-fetch it.
+        if _have_local_cfg:
+            def _sync_up():
+                try:
+                    import threading, core.account_store as _AS
+                    threading.Thread(target=_AS.push_config_to_server,
+                                     daemon=True).start()
+                except Exception:
+                    pass
+            _QT.singleShot(5000, _sync_up)
+
     def _on_login_success(login_win, token: str, user: dict):
         login_win.close()
-        _launch(user)
+        # V4.6.101 — persist the account, then RESTART so the path layer
+        # re-resolves the per-account data dir (DATA_DIR/accounts/<id>) for the
+        # account just signed into. (At first launch the dir was resolved before
+        # any token existed.) The restarted process pulls this account's config
+        # + keys from the server if it has no local copy.
+        try:
+            save_auth(token, user)
+        except Exception:
+            pass
+        try:
+            from core.updater import restart_app
+            restart_app()
+        except Exception:
+            _launch(user)
 
     def _on_offline(login_win):
         login_win.close()

@@ -387,6 +387,42 @@ def delete_credentials(authorization: str | None = Header(default=None)):
     return {"ok": True}
 
 
+# ── V4.6.101: per-account desktop config (bot registry + per-bot settings +
+# prefs = the desktop's apex_settings.json, minus secrets). Lets a switched
+# account or a fresh/cleared machine reconstruct its config. API keys stay in
+# the encrypted /credentials blob, never here. Stored per-user as a plain JSON
+# file alongside the user's bot data. ───────────────────────────────────────
+def _desktop_config_path(user_id: int):
+    return bot_runner._user_data_dir(user_id) / "desktop_config.json"
+
+
+@app.get("/desktop-config")
+def get_desktop_config(authorization: str | None = Header(default=None)):
+    user = _current_user(authorization)
+    import json as _json
+    p = _desktop_config_path(user["id"])
+    if p.exists():
+        try:
+            return {"config": _json.loads(p.read_text(encoding="utf-8"))}
+        except Exception:
+            pass
+    return {"config": None}
+
+
+@app.put("/desktop-config")
+def put_desktop_config(payload: dict,
+                       authorization: str | None = Header(default=None)):
+    user = _current_user(authorization)
+    cfg = payload.get("config") if isinstance(payload, dict) else None
+    if not isinstance(cfg, dict):
+        raise HTTPException(400, "Body must be a JSON object {config: {...}}.")
+    import json as _json
+    p = _desktop_config_path(user["id"])
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(_json.dumps(cfg), encoding="utf-8")
+    return {"ok": True, "keys": len(cfg)}
+
+
 # ── V7.1.12: per-user cloud schedule ───────────────────────────────
 
 @app.get("/schedule")

@@ -35,7 +35,8 @@ from PyQt6.QtWidgets import (
 )
 
 from core      import data as D
-from core.paths import DATA_DIR
+from core.paths import DATA_DIR, ACCOUNT_DIR   # V4.6.101 — DATA_DIR=login root,
+# ACCOUNT_DIR=this account's data (bots/). Auth reads use DATA_DIR; bots use ACCOUNT_DIR.
 from ui.styles import COLORS
 from ui.widgets import ScrollContent, SectionHeader, NoScrollComboBox
 
@@ -1516,8 +1517,8 @@ class MakeBotTab(QWidget):
         # V4.6.73 — Make Bot only produces trading bots now (universe
         # generators were removed; public universes come from the server
         # and are assigned at creation via the Ticker-universe dropdown).
-        bots_dir = DATA_DIR / "bots"
-        bots_dir.mkdir(exist_ok=True)
+        bots_dir = ACCOUNT_DIR / "bots"
+        bots_dir.mkdir(parents=True, exist_ok=True)
         dest = bots_dir / f"{slug}.py"
         dest.write_text(code, encoding="utf-8")
 
@@ -1588,7 +1589,7 @@ class MakeBotTab(QWidget):
         name = self._name_edit.text().strip()
         slug = "".join(ch if ch.isalnum() or ch in "-_" else "_"
                        for ch in name.strip().lower())
-        path = DATA_DIR / "bots" / f"{slug}.py"
+        path = ACCOUNT_DIR / "bots" / f"{slug}.py"
         if not path.exists():
             return
         # Build prefill from AI-generated metadata + current UI state
