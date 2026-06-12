@@ -82,15 +82,35 @@ def _app_icon() -> QIcon:
 # SINGLE INSTANCE
 # ─────────────────────────────────────────
 
+_SINGLE_INSTANCE_HANDLE = None
+
+
 def _check_single_instance() -> bool:
     """Return False if another APEX instance is already running."""
+    global _SINGLE_INSTANCE_HANDLE
     try:
         import ctypes
         _mutex = ctypes.windll.kernel32.CreateMutexW(
             None, False, "APEX_Trading_Platform_SingleInstance_v7")
+        _SINGLE_INSTANCE_HANDLE = _mutex   # keep so we can release it on restart
         return ctypes.windll.kernel32.GetLastError() != 183
     except Exception:
         return True   # can't check — allow launch
+
+
+def _restart_into_account():
+    """V4.6.101 — release the single-instance mutex, THEN restart. On Windows
+    os.execl spawns the new process before the old fully exits, so a still-held
+    mutex would make the restarted app think another instance is running and
+    quit. Closing the handle first frees the name before the new process checks."""
+    try:
+        import ctypes
+        if _SINGLE_INSTANCE_HANDLE:
+            ctypes.windll.kernel32.CloseHandle(_SINGLE_INSTANCE_HANDLE)
+    except Exception:
+        pass
+    from core.updater import restart_app
+    restart_app()
 
 
 # ─────────────────────────────────────────
@@ -2297,9 +2317,8 @@ class ApexWindow(QMainWindow):
                    or acc.get("user", {}).get("username", ""))
         self.statusBar().showMessage(f"Switching to {display} — restarting…")
         try:
-            from core.updater import restart_app
             from PyQt6.QtCore import QTimer as _QT
-            _QT.singleShot(300, restart_app)
+            _QT.singleShot(300, _restart_into_account)
         except Exception as e:
             self.statusBar().showMessage(f"Switch failed: {e}")
 
@@ -3812,8 +3831,7 @@ def main():
         except Exception:
             pass
         try:
-            from core.updater import restart_app
-            restart_app()
+            _restart_into_account()
         except Exception:
             _launch(user)
 
