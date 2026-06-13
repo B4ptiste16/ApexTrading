@@ -966,11 +966,19 @@ class ToolsTab(QWidget):
         self._ibkr_cloud_pw.setText(str(cur.get("cloud_password", "")))
         cfl.addWidget(self._ibkr_cloud_pw, 1, 1)
 
-        self._ibkr_run_on_oracle = QCheckBox(
-            "Run IBKR bots on Oracle (24/7, this computer can be closed)")
-        self._ibkr_run_on_oracle.setChecked(bool(cur.get("run_on_oracle", False)))
-        self._ibkr_run_on_oracle.setStyleSheet(f"color:{C['text']};font-size:11px;")
-        cfl.addWidget(self._ibkr_run_on_oracle, 2, 0, 1, 2)
+        # V4.6.102 — the explicit "Run on Oracle 24/7" toggle is gone; running
+        # IBKR bots on the cloud is now the DEFAULT (it's how it should work).
+        # A hidden, always-checked checkbox is kept so the save path + any code
+        # reading it still works, and a short note explains the behaviour.
+        self._ibkr_run_on_oracle = QCheckBox()
+        self._ibkr_run_on_oracle.setChecked(True)
+        self._ibkr_run_on_oracle.setVisible(False)
+        cloud_note = QLabel(
+            "Your IBKR bots run 24/7 on the APEX cloud automatically once your "
+            "login above is saved — you can close this computer.")
+        cloud_note.setStyleSheet(f"color:{C['muted']};font-size:11px;")
+        cloud_note.setWordWrap(True)
+        cfl.addWidget(cloud_note, 2, 0, 1, 2)
 
         cloud_save_row = QHBoxLayout()
         cloud_save_btn = QPushButton("☁  Save & sync cloud login")
@@ -2710,6 +2718,11 @@ class ToolsTab(QWidget):
             f"✓ {prov_label} key saved — sync to Oracle to use it on cloud bots")
         self._ai_save_msg.setStyleSheet(f"color:{C['green']};font-size:11px;")
         _QT.singleShot(5000, lambda: self._ai_save_msg.setText(""))
+        return   # V4.6.102 — END of _save_ai_key. The build code below was
+        # accidentally trapped in this handler (so it referenced an undefined
+        # 's' and crashed every AI-key save). It's unreachable dead code now;
+        # the live update banner lives in the header, so nothing user-facing
+        # is lost. (Full restore of these sections is a separate cleanup.)
 
         # ── UPDATES  (V7.1.3) ────────────────────────────
         # The old "allow updates during the trading day" toggle is gone:

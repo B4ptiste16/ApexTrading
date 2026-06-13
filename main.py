@@ -99,18 +99,51 @@ def _check_single_instance() -> bool:
 
 
 def _restart_into_account():
-    """V4.6.101 — release the single-instance mutex, THEN restart. On Windows
-    os.execl spawns the new process before the old fully exits, so a still-held
-    mutex would make the restarted app think another instance is running and
-    quit. Closing the handle first frees the name before the new process checks."""
+    """V4.6.102 — fully QUIT this app, then relaunch into the (now-active)
+    account. The user asked for a clean quit-before-restart rather than an
+    in-place exec, so we: release the single-instance mutex (so the new process
+    isn't blocked), spawn a detached fresh instance that waits for this PID to
+    exit, then quit Qt and exit. The fresh process re-resolves the per-account
+    data dir from apex_auth.json."""
     try:
         import ctypes
         if _SINGLE_INSTANCE_HANDLE:
             ctypes.windll.kernel32.CloseHandle(_SINGLE_INSTANCE_HANDLE)
     except Exception:
         pass
-    from core.updater import restart_app
-    restart_app()
+    import os, sys, subprocess, tempfile
+    try:
+        mypid = os.getpid()
+        exe = sys.executable
+        if getattr(sys, "frozen", False):
+            # Frozen: write a tiny relauncher batch that waits for THIS process
+            # to fully exit, then starts a fresh APEX, then deletes itself.
+            bat = os.path.join(tempfile.gettempdir(), "apex_switch_relaunch.bat")
+            with open(bat, "w", encoding="cp1252") as f:
+                f.write(
+                    "@echo off\r\n"
+                    ":waitloop\r\n"
+                    f"tasklist /fi \"PID eq {mypid}\" 2>nul | find \"{mypid}\" >nul\r\n"
+                    "if not errorlevel 1 ( timeout /t 1 /nobreak >nul & goto waitloop )\r\n"
+                    f"start \"\" \"{exe}\"\r\n"
+                    "del \"%~f0\" >nul 2>&1\r\n")
+            subprocess.Popen(["cmd", "/c", bat],
+                             creationflags=0x08000000 | 0x00000200)  # NO_WINDOW|NEW_GROUP
+        else:
+            subprocess.Popen([exe] + sys.argv[1:], close_fds=True)
+    except Exception:
+        try:
+            from core.updater import restart_app
+            restart_app()
+            return
+        except Exception:
+            pass
+    try:
+        from PyQt6.QtWidgets import QApplication
+        QApplication.quit()
+    except Exception:
+        pass
+    os._exit(0)
 
 
 # ─────────────────────────────────────────

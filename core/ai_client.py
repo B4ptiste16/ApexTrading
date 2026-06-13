@@ -45,11 +45,16 @@ PROVIDER_LABELS: dict[str, str] = {
 }
 
 PROVIDER_MODELS: dict[str, list[str]] = {
+    # V4.6.102 — current Claude lineup (newest first), including Fable 5.
     "anthropic": [
+        "claude-fable-5",
+        "claude-opus-4-8",
+        "claude-opus-4-7",
+        "claude-opus-4-6",
+        "claude-sonnet-4-6",
+        "claude-sonnet-4-5",
         "claude-haiku-4-5-20251001",
         "claude-3-5-haiku-20241022",
-        "claude-sonnet-4-5",
-        "claude-opus-4-5",
     ],
     "google": [
         "gemini-2.0-flash",

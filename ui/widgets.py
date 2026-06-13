@@ -452,8 +452,11 @@ class BotProcessWidget(QWidget):
             s    = _D.load_settings()
             mode = s.get("alpaca_mode", "paper")
             cur  = s.get(f"ibkr_{mode}", {}) or {}
-            return (bool(cur.get("run_on_oracle", False))
-                    and bool(str(cur.get("cloud_username", "")).strip())
+            # V4.6.102 — cloud is now the DEFAULT: an IBKR bot runs on Oracle
+            # whenever the user has entered their IBKR paper login (which they
+            # need for IBKR anyway). The old explicit "Run on Oracle 24/7"
+            # toggle was removed; we no longer require run_on_oracle=True.
+            return (bool(str(cur.get("cloud_username", "")).strip())
                     and bool(str(cur.get("cloud_password", ""))))
         except Exception:
             return False

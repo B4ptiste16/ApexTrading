@@ -171,9 +171,10 @@ PROVIDERS = {
     "Anthropic (Claude)": {
         "url":     "https://api.anthropic.com/v1/messages",
         "models":  [
-            ("Claude Sonnet 4.5  (best quality)",   "claude-sonnet-4-5-20250929"),
-            ("Claude Haiku 4.5   (fast & cheap)",   "claude-haiku-4-5-20250514"),
-            ("Claude Opus 4.7    (top tier)",       "claude-opus-4-7-20251101"),
+            ("Claude Fable 5     (newest, top tier)", "claude-fable-5"),
+            ("Claude Opus 4.8    (top tier)",         "claude-opus-4-8"),
+            ("Claude Sonnet 4.6  (balanced)",         "claude-sonnet-4-6"),
+            ("Claude Haiku 4.5   (fast & cheap)",     "claude-haiku-4-5-20251001"),
         ],
         "build":   _anthropic_build,
         "extract": _anthropic_extract,
