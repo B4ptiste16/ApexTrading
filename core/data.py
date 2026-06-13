@@ -676,17 +676,16 @@ def get_combined_history(period: str) -> pd.DataFrame:
     # producing a flat/spiky curve. bfill carries its first known value back.
     merged = pd.concat(frames, axis=1).sort_index().ffill().bfill().fillna(0.0)
     eq_cols = [c for c in merged.columns if c.startswith("eq_")]
-    pl_cols = [c for c in merged.columns if c.startswith("pl_")]
     eq_series = (merged[eq_cols].sum(axis=1)
                  if eq_cols else pd.Series(0.0, index=merged.index))
-    if pl_cols:
-        pl_series = merged[pl_cols].sum(axis=1)
-    else:
-        # V4.6.94 — IBKR / custom bots record EQUITY only (no profit_loss). The
-        # overview chart plots P/L, so derive it from the equity baseline,
-        # otherwise the line is flat at $0 even though equity is moving.
-        base = float(eq_series.iloc[0]) if len(eq_series) else 0.0
-        pl_series = eq_series - base
+    # V4.6.103 — ALWAYS derive a CUMULATIVE P/L from equity (period start as the
+    # baseline). We no longer sum the broker's per-day profit_loss column:
+    # Alpaca resets profit_loss to ~0 at every market open, which made the
+    # combined chart cliff straight down to zero at each day boundary. A
+    # continuous equity-baseline curve reads as true performance over time and
+    # matches IBKR/custom bots (which record equity only).
+    base = float(eq_series.iloc[0]) if len(eq_series) else 0.0
+    pl_series = eq_series - base
     return pd.DataFrame({
         "time":        merged.index,
         "equity":      eq_series.values,
