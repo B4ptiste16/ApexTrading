@@ -100,7 +100,55 @@ class AccountTab(QWidget):
         s.add(SectionHeader("CHANGE EMAIL", C["orange"]))
         s.add(self._build_email_form())
 
+        # ─── STORAGE (V4.6.105) ──────────────────────────────────
+        s.add(SectionHeader("STORAGE", C["green"]))
+        s.add(self._build_storage_card())
+
         s.add_stretch()
+
+    def _build_storage_card(self) -> QFrame:
+        """V4.6.105 — clear this account's local cache (equity history, charts,
+        logs) to reclaim disk. Your settings + keys are NOT touched (and the
+        cloud ledgers are the real record), so nothing important is lost — the
+        app re-derives the history from the server."""
+        frame = QFrame()
+        frame.setStyleSheet(
+            f"background:{C['panel']};border:none;border-radius:10px;")
+        v = QVBoxLayout(frame)
+        v.setContentsMargins(20, 16, 20, 16)
+        v.setSpacing(10)
+        info = QLabel(
+            "Free up disk by clearing this account's local cache (equity-history "
+            "snapshots, chart files, bot logs). Your bots, keys and settings are "
+            "kept — the cloud holds the real records, so the app just re-downloads "
+            "what it needs.")
+        info.setStyleSheet(f"color:{C['muted']};font-size:11px;line-height:1.6;")
+        info.setWordWrap(True)
+        v.addWidget(info)
+        row = QHBoxLayout()
+        btn = QPushButton("🧹  Clear local cache")
+        btn.setObjectName("toolBtn")
+        btn.clicked.connect(self._clear_cache)
+        self._cache_msg = QLabel("")
+        self._cache_msg.setStyleSheet(f"color:{C['green']};font-size:11px;")
+        row.addWidget(btn)
+        row.addWidget(self._cache_msg)
+        row.addStretch()
+        rw = QWidget(); rw.setLayout(row)
+        v.addWidget(rw)
+        return frame
+
+    def _clear_cache(self):
+        from PyQt6.QtCore import QTimer as _QT
+        try:
+            import core.account_store as _AS
+            n = _AS.clear_local_cache()
+            self._cache_msg.setText(f"✓ Cleared {n} cached item(s)")
+            self._cache_msg.setStyleSheet(f"color:{C['green']};font-size:11px;")
+        except Exception as e:
+            self._cache_msg.setText(f"Clear failed: {e}")
+            self._cache_msg.setStyleSheet(f"color:{C['red']};font-size:11px;")
+        _QT.singleShot(5000, lambda: self._cache_msg.setText(""))
 
     def _build_summary_card(self) -> QFrame:
         frame = QFrame()
