@@ -1,4 +1,4 @@
 {
-  "version": "4.6.105",
-  "notes": "v4.6.105 — Cleaner bot deletes, a Clear-cache button, and a fixed web dashboard\n\n🗑️ DELETE = GONE EVERYWHERE\n• Deleting a custom bot now also removes it from the cloud: it's stopped on every broker, dropped from the 24/7 keep-alive registry, and its server script is deleted. No more deleted bots lingering or reappearing.\n\n🧹 CLEAR LOCAL CACHE\n• Account → Storage → 'Clear local cache' frees disk by removing this account's cached equity-history / charts / logs. Your bots, keys and settings are kept — the cloud holds the real records and the app re-downloads what it needs.\n\n🌐 WEB DASHBOARD (already live on the server)\n• The browser dashboard now lists your real bots from your synced registry (deleted bots no longer show), and silenced bots are shown muted/dashed with a SILENCED badge, distinct from active bots.\n\nUpdate via the in-app banner.\n"
+  "version": "4.6.106",
+  "notes": "v4.6.106 — Server-reachability indicator in the header\n\n🟢 A new indicator in the top bar shows whether the app can reach the APEX cloud: green '● server' = reachable, red '● offline' = can't reach it (usually your network). So when something hiccups you can instantly tell a network blip apart from a real app problem — and your cloud bots keep trading on Oracle either way.\n\nUpdate via the in-app banner.\n"
 }

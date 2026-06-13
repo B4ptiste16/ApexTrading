@@ -1719,6 +1719,11 @@ class ApexWindow(QMainWindow):
         self._cfg_push_timer = QTimer(self)
         self._cfg_push_timer.timeout.connect(self._push_desktop_config)
         self._cfg_push_timer.start(600_000)
+        # V4.6.106 — server-reachability poll (every 20s + once at startup).
+        self._conn_timer = QTimer(self)
+        self._conn_timer.timeout.connect(self._refresh_conn_status)
+        self._conn_timer.start(20_000)
+        QTimer.singleShot(1500, self._refresh_conn_status)
 
         # V7.1.1: accept .py drops anywhere in the window so a user can
         # drag a bot script in and we'll offer to install it locally or
@@ -1850,6 +1855,19 @@ class ApexWindow(QMainWindow):
             f"border:none;border-radius:12px;"
         )
         layout.addWidget(self.mkt_label)
+
+        # V4.6.106 — server-reachability indicator. The home network drops the
+        # connection often; this tells the user at a glance whether a hiccup is
+        # the SERVER being unreachable (network) vs a real app problem, so they
+        # don't chase ghosts. Green = reachable, red = offline, grey = checking.
+        self.conn_label = QLabel("● server …")
+        self.conn_label.setToolTip(
+            "APEX cloud reachability. Red means the app can't reach the server "
+            "(usually your network) — your cloud bots keep trading regardless.")
+        self.conn_label.setStyleSheet(
+            f"font-size:10px;font-weight:600;letter-spacing:1px;"
+            f"color:{C['muted']};padding:3px 10px;")
+        layout.addWidget(self.conn_label)
 
         self.clock_label = QLabel()
         self.clock_label.setStyleSheet(
@@ -2859,6 +2877,43 @@ class ApexWindow(QMainWindow):
         w.start()
 
     # ── V4.0.1 — Terms of Service acceptance ─────────────────
+
+    def _refresh_conn_status(self):
+        """V4.6.106 — ping the APEX server off the UI thread and colour the
+        header indicator: green = reachable, red = offline (network)."""
+        from PyQt6.QtCore import QThread, pyqtSignal
+        if getattr(self, "_conn_worker", None) and self._conn_worker.isRunning():
+            return
+
+        class _Ping(QThread):
+            done = pyqtSignal(bool)
+            def run(self_):
+                ok = False
+                try:
+                    import requests
+                    from ui.login import load_server_url
+                    r = requests.get(f"{load_server_url()}/docs", timeout=6)
+                    ok = r.status_code < 500
+                except Exception:
+                    ok = False
+                self_.done.emit(ok)
+
+        def _apply(ok: bool):
+            if not hasattr(self, "conn_label"):
+                return
+            if ok:
+                self.conn_label.setText("● server")
+                self.conn_label.setStyleSheet(
+                    f"font-size:10px;font-weight:600;letter-spacing:1px;"
+                    f"color:{C['green']};padding:3px 10px;")
+            else:
+                self.conn_label.setText("● offline")
+                self.conn_label.setStyleSheet(
+                    f"font-size:10px;font-weight:600;letter-spacing:1px;"
+                    f"color:{C['red']};padding:3px 10px;")
+        self._conn_worker = _Ping()
+        self._conn_worker.done.connect(_apply)
+        self._conn_worker.start()
 
     def _push_desktop_config(self):
         """V4.6.101 — background-push this account's desktop config to the server."""
