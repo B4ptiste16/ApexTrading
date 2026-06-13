@@ -396,6 +396,37 @@ def _desktop_config_path(user_id: int):
     return bot_runner._user_data_dir(user_id) / "desktop_config.json"
 
 
+def _user_bot_registry(user_id: int, broker: str = "alpaca",
+                       mode: str = "paper") -> dict | None:
+    """V4.6.105 — the user's REAL bot registry (active / silenced / custom) for
+    a broker+mode, taken from their synced desktop-config. This is the source of
+    truth for which bots the user currently has — so the web dashboard stops
+    showing bots they deleted (the old code scanned private_bots/*.py files,
+    which persist after a delete). Returns None if the user hasn't synced yet."""
+    import json as _json
+    p = _desktop_config_path(user_id)
+    if not p.exists():
+        return None
+    try:
+        cfg = _json.loads(p.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    if not isinstance(cfg, dict):
+        return None
+    # Key shape: bot_registry_<uid>_<broker>_<mode>. The <uid> is the desktop's
+    # auth id, so match by the broker+mode suffix rather than guessing it.
+    suffix = f"_{broker}_{mode}"
+    for k, v in cfg.items():
+        if k.startswith("bot_registry_") and k.endswith(suffix) and isinstance(v, dict):
+            return v
+    for k, v in cfg.items():            # legacy: no mode suffix
+        if k.startswith("bot_registry_") and f"_{broker}" in k and isinstance(v, dict):
+            return v
+    if isinstance(cfg.get("bot_registry"), dict):
+        return cfg["bot_registry"]
+    return None
+
+
 @app.get("/desktop-config")
 def get_desktop_config(authorization: str | None = Header(default=None)):
     user = _current_user(authorization)
@@ -1196,22 +1227,39 @@ def web_api_status(request: Request):
     set (e.g. crypto bot shows up alongside LONG / SHORT / DAY)."""
     user = _web_user(request)
     linked = bool(creds.load_credentials(user["id"]))
-    # Always include built-ins
-    sides = ["LONG", "SHORT", "DAY"]
-    # Discover custom bots from /opt/apex_users/user_X/private_bots/*.py
-    try:
-        from pathlib import Path as _P
-        priv_dir = bot_runner.private_bots_dir(user["id"])
-        if priv_dir.exists():
-            for p in sorted(priv_dir.glob("*.py")):
-                slug = p.stem.upper()
-                if slug not in sides:
-                    sides.append(slug)
-    except Exception as e:
-        print(f"[web_api_status] custom-bot scan failed: {e}")
-    from fastapi import Query as _Q  # local import keeps the signature simple
     broker = (request.query_params.get("broker") or "alpaca").lower()
-    bots = {side: _bot_state(user["id"], side, broker) for side in sides}
+
+    # V4.6.105 — drive the dashboard from the user's SYNCED registry (active +
+    # silenced), so bots they deleted disappear and silenced bots are flagged.
+    silenced_set: set[str] = set()
+    reg = _user_bot_registry(user["id"], broker, "paper")
+    if reg is not None:
+        active   = [str(s) for s in (reg.get("active") or [])]
+        silenced = [str(s) for s in (reg.get("silenced") or [])]
+        silenced_set = {s for s in silenced}
+        # active (non-silenced) first, then silenced — registry is the truth
+        ordered = [s for s in active if s not in silenced_set] + silenced
+        seen: set[str] = set()
+        sides = [s for s in ordered if not (s in seen or seen.add(s))]
+    else:
+        # Legacy fallback (user hasn't synced a config yet): built-ins + a
+        # private_bots/*.py scan.
+        sides = ["LONG", "SHORT", "DAY"]
+        try:
+            priv_dir = bot_runner.private_bots_dir(user["id"])
+            if priv_dir.exists():
+                for p in sorted(priv_dir.glob("*.py")):
+                    slug = p.stem.upper()
+                    if slug not in sides:
+                        sides.append(slug)
+        except Exception as e:
+            print(f"[web_api_status] custom-bot scan failed: {e}")
+
+    bots = {}
+    for side in sides:
+        st = _bot_state(user["id"], side, broker)
+        st["silenced"] = side in silenced_set
+        bots[side] = st
     running_count = sum(1 for s in bots.values() if s.get("running"))
     return {"linked": linked, "sides": sides, "bots": bots,
             "broker": broker, "running_count": running_count}

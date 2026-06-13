@@ -681,6 +681,14 @@ def dashboard_page(user: dict, tab: str = "overview") -> HTMLResponse:
     .tab.active {{ color: var(--text);
                     border-bottom-color: var(--green); }}
     .botcard {{ margin-bottom: 14px; cursor: pointer; }}
+    /* V4.6.105 — silenced bots are shown muted + dashed with a SILENCED badge,
+       so they're visually distinct from active (unsilenced) bots. */
+    .botcard.silenced {{ opacity: .55; border-style: dashed; }}
+    .stat.silenced {{ opacity: .55; }}
+    .badge-sil {{ font-size: 9px; font-weight: 700; letter-spacing: 1px;
+                  color: var(--muted); border: 1px solid var(--muted);
+                  border-radius: 5px; padding: 1px 6px; margin-left: 6px;
+                  vertical-align: middle; }}
     .botcard .head {{ display:flex; align-items:center; gap:8px;
                        margin-bottom: 10px; }}
     .botcard .dot {{ width:12px; height:12px; border-radius:6px;
@@ -889,12 +897,13 @@ def dashboard_page(user: dict, tab: str = "overview") -> HTMLResponse:
       for (const side of SIDES) {{
         const s = state.bots[side] || {{}};
         const running = s.running === true;
+        const silenced = s.silenced === true;
         const dotCls = running ? "dot run" : "dot stop";
         c.insertAdjacentHTML("beforeend", `
-          <div class="stat">
+          <div class="stat${{silenced ? ' silenced' : ''}}">
             <span class="k">
               <span class="${{dotCls}}" style="vertical-align:middle;
-                margin-right:8px;"></span>${{side}}
+                margin-right:8px;"></span>${{side}}${{silenced ? ' <span class="badge-sil">SILENCED</span>' : ''}}
             </span>
             <span class="v">${{fmt$(s.equity)}}
               <span style="font-size:10px;color:var(--muted);">
@@ -973,14 +982,16 @@ def dashboard_page(user: dict, tab: str = "overview") -> HTMLResponse:
       for (const side of SIDES) {{
         const s = state.bots[side] || {{}};
         const running = s.running === true;
+        const silenced = s.silenced === true;
         const dotCls = running ? "dot run" : "dot stop";
         const dis = (state.linked === false) ? "disabled" : "";
         const nPos = s.positions == null ? 0 : s.positions;
         c.insertAdjacentHTML("beforeend", `
-          <div class="card botcard" id="card-${{side}}" onclick="toggleDetail('${{side}}')">
+          <div class="card botcard${{silenced ? ' silenced' : ''}}" id="card-${{side}}" onclick="toggleDetail('${{side}}')">
             <div class="head">
               <span class="${{dotCls}}"></span>
               <h2 style="margin:0;flex:1;">${{side}}</h2>
+              ${{silenced ? '<span class="badge-sil">SILENCED</span>' : ''}}
               <span class="v" style="font-size:12px;">${{fmt$(s.equity)}}</span>
             </div>
             <div class="stat"><span class="k">TODAY P/L</span>
