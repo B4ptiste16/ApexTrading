@@ -2106,9 +2106,12 @@ class ApexWindow(QMainWindow):
     # ── V3.2.0 — broker-mode selector ───────────────────────
 
     BROKER_MODES = {
-        # value → (display label, status)
+        # value → (display label, status). V4.6.104 — IBKR is fully live
+        # (cloud gateway + bots), so it no longer shows "coming very soon".
+        # TradingView stays "coming" — it's a charting platform with no order
+        # API, so bots can't trade on it.
         "alpaca":     ("Alpaca",      "active"),
-        "ibkr":       ("IBKR",        "coming"),
+        "ibkr":       ("IBKR",        "active"),
         "tradingview":("TradingView", "coming"),
     }
 

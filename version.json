@@ -1,4 +1,4 @@
 {
-  "version": "4.6.103",
-  "notes": "v4.6.103 — Portfolio chart is now a continuous performance curve over time\n\n📈 The PORTFOLIO VALUE chart used to cliff straight down to ~$0 at every day boundary. Cause: it plotted the broker's per-day profit/loss, and Alpaca resets that to ~0 at each market open. It now plots a CUMULATIVE P/L from the period's starting equity, so the line flows continuously as a function of time (and matches IBKR/custom bots, which already track this way). Real ups and downs still show; the fake daily resets are gone.\n\nUpdate via the in-app banner.\n"
+  "version": "4.6.104",
+  "notes": "v4.6.104 — IBKR is no longer marked 'coming soon'\n\n• The broker switcher no longer shows '(coming very soon)' next to IBKR — it's fully live (cloud gateway + bots). TradingView still shows it, because TradingView is a charting platform with no order API, so bots can't trade there.\n\nUpdate via the in-app banner.\n"
 }
