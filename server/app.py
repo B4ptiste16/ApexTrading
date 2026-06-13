@@ -757,12 +757,28 @@ def api_private_bot_list(authorization: str | None = Header(default=None)):
 @app.delete("/bots/private/{slug}")
 def api_private_bot_delete(slug: str,
                             authorization: str | None = Header(default=None)):
+    """V4.6.105 — FULLY remove a custom bot from the cloud so a deleted bot can
+    never linger (running, kept-alive by the watchdog, or as a ghost script):
+      1) stop it on every broker + drop it from the always-on desired registry
+      2) delete its uploaded script."""
     user = _current_user(authorization)
+    s = slug.upper()
+    stopped = []
+    for broker in ("alpaca", "ibkr"):
+        try:
+            bot_runner.stop_bot(user["id"], s, broker, user_initiated=True)
+            stopped.append(broker)
+        except Exception as e:
+            print(f"[private-delete] stop {s}/{broker}: {e}", flush=True)
     p = bot_runner.private_bots_dir(user["id"]) / f"{slug.lower()}.py"
-    if p.exists():
-        p.unlink()
-        return {"ok": True}
-    return {"ok": False, "detail": "Not found."}
+    removed = False
+    try:
+        if p.exists():
+            p.unlink()
+            removed = True
+    except Exception as e:
+        print(f"[private-delete] unlink {slug}: {e}", flush=True)
+    return {"ok": True, "stopped": stopped, "script_removed": removed}
 
 
 @app.post("/admin/bots/{slug}/flag")

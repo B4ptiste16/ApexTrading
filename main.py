@@ -994,6 +994,23 @@ class MoreBotsTab(QWidget):
         except Exception as _e:
             print(f"[delete-bot] market unpublish skipped: {_e}", flush=True)
 
+        # ── Step 0b: V4.6.105 — FULLY remove the bot from the cloud: stop it on
+        # every broker, drop it from the always-on desired registry, and delete
+        # its uploaded script. Without this the cloud script lingered (kept
+        # running / re-discovered by the web dashboard) after a local delete.
+        try:
+            from ui.login import load_auth, load_server_url
+            import requests as _rq
+            _tok = (load_auth() or {}).get("token")
+            if _tok:
+                dr = _rq.delete(
+                    f"{load_server_url()}/bots/private/{side.lower()}",
+                    headers={"Authorization": f"Bearer {_tok}"}, timeout=10)
+                print(f"[delete-bot] cloud remove '{side}': "
+                      f"{dr.status_code} {dr.text[:120]}", flush=True)
+        except Exception as _e:
+            print(f"[delete-bot] cloud remove skipped: {_e}", flush=True)
+
         # ── Step 0: free any IBKR allocation — sell the bot's sub-portfolio
         # and drop it from the Tools allocation table so deleted bots never
         # keep funds allocated (V4.6.70). Best-effort; never blocks deletion.
