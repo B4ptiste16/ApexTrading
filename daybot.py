@@ -435,79 +435,63 @@ def sync_brackets_with_alpaca(state: dict) -> dict:
     if not state.get("open_brackets"):
         return state
 
-    # V4.6.54 — reconcile against ACTUAL held positions. Drop any open bracket
-    # whose ticker isn't currently held (e.g. stale brackets carried over from
-    # a broker switch — a bracket placed on Alpaca won't exist on the IBKR
-    # slice). Keep brackets younger than a grace period so a just-placed entry
-    # isn't dropped before its fill shows up as a position. Without this the
-    # bot keeps skipping a ticker ("already has an open bracket") it doesn't
-    # actually hold, and never re-enters.
+    # V4.6.102 — count EVERY closed bracket as a win/loss. A bracket exits at
+    # its take-profit (gain) or stop-loss (loss); once the position is no longer
+    # held, the bracket has closed and must be tallied. The old code dropped
+    # un-held brackets as "stale" WITHOUT counting them (and the separate
+    # counting loop only caught closes that happened to coincide with a sync),
+    # so real losses (e.g. SNOW) and repeated wins (MRVL/CRWD/WOLF/NVTS) never
+    # registered — the card stuck at 2W/0L. We now tally by exit-fill vs entry
+    # for any bracket whose position is gone (past the entry-fill grace window).
     try:
         held = {str(p.symbol).upper()
                 for p in (trading_client.get_all_positions() or [])}
-        _now = datetime.now(timezone.utc)
-        for tk, br in list(state.get("open_brackets", {}).items()):
-            if tk.upper() in held:
-                continue
-            try:
-                age = (_now - datetime.fromisoformat(br.get("time"))).total_seconds()
-            except Exception:
-                age = 1e9
-            if age < 180:
-                continue          # just placed — give the fill time to land
-            state["open_brackets"].pop(tk, None)
-            print(f"  [bracket reconcile] {tk}: no live position on this "
-                  f"broker — clearing stale bracket", flush=True)
     except Exception:
-        pass
-    if not state.get("open_brackets"):
         return state
-
     try:
         orders = trading_client.get_orders(
             filter=GetOrdersRequest(
-                status=QueryOrderStatus.CLOSED,
-                limit=100,
-                nested=True
-            )
-        )
-        closed_symbols = {str(o.symbol) for o in orders
-                          if hasattr(o, "symbol") and o.symbol}
+                status=QueryOrderStatus.CLOSED, limit=200, nested=True))
     except Exception:
-        return state
+        orders = []
+    _now = datetime.now(timezone.utc)
 
     to_remove = []
-    for ticker, bracket in state["open_brackets"].items():
-        if ticker in closed_symbols:
-            # Try to determine if it was a win or loss
-            try:
-                pos_list = trading_client.get_all_positions()
-                still_open = any(p.symbol == ticker for p in pos_list)
-                if not still_open:
-                    # Position closed  -  figure out P/L from recent orders
-                    recent = [o for o in orders if str(o.symbol) == ticker]
-                    if recent:
-                        sell_order = sorted(recent,
-                            key=lambda o: o.filled_at or datetime.min.replace(tzinfo=timezone.utc),
-                            reverse=True)[0]
-                        fill_price = float(sell_order.filled_avg_price or 0)
-                        entry      = float(bracket.get("entry", fill_price))
-                        qty        = float(bracket.get("qty", 0))
-                        pnl        = (fill_price - entry) * qty
-
-                        state["total_pnl"] = round(
-                            state.get("total_pnl", 0) + pnl, 4)
-                        if pnl >= 0:
-                            state["wins"]   = state.get("wins", 0) + 1
-                        else:
-                            state["losses"] = state.get("losses", 0) + 1
-
-                        result = "WIN" if pnl >= 0 else "LOSS"
-                        print(f"  [bracket closed] {ticker}: {result} "
-                              f"${pnl:+.2f}")
-                    to_remove.append(ticker)
-            except Exception:
-                to_remove.append(ticker)
+    for ticker, bracket in list(state["open_brackets"].items()):
+        if ticker.upper() in held:
+            continue                      # still open — leave it
+        try:
+            age = (_now - datetime.fromisoformat(bracket.get("time"))).total_seconds()
+        except Exception:
+            age = 1e9
+        if age < 180:
+            continue                      # just placed — entry fill not in yet
+        # Position is gone → the bracket closed. Classify from the latest
+        # filled SELL (the exit leg): above entry = take-profit win, below =
+        # stop-loss loss.
+        recent = [o for o in orders
+                  if str(o.symbol) == ticker
+                  and str(getattr(o, "side", "")).lower() == "sell"
+                  and getattr(o, "filled_avg_price", None)]
+        if recent:
+            sell = sorted(recent,
+                key=lambda o: o.filled_at or datetime.min.replace(tzinfo=timezone.utc),
+                reverse=True)[0]
+            fill_price = float(sell.filled_avg_price or 0)
+            entry      = float(bracket.get("entry", fill_price))
+            qty        = float(bracket.get("qty", 0))
+            pnl        = (fill_price - entry) * qty
+            state["total_pnl"] = round(state.get("total_pnl", 0) + pnl, 4)
+            if pnl >= 0:
+                state["wins"]   = state.get("wins", 0) + 1
+            else:
+                state["losses"] = state.get("losses", 0) + 1
+            print(f"  [bracket closed] {ticker}: "
+                  f"{'WIN' if pnl >= 0 else 'LOSS'} ${pnl:+.2f}", flush=True)
+        else:
+            print(f"  [bracket reconcile] {ticker}: position gone, no exit "
+                  f"fill found — clearing", flush=True)
+        to_remove.append(ticker)
 
     for t in to_remove:
         state["open_brackets"].pop(t, None)
