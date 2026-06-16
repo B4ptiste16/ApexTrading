@@ -1,4 +1,4 @@
 {
-  "version": "4.6.106",
-  "notes": "v4.6.106 — Server-reachability indicator in the header\n\n🟢 A new indicator in the top bar shows whether the app can reach the APEX cloud: green '● server' = reachable, red '● offline' = can't reach it (usually your network). So when something hiccups you can instantly tell a network blip apart from a real app problem — and your cloud bots keep trading on Oracle either way.\n\nUpdate via the in-app banner.\n"
+  "version": "4.6.107",
+  "notes": "v4.6.107 — IBKR equity/value charts now show the full timeframe\n\n📈 Fixed: on IBKR, the portfolio value curve only ever showed the last day and ignored the time-period selector. The 'ALL' period was silently collapsing to a single day, so the value line sat under trade events that spanned weeks. Now 'ALL' plots the whole recorded history and every period (1D/1W/1M/…) calibrates correctly, so the value line and the trade-event markers line up on the same timeline.\n\n🟢 Also includes the header server-reachability indicator (green '● server' = cloud reachable, red '● offline' = network issue) so you can tell a network blip from a real problem — your cloud bots keep trading on Oracle either way.\n\nUpdate via the in-app banner.\n"
 }

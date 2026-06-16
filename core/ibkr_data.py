@@ -508,16 +508,20 @@ def get_history(side: str, period: str) -> pd.DataFrame:
     if not snaps:
         return pd.DataFrame()
     from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+    # V4.6.107 — "ALL" (and any unknown period) means the WHOLE history, not a
+    # 1-day fallback. The old dict had no "ALL" key, so the default `.get(...,1)`
+    # collapsed the chart to the last day (the overview defaults to ALL), which
+    # is why the equity/value curve "only showed the last day".
     days = {"1D": 1, "1W": 7, "1M": 30, "3M": 90,
-            "6M": 180, "1Y": 365}.get(period, 1)
-    cutoff = _dt.now(_tz.utc) - _td(days=days)
+            "6M": 180, "1Y": 365}.get(period)
+    cutoff = None if days is None else (_dt.now(_tz.utc) - _td(days=days))
     rows = []
     for s in snaps:
         try:
             ts = _dt.fromisoformat(s["ts"])
             if ts.tzinfo is None:
                 ts = ts.replace(tzinfo=_tz.utc)
-            if ts >= cutoff:
+            if cutoff is None or ts >= cutoff:
                 rows.append((ts, float(s.get("equity", 0) or 0)))
         except Exception:
             continue
