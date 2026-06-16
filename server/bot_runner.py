@@ -255,10 +255,15 @@ def _norm_sym(symbol: str) -> str:
 
 def _replay_fills_basis(fills_file: Path) -> dict:
     """V4.6.108 — read-only reconstruction of each symbol's average ENTRY price
-    from a `.fills.jsonl` log (weighted avg on adds, kept on partial exits, reset
-    on flat/flip). Lets the desktop show real per-position P/L immediately, even
-    for positions opened before per-slice cost tracking — without mutating any
-    ledger file. Mirrors core.ledger.replay_fills_basis."""
+    AND net quantity from a `.fills.jsonl` log (weighted avg on adds, kept on
+    partial exits, reset on flat/flip). Returns {SYM: {"avg": x, "qty": y}}.
+
+    The caller MUST verify `qty` matches the ledger's current holding before
+    trusting `avg`: the fills log only began at v4.6.63, so a position opened
+    earlier is missing its opening buys — replaying it sends the symbol through a
+    phantom short and yields a bogus entry. Matching the net qty proves the log
+    is complete for that symbol; otherwise we'd rather show break-even than a
+    wrong P/L. Mirrors core.ledger.replay_fills_basis."""
     import json as _json
     if not fills_file.exists():
         return {}
@@ -296,7 +301,8 @@ def _replay_fills_basis(fills_file: Path) -> dict:
             avg[sym] = ((abs(old) * a0 + abs(delta) * price) / abs(new)
                         if a0 > 0 else price)
         pos[sym] = new
-    return {s: a for s, a in avg.items() if abs(pos.get(s, 0.0)) > 1e-9 and a > 0}
+    return {s: {"avg": a, "qty": pos.get(s, 0.0)}
+            for s, a in avg.items() if abs(pos.get(s, 0.0)) > 1e-9 and a > 0}
 
 
 def list_ibkr_ledgers(user_id: int) -> list[dict]:
@@ -318,14 +324,23 @@ def list_ibkr_ledgers(user_id: int) -> list[dict]:
             # positions opened before cost tracking, or bot not cycled since the
             # upgrade), reconstruct them read-only from the fills log so the
             # desktop's position gauge shows real entry/P&L right away.
-            held = {_norm_sym(s) for s, q in holdings.items()
-                    if abs(float(q or 0)) > 1e-9}
-            if any(float(cost_basis.get(s, 0) or 0) <= 0 for s in held):
+            held_qty = {_norm_sym(s): float(q or 0) for s, q in holdings.items()
+                        if abs(float(q or 0)) > 1e-9}
+            if any(float(cost_basis.get(s, 0) or 0) <= 0 for s in held_qty):
                 replayed = _replay_fills_basis(
                     f.with_name(f.stem + ".fills.jsonl"))
-                for s, a in replayed.items():
-                    if float(cost_basis.get(s, 0) or 0) <= 0:
-                        cost_basis[s] = a
+                for s, info in replayed.items():
+                    if float(cost_basis.get(s, 0) or 0) > 0:
+                        continue
+                    hq = held_qty.get(s)
+                    if hq is None:
+                        continue
+                    # only trust the replayed entry when the fills log reproduces
+                    # the current holding (sign + ~1% qty) — proof it's complete
+                    rq = float(info.get("qty", 0) or 0)
+                    if (hq > 0) == (rq > 0) and abs(abs(rq) - abs(hq)) <= max(
+                            0.01 * abs(hq), 1e-6):
+                        cost_basis[s] = float(info.get("avg", 0) or 0)
             out.append({
                 "bot_id":     j.get("bot_id", f.stem),
                 "cash":       float(j.get("cash", 0.0)),

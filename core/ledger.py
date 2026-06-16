@@ -258,17 +258,25 @@ class Ledger:
         by replaying this slice's fills log. Used to heal positions that were
         opened before per-slice cost tracking existed. Returns True if anything
         was filled in. Only fills GAPS — never overwrites a live basis."""
-        held = {s for s, q in self.holdings.items() if abs(q) > _EPS}
-        missing = {s for s in held if self.cost_basis.get(s, 0.0) <= 0}
+        missing = {s: q for s, q in self.holdings.items()
+                   if abs(q) > _EPS and self.cost_basis.get(s, 0.0) <= 0}
         if not missing:
             return False
         if fills_path is None:
             fills_path = self.path.with_name(self.path.stem + ".fills.jsonl")
         replayed = replay_fills_basis(fills_path)
         changed = False
-        for s in missing:
-            avg = replayed.get(s)
-            if avg and avg > 0:
+        for s, hq in missing.items():
+            info = replayed.get(s)
+            if not info:
+                continue
+            avg = float(info.get("avg", 0) or 0)
+            rq = float(info.get("qty", 0) or 0)
+            # only trust a reconstructed entry when the fills log reproduces this
+            # holding (the log began at v4.6.63, so older opens may be missing —
+            # a partial log yields a phantom-short basis we must not record)
+            if avg > 0 and (hq > 0) == (rq > 0) and abs(abs(rq) - abs(hq)) <= max(
+                    0.01 * abs(hq), 1e-6):
                 self.cost_basis[s] = avg
                 changed = True
         if changed:
@@ -343,11 +351,13 @@ class Ledger:
         }
 
 
-def replay_fills_basis(fills_path: str | Path) -> dict[str, float]:
-    """Replay a `.fills.jsonl` log to reconstruct the average ENTRY price of
-    each symbol's CURRENT open position. Same weighted-average rules the live
-    ledger uses (adds average in, partial exits keep the average, flat/flip
-    resets). Returns {SYM: avg_entry} for symbols still open at the end."""
+def replay_fills_basis(fills_path: str | Path) -> dict[str, dict]:
+    """Replay a `.fills.jsonl` log to reconstruct the average ENTRY price AND net
+    quantity of each symbol's CURRENT open position. Same weighted-average rules
+    the live ledger uses (adds average in, partial exits keep the average,
+    flat/flip resets). Returns {SYM: {"avg": entry, "qty": net}} for symbols
+    still open at the end. Callers verify `qty` against the live holding before
+    trusting `avg` (the log may predate a position's open → bogus basis)."""
     p = Path(fills_path)
     if not p.exists():
         return {}
@@ -386,7 +396,8 @@ def replay_fills_basis(fills_path: str | Path) -> dict[str, float]:
                         if a0 > 0 else price)
         # partial exit → keep avg
         pos[sym] = new
-    return {s: a for s, a in avg.items() if abs(pos.get(s, 0.0)) > _EPS and a > 0}
+    return {s: {"avg": a, "qty": pos.get(s, 0.0)}
+            for s, a in avg.items() if abs(pos.get(s, 0.0)) > _EPS and a > 0}
 
 
 # ── env-driven convenience (used by the bot subprocess) ─────────────
