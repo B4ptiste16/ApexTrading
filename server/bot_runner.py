@@ -244,6 +244,61 @@ def _ibkr_ledger_dir(user_id: int) -> Path:
     return _instance_root(user_id, "ibkr") / "ibkr" / "ledgers"
 
 
+def _norm_sym(symbol: str) -> str:
+    s = str(symbol or "").upper().strip()
+    if "/" in s:
+        s = s.split("/", 1)[0]
+    elif s.endswith("-USD"):
+        s = s[:-4]
+    return s
+
+
+def _replay_fills_basis(fills_file: Path) -> dict:
+    """V4.6.108 — read-only reconstruction of each symbol's average ENTRY price
+    from a `.fills.jsonl` log (weighted avg on adds, kept on partial exits, reset
+    on flat/flip). Lets the desktop show real per-position P/L immediately, even
+    for positions opened before per-slice cost tracking — without mutating any
+    ledger file. Mirrors core.ledger.replay_fills_basis."""
+    import json as _json
+    if not fills_file.exists():
+        return {}
+    pos: dict = {}
+    avg: dict = {}
+    try:
+        lines = fills_file.read_text(encoding="utf-8").splitlines()
+    except Exception:
+        return {}
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            r = _json.loads(line)
+            sym = _norm_sym(r.get("symbol", ""))
+            side = str(r.get("side", "")).upper()
+            qty = abs(float(r.get("qty", 0) or 0))
+            price = abs(float(r.get("price", 0) or 0))
+        except Exception:
+            continue
+        if not sym or qty <= 1e-9 or price <= 0:
+            continue
+        delta = qty if side in ("BUY", "COVER") else -qty
+        old = pos.get(sym, 0.0)
+        new = old + delta
+        if abs(new) <= 1e-9:
+            pos[sym] = 0.0
+            avg.pop(sym, None)
+            continue
+        if abs(old) <= 1e-9 or (old > 0) != (new > 0):
+            avg[sym] = price
+        elif abs(new) > abs(old) + 1e-9:
+            a0 = avg.get(sym, 0.0)
+            avg[sym] = ((abs(old) * a0 + abs(delta) * price) / abs(new)
+                        if a0 > 0 else price)
+        pos[sym] = new
+    return {s: a for s, a in avg.items() if abs(pos.get(s, 0.0)) > 1e-9 and a > 0}
+
+
 def list_ibkr_ledgers(user_id: int) -> list[dict]:
     """V4.6.51 — return each IBKR bot's sub-portfolio snapshot (bot_id, cash,
     holdings, last_value) so the desktop can show a LIVE allocation %."""
@@ -257,14 +312,28 @@ def list_ibkr_ledgers(user_id: int) -> list[dict]:
             continue
         try:
             j = _json.loads(f.read_text(encoding="utf-8"))
+            holdings = j.get("holdings", {}) or {}
+            cost_basis = dict(j.get("cost_basis", {}) or {})
+            # V4.6.108 — if the bot hasn't recorded per-slice entries yet (e.g.
+            # positions opened before cost tracking, or bot not cycled since the
+            # upgrade), reconstruct them read-only from the fills log so the
+            # desktop's position gauge shows real entry/P&L right away.
+            held = {_norm_sym(s) for s, q in holdings.items()
+                    if abs(float(q or 0)) > 1e-9}
+            if any(float(cost_basis.get(s, 0) or 0) <= 0 for s in held):
+                replayed = _replay_fills_basis(
+                    f.with_name(f.stem + ".fills.jsonl"))
+                for s, a in replayed.items():
+                    if float(cost_basis.get(s, 0) or 0) <= 0:
+                        cost_basis[s] = a
             out.append({
                 "bot_id":     j.get("bot_id", f.stem),
                 "cash":       float(j.get("cash", 0.0)),
                 "allocated":  float(j.get("allocated_cash", 0.0)),
                 "value":      float(j.get("last_value", 0.0)),
-                "holdings":   j.get("holdings", {}),
+                "holdings":   holdings,
                 "marks":      j.get("marks", {}),     # V4.6.61 — per-holding exact marks
-                "cost_basis": j.get("cost_basis", {}),  # V4.6.108 — per-slice avg entry
+                "cost_basis": cost_basis,             # V4.6.108 — per-slice avg entry
                 "file":       f.stem,
             })
         except Exception:
