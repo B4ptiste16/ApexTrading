@@ -302,6 +302,7 @@ def _build_cloud_data(mode: str) -> dict:
         cash = float(led.get("cash", 0.0) or 0.0)
         holdings = led.get("holdings", {}) or {}
         marks = led.get("marks", {}) or {}
+        basis = led.get("cost_basis", {}) or {}
         positions = []
         held_val = 0.0
         for sym, qty in holdings.items():
@@ -311,15 +312,26 @@ def _build_cloud_data(mode: str) -> dict:
                 continue
             if abs(q) <= 1e-9:
                 continue
-            # V4.6.61 — prefer the EXACT marks the bot captured from the IBKR
-            # account (real average cost + price + unrealized P/L). Fall back to
-            # a local yfinance price (entry == price, i.e. break-even) only when
-            # the bot hasn't written marks yet.
+            # V4.6.61/108 — entry price precedence:
+            #   1) the slice's own recorded cost basis (per-bot correct),
+            #   2) the bot's captured mark avg_entry (only if it differs from
+            #      price — i.e. a REAL cost, not the break-even fallback),
+            #   3) a live yfinance price (break-even) as the last resort.
+            # Always price the current value with a LIVE quote so the gauge's
+            # current→entry distance (the % P/L) reflects today's market.
             mk = marks.get(sym) or marks.get(str(sym).upper()) or {}
-            px    = float(mk.get("price", 0) or 0) or _quick_price(sym)
-            entry = float(mk.get("avg_entry", 0) or 0) or px
-            mv    = float(mk.get("mv", 0) or 0) or (q * px)
-            upl   = float(mk.get("upl", 0) or 0)
+            px = (float(mk.get("price", 0) or 0)) or _quick_price(sym)
+            cb = float(basis.get(sym, 0) or basis.get(str(sym).upper(), 0) or 0)
+            mk_entry = float(mk.get("avg_entry", 0) or 0)
+            mk_price = float(mk.get("price", 0) or 0)
+            entry = cb
+            if entry <= 0:
+                # only trust mark avg_entry if it isn't the break-even fallback
+                entry = mk_entry if (mk_entry > 0 and abs(mk_entry - mk_price) > 1e-6) else 0.0
+            if entry <= 0:
+                entry = px
+            mv    = q * px
+            upl   = (px - entry) * q
             plpc  = (upl / (entry * abs(q))) if (entry and q) else 0.0
             held_val += mv
             positions.append({

@@ -351,6 +351,13 @@ class _IBKRShim:
                     port[psym] = it
         except Exception:
             pass
+        # V4.6.108 — heal any pre-existing holdings that have no recorded entry
+        # (opened before per-slice cost tracking) by replaying this slice's
+        # fills. Cheap no-op once every held symbol has a basis.
+        try:
+            led.backfill_basis_from_fills()
+        except Exception:
+            pass
         holdings_val = 0.0
         marks: dict = {}
         for sym, qty in led.holdings.items():
@@ -358,10 +365,15 @@ class _IBKRShim:
                 continue
             nsym = normalize_symbol(sym)
             it = port.get(nsym)
-            avg = float(getattr(it, "averageCost", 0) or 0) if it is not None else 0.0
             px  = float(getattr(it, "marketPrice", 0) or 0) if it is not None else 0.0
             if px <= 0:
                 px = self._price(sym)
+            # Prefer the slice's OWN average entry (per-bot correct). Fall back to
+            # IBKR's account-level averageCost (blended across bots), then to the
+            # current price (break-even) only when neither is available.
+            avg = float(led.cost_basis.get(nsym, 0) or 0)
+            if avg <= 0 and it is not None:
+                avg = float(getattr(it, "averageCost", 0) or 0)
             if avg <= 0:
                 avg = px            # cost basis unknown — show at break-even
             mv  = qty * px

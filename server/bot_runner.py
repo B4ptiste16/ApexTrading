@@ -264,6 +264,7 @@ def list_ibkr_ledgers(user_id: int) -> list[dict]:
                 "value":      float(j.get("last_value", 0.0)),
                 "holdings":   j.get("holdings", {}),
                 "marks":      j.get("marks", {}),     # V4.6.61 — per-holding exact marks
+                "cost_basis": j.get("cost_basis", {}),  # V4.6.108 — per-slice avg entry
                 "file":       f.stem,
             })
         except Exception:

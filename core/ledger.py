@@ -41,6 +41,14 @@ from typing import Optional
 _EPS = 1e-9
 
 
+def _is_num(v) -> bool:
+    try:
+        float(v)
+        return True
+    except (TypeError, ValueError):
+        return False
+
+
 def normalize_symbol(symbol: str) -> str:
     """Collapse the various symbol spellings to the plain IBKR ticker the
     ledger stores.  yfinance 'BTC-USD' and Alpaca 'BTC/USD' both become
@@ -94,6 +102,17 @@ class Ledger:
             for k, v in (data.get("marks") or {}).items()
             if isinstance(v, dict)
         }
+        # V4.6.108 — per-slice average ENTRY price, maintained from THIS bot's
+        # own fills (weighted avg on adds, preserved on partial exits, dropped on
+        # flat). This is the source of truth for a bot's entry — unlike IBKR's
+        # account-level `averageCost`, which is BLENDED across every bot that
+        # holds the same symbol (and was coming back 0/empty for cloud bots,
+        # leaving the position gauge stuck at 0%).
+        self.cost_basis: dict[str, float] = {
+            normalize_symbol(k): float(v)
+            for k, v in (data.get("cost_basis") or {}).items()
+            if _is_num(v)
+        }
 
     # ── persistence ─────────────────────────────────────────────────
 
@@ -142,6 +161,7 @@ class Ledger:
                 "updated": self.updated,
                 "last_value": self.last_value,
                 "marks": self.marks,
+                "cost_basis": self.cost_basis,
             }, indent=2), encoding="utf-8")
         except Exception as e:
             print(f"  [ledger] save failed: {e}", flush=True)
@@ -172,14 +192,45 @@ class Ledger:
 
     # ── mutations (each persists) ───────────────────────────────────
 
+    def _update_basis(self, sym: str, delta: float, price: float) -> None:
+        """V4.6.108 — maintain this slice's average entry for `sym` given a
+        SIGNED quantity change `delta` (+buy/cover, −sell/short) at `price`.
+        Must be called BEFORE `holdings` is mutated (it reads the old qty).
+
+        Adds in the same direction → weighted average; opening or flipping
+        direction → fresh price; partial exit → keep the existing average;
+        flat → drop. Works identically for longs (positive) and shorts
+        (negative), so the entry is always the price the slice paid/received."""
+        price = abs(float(price or 0.0))
+        old = self.holdings.get(sym, 0.0)
+        new = old + delta
+        if abs(new) <= _EPS:
+            self.cost_basis.pop(sym, None)
+            return
+        if price <= 0:
+            return
+        old_avg = self.cost_basis.get(sym, 0.0)
+        opening = abs(old) <= _EPS or (old > 0) != (new > 0)
+        if opening:
+            self.cost_basis[sym] = price
+        elif abs(new) > abs(old) + _EPS:        # adding in same direction
+            if old_avg > 0:
+                self.cost_basis[sym] = (
+                    abs(old) * old_avg + abs(delta) * price) / abs(new)
+            else:                               # no prior basis — best estimate
+                self.cost_basis[sym] = price
+        # else: partial exit → keep old_avg unchanged
+
     def record_buy(self, symbol: str, qty: float, price: float) -> None:
         sym = normalize_symbol(symbol)
+        self._update_basis(sym, qty, price)
         self.cash -= qty * price
         self.holdings[sym] = self.holdings.get(sym, 0.0) + qty
         self.save()
 
     def record_sell(self, symbol: str, qty: float, price: float) -> None:
         sym = normalize_symbol(symbol)
+        self._update_basis(sym, -qty, price)
         self.cash += qty * price
         self.holdings[sym] = self.holdings.get(sym, 0.0) - qty
         self.save()
@@ -187,6 +238,7 @@ class Ledger:
     def record_short(self, symbol: str, qty: float, price: float) -> None:
         """Sell-to-open: proceeds add to cash, holdings go negative."""
         sym = normalize_symbol(symbol)
+        self._update_basis(sym, -qty, price)
         self.cash += qty * price
         self.holdings[sym] = self.holdings.get(sym, 0.0) - qty
         self.save()
@@ -194,9 +246,34 @@ class Ledger:
     def record_cover(self, symbol: str, qty: float, price: float) -> None:
         """Buy-to-cover: pays cash, brings a negative holding back up."""
         sym = normalize_symbol(symbol)
+        self._update_basis(sym, qty, price)
         self.cash -= qty * price
         self.holdings[sym] = self.holdings.get(sym, 0.0) + qty
         self.save()
+
+    # ── cost-basis backfill (V4.6.108) ──────────────────────────────────
+
+    def backfill_basis_from_fills(self, fills_path: Optional[Path] = None) -> bool:
+        """Reconstruct missing average-entry prices for currently-held symbols
+        by replaying this slice's fills log. Used to heal positions that were
+        opened before per-slice cost tracking existed. Returns True if anything
+        was filled in. Only fills GAPS — never overwrites a live basis."""
+        held = {s for s, q in self.holdings.items() if abs(q) > _EPS}
+        missing = {s for s in held if self.cost_basis.get(s, 0.0) <= 0}
+        if not missing:
+            return False
+        if fills_path is None:
+            fills_path = self.path.with_name(self.path.stem + ".fills.jsonl")
+        replayed = replay_fills_basis(fills_path)
+        changed = False
+        for s in missing:
+            avg = replayed.get(s)
+            if avg and avg > 0:
+                self.cost_basis[s] = avg
+                changed = True
+        if changed:
+            self.save()
+        return changed
 
     # ── valuation + rebalancing (V4.6.51) ───────────────────────────
 
@@ -264,6 +341,52 @@ class Ledger:
         self.holdings = {
             s: q for s, q in self.holdings.items() if abs(q) > _EPS
         }
+
+
+def replay_fills_basis(fills_path: str | Path) -> dict[str, float]:
+    """Replay a `.fills.jsonl` log to reconstruct the average ENTRY price of
+    each symbol's CURRENT open position. Same weighted-average rules the live
+    ledger uses (adds average in, partial exits keep the average, flat/flip
+    resets). Returns {SYM: avg_entry} for symbols still open at the end."""
+    p = Path(fills_path)
+    if not p.exists():
+        return {}
+    pos: dict[str, float] = {}      # signed qty
+    avg: dict[str, float] = {}      # avg entry
+    try:
+        lines = p.read_text(encoding="utf-8").splitlines()
+    except Exception:
+        return {}
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            r = json.loads(line)
+            sym = normalize_symbol(r.get("symbol", ""))
+            side = str(r.get("side", "")).upper()
+            qty = abs(float(r.get("qty", 0) or 0))
+            price = abs(float(r.get("price", 0) or 0))
+        except Exception:
+            continue
+        if not sym or qty <= _EPS or price <= 0:
+            continue
+        delta = qty if side in ("BUY", "COVER") else -qty
+        old = pos.get(sym, 0.0)
+        new = old + delta
+        if abs(new) <= _EPS:
+            pos[sym] = 0.0
+            avg.pop(sym, None)
+            continue
+        if abs(old) <= _EPS or (old > 0) != (new > 0):
+            avg[sym] = price                      # opening / flip
+        elif abs(new) > abs(old) + _EPS:          # adding
+            a0 = avg.get(sym, 0.0)
+            avg[sym] = ((abs(old) * a0 + abs(delta) * price) / abs(new)
+                        if a0 > 0 else price)
+        # partial exit → keep avg
+        pos[sym] = new
+    return {s: a for s, a in avg.items() if abs(pos.get(s, 0.0)) > _EPS and a > 0}
 
 
 # ── env-driven convenience (used by the bot subprocess) ─────────────
