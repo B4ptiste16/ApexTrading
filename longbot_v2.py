@@ -248,6 +248,25 @@ _apex_data_dir = os.environ.get("APEX_DATA_DIR") or str(
 )
 load_dotenv(__import__("pathlib").Path(_apex_data_dir) / ".env", override=True)
 load_dotenv(override=True)  # fallback: also search CWD / parent dirs
+
+# V4.6.109 — scope state/log/analysis/charts to THIS bot's per-broker instance
+# dir (mirrors core.data.broker_data_dir) so the same user running LONG on both
+# Alpaca and IBKR — or two different users — never share one state file. The old
+# RELATIVE paths resolved to the launch cwd (/opt/apex_bots on the server), so
+# every instance wrote the SAME file and one bot's reconcile (seeing only its own
+# broker's positions) corrupted another's open positions and win/loss tally.
+_apex_broker = (os.environ.get("APEX_BROKER") or "alpaca").lower()
+_data_root = __import__("pathlib").Path(_apex_data_dir)
+if _apex_broker != "alpaca":
+    _data_root = _data_root / _apex_broker
+try:
+    _data_root.mkdir(parents=True, exist_ok=True)
+except Exception:
+    pass
+STATE_FILE    = str(_data_root / "longv2_state.json")
+LOG_FILE      = str(_data_root / "longv2_trade_log.jsonl")
+ANALYSIS_FILE = str(_data_root / "longv2_analysis.txt")
+CHART_DIR     = str(_data_root / "longv2_charts")
 os.makedirs(CHART_DIR, exist_ok=True)
 
 _AI_PROVIDER, _AI_MODEL, _AI_KEY, _AI_MODE = load_ai_config()

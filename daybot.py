@@ -87,6 +87,25 @@ _apex_data_dir = os.environ.get("APEX_DATA_DIR") or str(
 load_dotenv(__import__("pathlib").Path(_apex_data_dir) / ".env", override=True)
 load_dotenv(override=True)  # fallback: also search CWD / parent dirs
 
+# V4.6.109 — per-instance data dir (mirrors core.data.broker_data_dir): Alpaca
+# uses the flat data dir, every other broker gets its own <broker>/ subdir. The
+# day bot's state/log/analysis/charts hang off THIS so the same user running DAY
+# on both Alpaca and IBKR — or two different users — never share one
+# daybot_state.json. They previously all used RELATIVE paths that resolved to the
+# launch cwd (/opt/apex_bots on the server), so every day bot wrote the SAME
+# file: one bot's reconcile (which only sees its OWN broker's positions) would
+# pop another broker's open brackets, leaving that position unprotected (price
+# could sail past the take-profit with no order left to sell it) and corrupting
+# the win/loss tally.
+_apex_broker = (os.environ.get("APEX_BROKER") or "alpaca").lower()
+_data_root = __import__("pathlib").Path(_apex_data_dir)
+if _apex_broker != "alpaca":
+    _data_root = _data_root / _apex_broker
+try:
+    _data_root.mkdir(parents=True, exist_ok=True)
+except Exception:
+    pass
+
 
 # =========================================================
 # CONFIG
@@ -247,10 +266,12 @@ TOP_N_CLAUDE  = 3      # send top 3 charts to AI
 MAX_TOKENS    = 500    # small  -  just needs one ticker + confidence
 
 # -- Files ------------------------------------------------
-STATE_FILE    = "daybot_state.json"
-LOG_FILE      = "daybot_trade_log.jsonl"
-ANALYSIS_FILE = "daybot_analysis.txt"
-CHART_DIR     = "daybot_charts"
+# V4.6.109 — instance-scoped (see _data_root above). Absolute paths so the bot's
+# launch cwd no longer decides where state lives → no cross-instance collisions.
+STATE_FILE    = str(_data_root / "daybot_state.json")
+LOG_FILE      = str(_data_root / "daybot_trade_log.jsonl")
+ANALYSIS_FILE = str(_data_root / "daybot_analysis.txt")
+CHART_DIR     = str(_data_root / "daybot_charts")
 
 
 # =========================================================
