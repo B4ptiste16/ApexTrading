@@ -209,10 +209,14 @@ SONNET_INPUT_PER_M = 3.00
 SONNET_OUTPUT_PER_M= 15.00
 
 # Alpaca period map
+# V4.6.107 — "ALL" was missing, so `.get(period, ("1D","5Min"))` collapsed the
+# whole-history view to the last day. Map it to a year of daily bars (covers all
+# of these bots' lifetimes) so the value curve spans the full timeline.
 ALPACA_PERIOD = {
     "1D": ("1D","5Min"), "1W": ("1W","1H"),
     "1M": ("1M","1D"),   "3M": ("3M","1D"),
     "6M": ("6M","1D"),   "1Y": ("1A","1D"),
+    "ALL": ("1A","1D"),
 }
 
 
