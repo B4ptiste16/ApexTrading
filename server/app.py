@@ -1669,7 +1669,8 @@ def api_ibkr_ledgers(authorization: str | None = Header(default=None)):
     """V4.6.51 — each IBKR bot's sub-portfolio snapshot (cash, holdings, live
     value) so the desktop can show an allocation % that tracks performance."""
     user = _current_user(authorization)
-    return {"ledgers": bot_runner.list_ibkr_ledgers(user["id"])}
+    return {"ledgers": bot_runner.list_ibkr_ledgers(user["id"]),
+            "account": bot_runner.read_ibkr_account(user["id"])}
 
 
 @app.get("/ibkr/{side}/fills")

@@ -356,6 +356,26 @@ def list_ibkr_ledgers(user_id: int) -> list[dict]:
     return out
 
 
+def read_ibkr_account(user_id: int, mode: str = "paper") -> dict:
+    """V4.6.111 — the whole-account NetLiquidation + free cash snapshot the bots
+    write next to the ledgers (account_<mode>.json). Lets the desktop show the
+    FULL IBKR account value (all bots + unallocated cash), not just the sum of
+    bot slices. {} when no bot has snapshotted yet (e.g. gateway never came up)."""
+    import json as _json
+    f = _ibkr_ledger_dir(user_id) / f"account_{mode.lower()}.json"
+    if not f.exists():
+        return {}
+    try:
+        j = _json.loads(f.read_text(encoding="utf-8"))
+        return {
+            "net_liq": float(j.get("net_liq", 0.0)),
+            "cash":    float(j.get("cash", 0.0)),
+            "updated": j.get("updated", ""),
+        }
+    except Exception:
+        return {}
+
+
 def list_ibkr_fills(user_id: int, side: str, mode: str = "paper",
                     limit: int = 500) -> list[dict]:
     """V4.6.63 — return a cloud IBKR bot's recorded fills (newest first) so the

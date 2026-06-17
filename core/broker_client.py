@@ -397,6 +397,14 @@ class _IBKRShim:
                 led.marks = marks
         except Exception:
             pass
+        # V4.6.111 — snapshot the WHOLE IBKR account (NetLiquidation + free cash)
+        # next to the ledgers so the desktop can show the FULL account value, not
+        # just the sum of bot slices. Cheap + throttled; any bot may write it
+        # (they all see the same shared account).
+        try:
+            self._snapshot_whole_account()
+        except Exception:
+            pass
         return SimpleNamespace(
             id=self.account,         # V4.6.53 — bots read account.id
             portfolio_value=eq, equity=eq, cash=led.cash,
@@ -417,6 +425,49 @@ class _IBKRShim:
         except Exception:
             pass
         return 0.0
+
+    def _snapshot_whole_account(self):
+        """V4.6.111 — write the whole IBKR account's NetLiquidation + free cash to
+        a shared file next to the ledgers (account_<mode>.json), so the desktop
+        can display the FULL account value (bots + unallocated cash), not just the
+        sum of bot slices. Throttled to ~45s; any bot may write it."""
+        if self.ledger is None:
+            return
+        now = time.time()
+        if now - getattr(self, "_acct_snap_ts", 0) < 45:
+            return
+        self._acct_snap_ts = now
+        try:
+            vals = self.ib.accountValues()
+        except Exception:
+            return
+
+        def _pick(tag):
+            usd = None
+            for av in vals:
+                if av.tag == tag:
+                    if av.currency == "USD":
+                        return float(av.value)
+                    usd = float(av.value)
+            return usd
+
+        net_liq = _pick("NetLiquidation")
+        cash    = _pick("TotalCashValue")
+        if not net_liq:
+            return
+        import json as _json
+        from datetime import datetime as _dt, timezone as _tz
+        stem = self.ledger.path.stem            # e.g. "long_paper"
+        mode = stem.split("_")[-1] if "_" in stem else "paper"
+        f = self.ledger.path.parent / f"account_{mode}.json"
+        try:
+            f.write_text(_json.dumps({
+                "net_liq": round(float(net_liq), 2),
+                "cash":    round(float(cash or 0), 2),
+                "updated": _dt.now(_tz.utc).isoformat(timespec="seconds"),
+            }), encoding="utf-8")
+        except Exception:
+            pass
 
     def maybe_rebalance(self):
         """V4.6.51 — when the user LOWERS this bot's allocation in Tools, a

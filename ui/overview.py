@@ -474,11 +474,15 @@ class OverviewTab(QWidget):
         cards_row = QHBoxLayout()
         cards_row.setSpacing(10)
         self._broker_cards = {}
-        for lbl in ("TOTAL VALUE", "DAY P/L", "TOTAL P/L", "POSITIONS"):
+        # V4.6.111 — "FULL ACCOUNT" shows the whole IBKR account NetLiquidation
+        # (bots + unallocated cash); "BOTS VALUE" is the sum of the bot slices.
+        for lbl in ("FULL ACCOUNT", "BOTS VALUE", "DAY P/L", "TOTAL P/L", "POSITIONS"):
             card = MetricCard(lbl, "—", C["text"])
             card.setFixedHeight(74)
             self._broker_cards[lbl] = card
             cards_row.addWidget(card)
+        # Back-compat alias: existing code updates "TOTAL VALUE".
+        self._broker_cards["TOTAL VALUE"] = self._broker_cards["BOTS VALUE"]
         outer.addLayout(cards_row)
         return frame
 
@@ -518,8 +522,28 @@ class OverviewTab(QWidget):
             if not have:
                 return
             day_pct = (day_pl / prev_eq * 100) if prev_eq else 0.0
-            self._broker_cards["TOTAL VALUE"].update_value(
+            self._broker_cards["BOTS VALUE"].update_value(
                 f"${tot_val:,.0f}", C["text"])
+            # V4.6.111 — FULL ACCOUNT (IBKR only): the whole brokerage account
+            # NetLiquidation, which includes cash not assigned to any bot. Alpaca
+            # has a separate account per bot, so there's no single "full account".
+            full_card = self._broker_cards.get("FULL ACCOUNT")
+            if full_card is not None:
+                full_val = 0.0
+                if broker == "ibkr":
+                    try:
+                        from core import ibkr_data
+                        full_val = float(ibkr_data.whole_account_value() or 0)
+                    except Exception:
+                        full_val = 0.0
+                if full_val > 0:
+                    full_card.update_value(f"${full_val:,.0f}", C["text"])
+                    full_card.setVisible(True)
+                elif broker == "ibkr":
+                    full_card.update_value("—", C["muted"])
+                    full_card.setVisible(True)
+                else:
+                    full_card.setVisible(False)
             dcol = C["green"] if day_pl >= 0 else C["red"]
             self._broker_cards["DAY P/L"].update_value(
                 f"{'+' if day_pl>=0 else ''}${day_pl:,.0f} ({day_pct:+.1f}%)", dcol)

@@ -636,9 +636,20 @@ class BotTab(QWidget):
         self.period_combo = NoScrollComboBox()
         self.period_combo.addItems(["1D","1W","1M","3M","6M","1Y"])
         self.period_combo.setFixedWidth(80)
-        self.period_combo.currentTextChanged.connect(
-            lambda _: self._apply_equity(self._cached))
+        # V4.6.111 — re-FETCH on period change (the history is fetched per
+        # period). Re-rendering the cached 1D data could never show a week/month,
+        # which is why switching to 1W/1M "did nothing". Repaint the cached view
+        # instantly for feedback, then pull the wider history in the background.
+        self.period_combo.currentTextChanged.connect(self._on_period_changed)
         return self.period_combo
+
+    def _on_period_changed(self, _period: str):
+        if getattr(self, "_cached", None):
+            try:
+                self._apply_equity(self._cached)
+            except Exception:
+                pass
+        self.refresh()
 
     def _on_conf_changed(self, val: float):
         D.set_bot_min_conf(self.side, val)

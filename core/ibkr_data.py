@@ -220,6 +220,16 @@ def reset() -> None:
 _CLOUD_TTL = 12.0
 _cloud_cache: dict[str, tuple] = {}     # mode -> (ts, {SIDE: {account, positions}})
 _cloud_inflight: set = set()
+_whole_account: dict[str, dict] = {}    # mode -> {net_liq, cash, updated} (V4.6.111)
+
+
+def whole_account_value(mode: str | None = None) -> float:
+    """V4.6.111 — the FULL IBKR account NetLiquidation (every bot's slice plus
+    any unallocated cash), as last snapshotted by a running bot. 0.0 when no
+    snapshot exists yet (gateway never came up this session)."""
+    m = (mode or _mode())
+    with _snap_lock:
+        return float((_whole_account.get(m) or {}).get("net_liq", 0.0) or 0.0)
 
 _PRICE_TTL = 60.0
 _price_cache: dict[str, tuple] = {}     # SYM -> (ts, price)
@@ -285,7 +295,14 @@ def _build_cloud_data(mode: str) -> dict:
                           timeout=10)
         if not rr.ok:
             return {}
-        ledgers = rr.json().get("ledgers", []) or []
+        _body  = rr.json()
+        ledgers = _body.get("ledgers", []) or []
+        # V4.6.111 — whole-account NetLiquidation snapshot (bots + unallocated
+        # cash) so the desktop can show the FULL account, not just bot slices.
+        acct = _body.get("account") or {}
+        if float(acct.get("net_liq", 0) or 0) > 0:
+            with _snap_lock:
+                _whole_account[mode] = acct
     except Exception as e:
         print(f"[ibkr] cloud ledgers fetch: {e}")
         return {}

@@ -264,6 +264,25 @@ def equity_curve(equity_df: pd.DataFrame, side: str, period: str,
     }]
 
     # v3.1.2 — vertical event markers (one shape per trade)
+    # V4.6.111 — keep only events INSIDE the visible window. The equity series
+    # already reflects the selected period, so an out-of-range trade would
+    # stretch the x-axis far past the curve and squash it into the corner
+    # (the "1D curve but events from two weeks ago" bug).
+    if events:
+        try:
+            _tmin = pd.to_datetime(equity_df["time"].iloc[0],  utc=True)
+            _tmax = pd.to_datetime(equity_df["time"].iloc[-1], utc=True)
+            _filtered = []
+            for _e in events:
+                try:
+                    _ets = pd.to_datetime(_e[0], utc=True)
+                    if _tmin <= _ets <= _tmax:
+                        _filtered.append(_e)
+                except Exception:
+                    _filtered.append(_e)
+            events = _filtered
+        except Exception:
+            pass
     if events:
         for ts, kind, label in events:
             if hasattr(ts, "tz_convert"):
