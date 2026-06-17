@@ -219,6 +219,15 @@ def _maybe_generate_universes() -> None:
         print(f"[universe-factory] generation failed: {e}", flush=True)
 
 
+# V4.6.111 — back off bots whose start keeps FAILING for a deterministic config
+# reason (e.g. no Alpaca key synced for that slot). Retrying every 45s forever
+# spams the log and buries real problems; a 5-minute backoff still recovers
+# quickly once the user syncs the missing credential. There is NO cap on how
+# many bots run — every desired bot is started; this only paces doomed retries.
+_START_BACKOFF: dict = {}          # (uid, side, broker) -> retry-after epoch
+_START_BACKOFF_SECS = 300
+
+
 def _watchdog_sweep() -> None:
     try:
         _maybe_generate_universes()
@@ -246,13 +255,21 @@ def _watchdog_sweep() -> None:
             should_run = crypto or (is_open is True)
             running = br.is_running(uid, side, broker)
             if should_run and not running:
+                key = (uid, side, broker)
+                if time.time() < _START_BACKOFF.get(key, 0):
+                    continue                      # doomed start — backing off
                 res = br.start_bot(uid, side, broker)
                 if res.get("ok") and not res.get("already_running"):
+                    _START_BACKOFF.pop(key, None)
                     print(f"[watchdog] started user={uid} {side}/{broker} "
                           f"pid={res.get('pid')}", flush=True)
+                elif res.get("ok"):
+                    _START_BACKOFF.pop(key, None)
                 elif not res.get("ok"):
+                    _START_BACKOFF[key] = time.time() + _START_BACKOFF_SECS
                     print(f"[watchdog] user={uid} {side}/{broker} start "
-                          f"failed: {res.get('detail')}", flush=True)
+                          f"failed: {res.get('detail')} — retrying in "
+                          f"{_START_BACKOFF_SECS}s", flush=True)
             elif (not should_run) and running and (is_open is False):
                 # Equity bot + market confirmed CLOSED → stop until next open.
                 br.stop_bot(uid, side, broker, user_initiated=False)
