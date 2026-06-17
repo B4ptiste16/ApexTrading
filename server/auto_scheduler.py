@@ -252,6 +252,21 @@ def _watchdog_sweep() -> None:
                 crypto = br.bot_asset_type(uid, side) == "crypto"
             except Exception:
                 crypto = False
+            # V4.6.112 — a crypto bot must never live on IBKR (no reliable Paxos
+            # market data → it can't price/fill). Retire any that slipped in:
+            # stop it and drop it from the registry so it stays gone. The user
+            # re-creates it on Alpaca.
+            if crypto and broker == "ibkr":
+                if br.is_running(uid, side, broker):
+                    br.stop_bot(uid, side, broker, user_initiated=True)
+                    print(f"[watchdog] retired crypto bot {side} from IBKR "
+                          f"(unsupported) — move it to Alpaca", flush=True)
+                else:
+                    try:
+                        br.remove_desired(uid, side, broker)
+                    except Exception:
+                        pass
+                continue
             should_run = crypto or (is_open is True)
             running = br.is_running(uid, side, broker)
             if should_run and not running:

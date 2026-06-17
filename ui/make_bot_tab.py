@@ -562,7 +562,13 @@ def _brokers_rule(brokers: list[str]) -> str:
         "framework owns ALL broker connection, auth and order routing.\n"
         "• Your ONLY output is the decide() decision dict; the framework "
         "executes it on whichever broker (Alpaca or IBKR) is active.\n"
-        f"• Add this exact line to the APEX-BOT-META block: 'brokers: {blist}'.\n"
+        # V4.6.112 — IBKR has no reliable crypto market data, so a crypto bot
+        # must NEVER target IBKR regardless of the checkboxes above.
+        "• CRITICAL: if asset_type is 'crypto', the META 'brokers:' line MUST be "
+        "exactly 'brokers: alpaca' (omit ibkr) — IBKR cannot trade crypto. For "
+        "any non-crypto asset_type, use the target list below.\n"
+        f"• Add this exact line to the APEX-BOT-META block: 'brokers: {blist}' "
+        "(UNLESS asset_type is crypto, per the rule above).\n"
         f"{ibkr_note}"
         "• OPTIONAL: include 'confidence': <0..1 float> in the decision dict. "
         "When present, the framework skips the trade if it's below the user's "

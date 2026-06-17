@@ -1521,15 +1521,25 @@ class ToolsTab(QWidget):
                 if not isinstance(c, dict) or c.get("id") != bot_id:
                     continue
                 brokers = c.get("brokers")
-                if not brokers:
+                asset_type = str(c.get("asset_type", "") or "").lower()
+                if not brokers or not asset_type:
                     script = c.get("script", "")
                     if script:
                         try:
                             from core.bot_meta import parse_meta
-                            src = open(script, encoding="utf-8").read()
-                            brokers = (parse_meta(src) or {}).get("brokers")
+                            meta = parse_meta(
+                                open(script, encoding="utf-8").read()) or {}
+                            if not brokers:
+                                brokers = meta.get("brokers")
+                            if not asset_type:
+                                asset_type = str(
+                                    meta.get("asset_type", "") or "").lower()
                         except Exception:
-                            brokers = None
+                            pass
+                # V4.6.112 — crypto bots can't run on IBKR (no reliable crypto
+                # market data); keep them out of the IBKR allocation table.
+                if asset_type == "crypto":
+                    return False
                 if not brokers:
                     b = str(c.get("broker", "")).lower()
                     brokers = [b] if b else []

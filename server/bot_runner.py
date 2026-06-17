@@ -790,6 +790,19 @@ def _start_bot_impl(user_id: int, side: str, broker: Optional[str] = None) -> di
     IBKR concurrently. When omitted, falls back to the per-user default."""
     s = side.upper()
     b = _resolve_broker(user_id, s, broker)
+    # V4.6.112 — crypto bots can't trade on IBKR: IBKR paper has no reliable
+    # crypto (Paxos) market data (Error 10197 'no market data during competing
+    # live session'), so the bot can never price or fill. Refuse the start and
+    # drop it from the desired registry so the watchdog stops trying — the user
+    # runs crypto on Alpaca, which supports it natively.
+    if b == "ibkr" and bot_asset_type(user_id, side) == "crypto":
+        try:
+            remove_desired(user_id, s, b)
+        except Exception:
+            pass
+        return {"ok": False, "detail":
+                "Crypto bots can't run on IBKR — IBKR has no reliable crypto "
+                "market data. Run this bot on Alpaca (native crypto support)."}
     key = (user_id, s, b)
     if is_running(user_id, side, b):
         existing_pid = (_RUNNING[key].pid if key in _RUNNING
