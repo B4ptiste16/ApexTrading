@@ -766,6 +766,28 @@ class BotRunner:
                 print(f"  SKIP   {symbol:<10}  no free cash to {action} "
                       f"(already fully invested)", flush=True)
                 return
+            # V4.6.112 — Alpaca rejects crypto orders below a $10 notional
+            # ("cost basis must be >= minimal amount of order 10"). Bump a
+            # too-small buy up to the floor when the cash allows; otherwise skip
+            # rather than fire a doomed order.
+            if self.asset_type == "crypto":
+                try:
+                    _px = float(bars["Close"].squeeze().iloc[-1])
+                except Exception:
+                    _px = 0.0
+                if _px > 0 and float(d["qty"]) * _px < 10.0:
+                    _floor = 10.50           # small buffer over Alpaca's $10 min
+                    _live  = _account_snapshot(client)
+                    _avail = _live.get("available_cash", _live.get("cash", 0.0))
+                    if _avail >= _floor:
+                        d["qty"] = round(_floor / _px, 9)
+                        print(f"  MIN    {symbol:<10}  bumped to ~${_floor:.2f} "
+                              f"(Alpaca crypto $10 minimum)", flush=True)
+                    else:
+                        print(f"  SKIP   {symbol:<10}  order "
+                              f"${float(d['qty'])*_px:.2f} < $10 Alpaca min and "
+                              f"only ${_avail:.2f} free", flush=True)
+                        return
         try:
             order = _submit(client, alpaca_sym, action, d["qty"])
             print(f"  {action:<6} {symbol:<10}  qty={d['qty']}  "
