@@ -592,6 +592,31 @@ def _cloud_broker(blob: dict, side: str) -> str:
                or blob.get("APEX_CLOUD_BROKER") or "alpaca").lower()
 
 
+def _ibkr_alloc_from_desktop_config(user_id: int, side: str,
+                                    mode: str = "paper"):
+    """V4.6.114 — this bot's IBKR allocation % from the synced desktop-config
+    (its ibkr_<mode>.bots table). The credentials blob (the historic source) is
+    REPLACED by every PUT /credentials, so an allocation set without an Alpaca
+    re-sync got wiped — the bot then seeded nothing, showed $0 and traded the
+    whole account. The desktop-config carries the full settings and is pushed
+    regularly, so it's the reliable source. None when not found."""
+    import json as _json
+    try:
+        p = _user_data_dir(user_id) / "desktop_config.json"
+        if not p.exists():
+            return None
+        cfg  = _json.loads(p.read_text(encoding="utf-8"))
+        bots = (cfg.get(f"ibkr_{str(mode).lower()}", {}) or {}).get("bots") or []
+        su   = str(side).upper()
+        for b in bots:
+            if str(b.get("id", "")).upper() == su:
+                a = str(b.get("allocation", "")).strip().rstrip("%")
+                return a or None
+    except Exception:
+        pass
+    return None
+
+
 def _ibkr_client_id(blob: dict, side: str) -> int:
     """Stable, collision-resistant clientId for this side on the user's
     shared gateway. Honors a desktop-synced IBKR_CLIENT_ID_<SIDE> when set,
@@ -682,6 +707,10 @@ def _build_env(user_id: int, side: str,
         # V4.6.50 — this bot's allocation % (synced from Tools → IBKR) so the
         # shim seeds its sub-portfolio slice instead of trading the whole acct.
         _alloc = blob.get(f"APEX_IBKR_ALLOC_{s}")
+        if _alloc in (None, ""):
+            # V4.6.114 — fall back to the reliably-synced desktop-config (the
+            # blob gets wiped by other credential syncs).
+            _alloc = _ibkr_alloc_from_desktop_config(user_id, s, _ibkr_mode)
         if _alloc not in (None, ""):
             env["APEX_IBKR_ALLOC"] = str(_alloc)
 
