@@ -1730,6 +1730,17 @@ class ToolsTab(QWidget):
                 self._refresh_ibkr_live_alloc()
             except Exception:
                 pass
+            # V4.6.113 — CRITICAL: push the IBKR allocations to the APEX server so
+            # CLOUD bots can SEED their sub-portfolio. The local seed above needs a
+            # LOCAL gateway (cloud users have none), and the allocation otherwise
+            # only reached the server as a side-effect of an Alpaca slot save — so
+            # a newly-added IBKR bot's % never synced and it traded the WHOLE
+            # account (the per-bot view showed $0 with no ledger). This pushes a
+            # COMPLETE credentials payload (all keys + allocs), so nothing is wiped.
+            try:
+                self._auto_sync_after_slot_save([])
+            except Exception:
+                pass
             msg = "✓ Saved"
             if seeded:
                 msg = f"✓ Saved · seeded {seeded} sub-portfolio(s)"
