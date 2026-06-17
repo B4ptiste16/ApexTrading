@@ -5,6 +5,7 @@ Common Qt components used across all tabs.
 
 import os
 import sys
+import json
 from pathlib import Path
 from typing import Optional
 
@@ -57,19 +58,37 @@ class ChartView(QWebEngineView):
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.page().setBackgroundColor(QColor(C["bg"]))
         self._last_html = None
+        self._last_fig  = None    # extracted figure JSON of the live chart
         self._loading   = False
         self._pending   = None
+        self._ready     = False   # real chart loaded → can react() in place
         self.loadFinished.connect(self._on_loaded)
         self._show_placeholder()
 
+    @staticmethod
+    def _extract_fig(html: str):
+        """Pull the figure JSON out of a chart page (the <script id="apex-fig">
+        block) so we can diff it and update in place. None if not a chart page."""
+        marker = '<script id="apex-fig" type="application/json">'
+        i = html.find(marker)
+        if i < 0:
+            return None
+        i += len(marker)
+        j = html.find('</script>', i)
+        return html[i:j] if j > i else None
+
     def _on_loaded(self, ok):
         self._loading = False
+        # The chart's react() hook is now available iff a real chart (not the
+        # placeholder) just finished loading.
+        self._ready = self._last_fig is not None
         if self._pending is not None:
             nxt, self._pending = self._pending, None
-            self._do_load(nxt)
+            self._apply(nxt)
 
     def _do_load(self, html: str):
         self._last_html = html
+        self._last_fig  = self._extract_fig(html)
         self._loading   = True
         self.setHtml(html, QUrl("about:blank"))
 
@@ -80,17 +99,33 @@ class ChartView(QWebEngineView):
         <span style="color:{C['muted']};font-family:'JetBrains Mono';font-size:12px;">
         Loading...</span></body></html>""")
 
-    def load_chart(self, html: str):
-        # 1) Skip if nothing changed -> no blink when data is unchanged.
-        if html == self._last_html:
+    def _apply(self, html: str):
+        fig = self._extract_fig(html)
+        # Smooth path: chart already live + same structure → morph in place with
+        # Plotly.react (no web-view reload, so no blank flash / page shift).
+        if self._ready and fig is not None and not self._loading:
+            if fig == self._last_fig:
+                return                      # nothing changed
+            self._last_html = html
+            self._last_fig  = fig
+            self.page().runJavaScript(
+                f"if(window.__apexReact)window.__apexReact({json.dumps(fig)})")
             return
-        # 2) If a previous chart is still rendering, don't interrupt it
-        #    (that's the "reloads before it even loads" flicker). Remember
-        #    the latest and apply it once the current render finishes.
+        # First load (or a render is in flight): full page load, coalescing the
+        # newest html so we never interrupt an in-progress render.
         if self._loading:
             self._pending = html
             return
         self._do_load(html)
+
+    def load_chart(self, html: str):
+        # Skip if the figure is identical -> no work when data is unchanged.
+        fig = self._extract_fig(html)
+        if fig is not None and fig == self._last_fig and self._ready:
+            return
+        if fig is None and html == self._last_html:
+            return
+        self._apply(html)
 
 
 class LazyChartView(QWidget):
@@ -1428,6 +1463,8 @@ class ClosedTradesFeed(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._show_pl = True
+        self._trades  = []
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
@@ -1453,14 +1490,27 @@ class ClosedTradesFeed(QWidget):
             f"color:{C['muted']};font-size:11px;padding:8px 0;")
         self._vbox.insertWidget(0, self._empty)
 
+    def set_show_pl(self, show: bool):
+        """V4.6.110 — toggle the realised-gain figures on/off and re-render the
+        current trades in place (no broker round-trip)."""
+        show = bool(show)
+        if show == self._show_pl:
+            return
+        self._show_pl = show
+        self._render()
+
     def load(self, trades: list):
         """trades = list of dicts: ticker, qty, avg_sell, pl, pl_pct, closed_at"""
+        self._trades = list(trades or [])
+        self._render()
+
+    def _render(self):
         while self._vbox.count() > 0:
             item = self._vbox.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
 
-        if not trades:
+        if not self._trades:
             empty = QLabel("No closed trades yet")
             empty.setStyleSheet(
                 f"color:{C['muted']};font-size:11px;padding:8px 0;")
@@ -1468,7 +1518,7 @@ class ClosedTradesFeed(QWidget):
             self._vbox.addStretch()
             return
 
-        for t in trades:
+        for t in self._trades:
             row = self._make_row(t)
             self._vbox.addWidget(row)
         self._vbox.addStretch()
@@ -1508,9 +1558,13 @@ class ClosedTradesFeed(QWidget):
         price_lbl = QLabel(f"@ ${price:,.2f}")
         price_lbl.setStyleSheet(f"color:{C['muted']};font-size:10px;")
 
-        pl_lbl = QLabel(f"{sign}${abs(pl):,.2f}  ({sign}{pl_pct:.1f}%)")
-        pl_lbl.setStyleSheet(
-            f"color:{pl_c};font-size:11px;font-weight:600;")
+        if self._show_pl:
+            pl_lbl = QLabel(f"{sign}${abs(pl):,.2f}  ({sign}{pl_pct:.1f}%)")
+            pl_lbl.setStyleSheet(
+                f"color:{pl_c};font-size:11px;font-weight:600;")
+        else:
+            pl_lbl = QLabel("•••")
+            pl_lbl.setStyleSheet(f"color:{C['muted']};font-size:11px;")
 
         when_lbl = QLabel(when)
         when_lbl.setStyleSheet(f"color:{C['muted']};font-size:9px;")

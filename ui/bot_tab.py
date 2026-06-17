@@ -7,6 +7,7 @@ from pathlib import Path
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QFrame, QGridLayout, QSizePolicy, QDoubleSpinBox, QSpinBox,
+    QCheckBox,
 )
 from PyQt6.QtCore import Qt, QTimer
 
@@ -436,7 +437,25 @@ class BotTab(QWidget):
         s.add(cw2)
 
         # 11. POSITIONS + RECENT CLOSED TRADES (half/half, V4.6.69)
-        s.add(SectionHeader("POSITIONS & RECENT CLOSED TRADES", self.color))
+        # V4.6.110 — header carries a "Show P/L" toggle that hides the realised
+        # (closed trades) AND unrealised (open positions) gain figures on demand.
+        _ph = QHBoxLayout(); _ph.setContentsMargins(0, 0, 0, 0)
+        _ph.addWidget(SectionHeader("POSITIONS & CLOSED TRADES", self.color), 1)
+        self.pl_toggle = QCheckBox("Show P/L")
+        self.pl_toggle.setChecked(True)
+        self.pl_toggle.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.pl_toggle.setStyleSheet(
+            f"QCheckBox{{color:{C['muted']};font-size:10px;"
+            f"letter-spacing:1px;spacing:6px;}}"
+            f"QCheckBox::indicator{{width:13px;height:13px;border-radius:3px;"
+            f"border:1px solid {C['muted']};}}"
+            f"QCheckBox::indicator:checked{{background:{self.color};"
+            f"border:1px solid {self.color};}}")
+        self.pl_toggle.toggled.connect(self._on_toggle_pl)
+        _ph.addWidget(self.pl_toggle, 0, Qt.AlignmentFlag.AlignVCenter)
+        _phw = QWidget(); _phw.setLayout(_ph)
+        s.add(_phw)
+        self._show_pl = True
         self.pos_table = DataTable()
         self.pos_table.setFixedHeight(190)
         self.closed_trades_feed = ClosedTradesFeed()
@@ -1001,7 +1020,9 @@ class BotTab(QWidget):
 
         now   = pd.Timestamp.now(tz="UTC")
         items = []
-        for _, row in sells.head(25).iterrows():
+        # V4.6.110 — show the FULL closed-trade history (the feed scrolls); cap
+        # high only to bound widget count on a very long-lived bot.
+        for _, row in sells.head(500).iterrows():
             t      = row["Ticker"]
             qty    = float(row["Qty"])
             price  = float(row["Avg Fill"])
@@ -1191,10 +1212,26 @@ class BotTab(QWidget):
         self.cost_calls.update_value(
             str(costs.get("calls",0)), C["muted"])
 
+    def _on_toggle_pl(self, checked: bool):
+        """V4.6.110 — show/hide realised + unrealised gains across the closed
+        trades feed and the open-positions table. Re-renders from the cached
+        data so the change is instant (no broker round-trip)."""
+        self._show_pl = checked
+        try:
+            self.closed_trades_feed.set_show_pl(checked)
+        except Exception:
+            pass
+        if getattr(self, "_cached", None):
+            try:
+                self._apply_positions(self._cached)
+            except Exception:
+                pass
+
     def _apply_positions(self, data):
         pos = data.get("positions", [])
         a   = data.get("account", {})
         pv  = a.get("portfolio_value", 1)
+        show_pl = getattr(self, "_show_pl", True)
         rows = []
         tickers = []
         for p in sorted(pos, key=lambda x: abs(x.get("market_value",0)), reverse=True):
@@ -1206,12 +1243,14 @@ class BotTab(QWidget):
                 "Value ($)":  round(mv,2),
                 "Weight %":   round(abs(mv)/pv*100,2) if pv else 0,
                 "Avg Entry":  round(float(p["avg_entry_price"]),3),
-                "Unreal P/L": round(unr,2),
+                "Unreal P/L": round(unr,2) if show_pl else "•••",
                 "Dust?":      "⚠" if abs(mv)<1.0 else "",
             })
             tickers.append(p["symbol"])
 
         def unr_color(v):
+            if not show_pl:
+                return None
             try: return C["green"] if float(v)>=0 else C["red"]
             except: return None
 

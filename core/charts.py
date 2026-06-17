@@ -134,7 +134,13 @@ def _base_layout(height=300, title="", color=TEXT, extra=None):
 
 
 def _make_html(data: list, layout: dict) -> str:
-    """Wrap traces + layout into a self-contained HTML page."""
+    """Wrap traces + layout into a self-contained HTML page.
+
+    V4.6.110 — the figure JSON is tagged in a <script type="application/json">
+    block so the desktop ChartView can pull it out and, after the first paint,
+    morph the chart in place with Plotly.react() (window.__apexReact) instead of
+    reloading the whole web view. react() diffs the data and only redraws what
+    changed, so a price tick updates smoothly with no blank flash / page shift."""
     fig_json = json.dumps({"data": data, "layout": layout})
     return f"""<!DOCTYPE html>
 <html>
@@ -148,13 +154,18 @@ def _make_html(data: list, layout: dict) -> str:
 </head>
 <body>
 <div id="chart" style="width:100%;height:100vh;"></div>
+<script id="apex-fig" type="application/json">{fig_json}</script>
 <script>
-  var fig = {fig_json};
-  Plotly.newPlot('chart', fig.data, fig.layout, {{
-    responsive: true,
-    displayModeBar: false,
-    scrollZoom: false,
-  }});
+  var _opts = {{ responsive: true, displayModeBar: false, scrollZoom: false }};
+  var fig = JSON.parse(document.getElementById('apex-fig').textContent);
+  Plotly.newPlot('chart', fig.data, fig.layout, _opts);
+  // In-place update entry point used by the desktop for subsequent refreshes.
+  window.__apexReact = function(figStr) {{
+    try {{
+      var f = JSON.parse(figStr);
+      Plotly.react('chart', f.data, f.layout, _opts);
+    }} catch (e) {{}}
+  }};
 </script>
 </body>
 </html>"""
