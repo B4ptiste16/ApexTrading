@@ -432,6 +432,11 @@ class OverviewTab(QWidget):
         # V4.6.94 — feed the combined TOTAL P/L into the broker-summary card so
         # it matches the chart's series exactly.
         try:
+            # V4.6.111 — IBKR owns TOTAL P/L via _refresh_broker_summary (deposit
+            # -proof Σ(value−allocated)); the combined-equity baseline below would
+            # double-count capital added when later bots were created.
+            if D.current_broker() == "ibkr":
+                return
             if df is not None and not df.empty and "profit_loss" in df.columns:
                 pl = float(df["profit_loss"].iloc[-1] - df["profit_loss"].iloc[0])
                 eq0 = float(df["equity"].iloc[0]) or 0.0
@@ -544,6 +549,23 @@ class OverviewTab(QWidget):
                     full_card.setVisible(True)
                 else:
                     full_card.setVisible(False)
+            # V4.6.111 — IBKR TOTAL P/L = deposit-proof Σ(value − allocated). The
+            # combined-equity baseline counted capital added when later bots were
+            # created as profit (the bogus +40%).
+            if broker == "ibkr":
+                tcard = self._broker_cards.get("TOTAL P/L")
+                if tcard is not None:
+                    try:
+                        from core import ibkr_data
+                        pl, base = ibkr_data.bots_total_pl()
+                        if base > 0:
+                            pct = (pl / base * 100) if base else 0.0
+                            col = C["green"] if pl >= 0 else C["red"]
+                            tcard.update_value(
+                                f"{'+' if pl>=0 else ''}${pl:,.0f} ({pct:+.1f}%)",
+                                col)
+                    except Exception:
+                        pass
             dcol = C["green"] if day_pl >= 0 else C["red"]
             self._broker_cards["DAY P/L"].update_value(
                 f"{'+' if day_pl>=0 else ''}${day_pl:,.0f} ({day_pct:+.1f}%)", dcol)

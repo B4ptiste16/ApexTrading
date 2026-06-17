@@ -221,6 +221,16 @@ _CLOUD_TTL = 12.0
 _cloud_cache: dict[str, tuple] = {}     # mode -> (ts, {SIDE: {account, positions}})
 _cloud_inflight: set = set()
 _whole_account: dict[str, dict] = {}    # mode -> {net_liq, cash, updated} (V4.6.111)
+_bots_pl: dict[str, tuple] = {}         # mode -> (pl_sum, allocated_sum) (V4.6.111)
+
+
+def bots_total_pl(mode: str | None = None):
+    """V4.6.111 — true lifetime P/L across all IBKR bots as (pl, base), where
+    pl = Σ(value − allocated) and base = Σ allocated. Deposit-proof, unlike the
+    combined-equity baseline. (0, 0) when no ledgers have been read yet."""
+    m = (mode or _mode())
+    with _snap_lock:
+        return _bots_pl.get(m, (0.0, 0.0))
 
 
 def whole_account_value(mode: str | None = None) -> float:
@@ -306,6 +316,22 @@ def _build_cloud_data(mode: str) -> dict:
     except Exception as e:
         print(f"[ibkr] cloud ledgers fetch: {e}")
         return {}
+
+    # V4.6.111 — true lifetime P/L across the bots = Σ(current value − capital
+    # allocated at creation). The combined-equity baseline counts capital ADDED
+    # when later bots were created as "profit" (hence the bogus +40%); comparing
+    # each slice to its own allocation is deposit-proof.
+    _pl_sum = 0.0
+    _alloc_sum = 0.0
+    for led in ledgers:
+        v = float(led.get("value", 0) or 0)
+        a = float(led.get("allocated", 0) or 0)
+        if a > 0:
+            _pl_sum    += (v - a)
+            _alloc_sum += a
+    if _alloc_sum > 0:
+        with _snap_lock:
+            _bots_pl[mode] = (_pl_sum, _alloc_sum)
 
     out: dict = {}
     for led in ledgers:

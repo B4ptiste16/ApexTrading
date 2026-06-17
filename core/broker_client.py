@@ -593,19 +593,32 @@ class _IBKRShim:
         # slice (priced live), never the whole shared IBKR account.
         if self.ledger is not None:
             asset_class = "crypto" if self.asset_type == "crypto" else "us_equity"
+            # V4.6.111 — populate the REAL average entry from the slice's cost
+            # basis (backfilled from fills when needed). Returning 0.0 here used
+            # to break the DAY bot's bracket re-arm: it derived stop/take-profit
+            # from entry=0, producing garbage levels (tp≈+ATR of ZERO) → invalid
+            # OCO orders, so a position could blow past its real target unsold.
+            try:
+                self.ledger.backfill_basis_from_fills()
+            except Exception:
+                pass
             out = []
             for sym, qty in self.ledger.holdings.items():
                 if abs(qty) <= _EPS:
                     continue
-                px = self._price(sym)
-                mv = qty * px
+                nsym  = normalize_symbol(sym)
+                px    = self._price(sym)
+                entry = float(self.ledger.cost_basis.get(nsym, 0) or 0)
+                mv    = qty * px
+                upl   = (px - entry) * qty if entry > 0 else 0.0
+                plpc  = (upl / (entry * abs(qty))) if (entry > 0 and qty) else 0.0
                 out.append(SimpleNamespace(
                     symbol=sym,
                     qty=qty,
                     market_value=mv,
-                    avg_entry_price=0.0,
-                    unrealized_pl=0.0,
-                    unrealized_plpc=0.0,
+                    avg_entry_price=entry,
+                    unrealized_pl=upl,
+                    unrealized_plpc=plpc,
                     current_price=px,
                     side=("short" if qty < 0 else "long"),
                     asset_class=asset_class,

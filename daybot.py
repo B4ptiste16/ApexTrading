@@ -499,16 +499,22 @@ def sync_brackets_with_alpaca(state: dict) -> dict:
                 key=lambda o: o.filled_at or datetime.min.replace(tzinfo=timezone.utc),
                 reverse=True)[0]
             fill_price = float(sell.filled_avg_price or 0)
-            entry      = float(bracket.get("entry", fill_price))
+            entry      = float(bracket.get("entry") or 0)
             qty        = float(bracket.get("qty", 0))
-            pnl        = (fill_price - entry) * qty
-            state["total_pnl"] = round(state.get("total_pnl", 0) + pnl, 4)
-            if pnl >= 0:
-                state["wins"]   = state.get("wins", 0) + 1
+            # V4.6.111 — don't tally a phantom W/L from a garbage bracket whose
+            # entry was never known (would book a huge bogus "win" = fill×qty).
+            if entry <= 0:
+                print(f"  [bracket reconcile] {ticker}: closed but entry "
+                      f"unknown — not tallied", flush=True)
             else:
-                state["losses"] = state.get("losses", 0) + 1
-            print(f"  [bracket closed] {ticker}: "
-                  f"{'WIN' if pnl >= 0 else 'LOSS'} ${pnl:+.2f}", flush=True)
+                pnl = (fill_price - entry) * qty
+                state["total_pnl"] = round(state.get("total_pnl", 0) + pnl, 4)
+                if pnl >= 0:
+                    state["wins"]   = state.get("wins", 0) + 1
+                else:
+                    state["losses"] = state.get("losses", 0) + 1
+                print(f"  [bracket closed] {ticker}: "
+                      f"{'WIN' if pnl >= 0 else 'LOSS'} ${pnl:+.2f}", flush=True)
         else:
             print(f"  [bracket reconcile] {ticker}: position gone, no exit "
                   f"fill found — clearing", flush=True)
@@ -562,10 +568,23 @@ def rearm_orphaned_positions(state: dict) -> dict:
             if qty <= 0:
                 continue
             entry = float(p.avg_entry_price)
+            # V4.6.111 — never build a bracket from an unknown entry. entry=0
+            # produced stop/tp around ZERO (garbage) whose OCO got rejected
+            # (position left unprotected) or triggered a bogus close. Skip until
+            # the broker reports a real average cost.
+            if entry <= 0:
+                print(f"  [re-arm] {sym}: skipped — entry price unknown",
+                      flush=True)
+                continue
             # Prefer the levels we recorded when we placed the bracket
             saved = (state.get("open_brackets") or {}).get(sym, {})
             stop  = float(saved.get("stop") or 0)
             tp    = float(saved.get("tp")   or 0)
+            # V4.6.111 — discard saved levels that don't straddle the entry (a
+            # long's tp must be ABOVE and stop BELOW entry). Catches stale garbage
+            # brackets recorded earlier when the entry was 0.
+            if not (0 < stop < entry < tp):
+                stop = tp = 0.0
             # Fallback: re-derive from a fresh ATR if we don't have them
             if not (stop and tp):
                 try:
@@ -672,7 +691,9 @@ def force_close_stale_brackets(state: dict) -> dict:
                 time_in_force=TimeInForce.DAY,
             )
             trading_client.submit_order(sell)
-            entry = float(bracket.get("entry", current))
+            entry = float(bracket.get("entry") or 0)
+            if entry <= 0:        # V4.6.111 — unknown entry → book break-even
+                entry = current
             pnl   = (current - entry) * qty
             state["total_pnl"] = round(state.get("total_pnl", 0) + pnl, 4)
             if pnl >= 0:
