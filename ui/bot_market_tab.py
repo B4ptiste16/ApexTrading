@@ -39,6 +39,24 @@ from ui.widgets import ScrollContent, SectionHeader, NoScrollComboBox
 C = COLORS
 
 
+class _ClickCard(QFrame):
+    """V4.6.115 — marketplace card that reveals its description on click,
+    keeping the grid compact. Clicking the Install button doesn't toggle
+    (the button consumes the event)."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._toggle = None
+
+    def set_toggle(self, w):
+        self._toggle = w
+
+    def mouseReleaseEvent(self, e):  # noqa: N802
+        if self._toggle is not None:
+            self._toggle.setVisible(not self._toggle.isVisible())
+        super().mouseReleaseEvent(e)
+
+
 class _HttpWorker(QThread):
     done = pyqtSignal(bool, dict)
 
@@ -384,129 +402,101 @@ class BotMarketTab(QWidget):
     # ── Card factory ───────────────────────────────────────────────
 
     def _make_card(self, b: dict, *, owned: bool) -> QWidget:
+        # V4.6.115 — compact, app-styled card: broker LOGOS + icon chips instead
+        # of verbose text, description hidden until the card is clicked, and a
+        # solid Install button.
+        from ui.bot_card import broker_icon, provider_icon
         accent = (C["orange"] if b.get("featured")
                   else C["purple"] if b.get("recommended")
                   else C["green"] if not b.get("price_credits")
                   else C["yellow"])
-        card = QFrame()
+        card = _ClickCard()
+        card.setObjectName("mcard")
         card.setStyleSheet(
-            f"QFrame {{ background:{C['panel']}; "
-            f"border:none; "
-            f"border-radius:12px; "
-            f"border-top:3px solid {accent}; }}"
-            f"QFrame:hover {{ border-color:{C['muted']}; }}")
+            f"QFrame#mcard {{ background:{C['panel']}; "
+            f"border:1px solid transparent; "
+            f"border-radius:12px; border-top:3px solid {accent}; }}"
+            f"QFrame#mcard:hover {{ border:1px solid {C['muted']}; "
+            f"border-top:3px solid {accent}; }}")
+        card.setCursor(Qt.CursorShape.PointingHandCursor)
         card.setSizePolicy(QSizePolicy.Policy.Expanding,
                             QSizePolicy.Policy.Preferred)
+        card.setToolTip("Click for details")
         v = QVBoxLayout(card)
-        v.setContentsMargins(18, 16, 18, 16)
-        v.setSpacing(10)
+        v.setContentsMargins(16, 14, 16, 14)
+        v.setSpacing(9)
 
-        # Header — name + badges
-        head = QHBoxLayout()
-        head.setSpacing(8)
+        # ── Header: name + broker logos (right) ──────────────────
+        head = QHBoxLayout(); head.setSpacing(8)
         name = QLabel(b.get("name", b.get("slug", "?")))
         name.setStyleSheet(
             f"font-family:'Syne',sans-serif;font-size:14px;font-weight:800;"
             f"color:{C['text']};letter-spacing:0.5px;")
         name.setWordWrap(True)
         head.addWidget(name, 1)
-        for cond, txt, col in (
-            (b.get("featured"),     "⭐ FEATURED", C["orange"]),
-            (b.get("recommended"),  "✦ RECO",      C["purple"]),
-        ):
+        for cond, txt, col in ((b.get("featured"), "★", C["orange"]),
+                               (b.get("recommended"), "✦", C["purple"])):
             if cond:
-                badge = QLabel(txt)
-                badge.setStyleSheet(
-                    f"color:{col};font-size:8px;letter-spacing:2px;"
-                    f"font-weight:700;padding:3px 7px;"
-                    f"border:none;border-radius:4px;")
-                head.addWidget(badge)
-        # V4.6.75 (#8) — universe provenance badge: does this bot trade a
-        # curated PUBLIC universe, or its own AI-picked tickers?
-        uni = (b.get("universe") or "").strip()
-        if uni and uni.lower() not in ("(ai-selected)", "ai-selected",
-                                       "none", "default"):
-            uni_txt, uni_col = f"🌐 {uni.upper()}", C["purple"]
-        else:
-            uni_txt, uni_col = "🎯 OWN PICKS", C["green"]
-        uni_badge = QLabel(uni_txt)
-        uni_badge.setStyleSheet(
-            f"color:{uni_col};font-size:8px;letter-spacing:1px;"
-            f"font-weight:700;padding:3px 7px;border:none;border-radius:4px;")
-        uni_badge.setToolTip(
-            "Trades a curated public universe regenerated weekly on the "
-            "APEX server." if uni_col == C["purple"]
-            else "The bot picks its own tickers (no fixed public universe).")
-        head.addWidget(uni_badge)
+                bd = QLabel(txt)
+                bd.setStyleSheet(f"color:{col};font-size:13px;")
+                head.addWidget(bd)
+        _bs = (b.get("broker") or "alpaca").lower()
+        brokers = []
+        if any(k in _bs for k in ("alpaca", "both")) or not _bs:
+            brokers.append("alpaca")
+        if any(k in _bs for k in ("ibkr", "both")):
+            brokers.append("ibkr")
+        for bk in brokers:
+            pm = broker_icon(bk, 16)
+            if pm is not None:
+                il = QLabel(); il.setPixmap(pm)
+                il.setToolTip(f"Runs on {bk.upper()}")
+                head.addWidget(il)
         hw = QWidget(); hw.setLayout(head)
         v.addWidget(hw)
 
-        # Description (or placeholder)
+        # ── Icon chips: AI provider + win / installs / rating ────
+        chips = QHBoxLayout(); chips.setSpacing(14)
+        prov = (b.get("creator_ai") or "").strip()
+        if prov and prov.lower() != "none":
+            pic = provider_icon(prov.split(",")[0].strip(), 15)
+            if pic is not None:
+                pl = QLabel(); pl.setPixmap(pic)
+                pl.setToolTip(f"Built with {prov}")
+                chips.addWidget(pl)
+
+        def _chip(emoji, text, tip, color):
+            t = QLabel(f"{emoji} {text}")
+            t.setStyleSheet(f"color:{color};font-size:11px;font-weight:700;")
+            t.setToolTip(tip)
+            chips.addWidget(t)
+
+        wr = b.get("win_rate_pct")
+        _chip("🏆", f"{wr:.0f}%" if wr else "—", "Win rate",
+              C["green"] if (wr or 0) >= 50 else C["muted"])
+        _chip("⬇", f"{b.get('downloads', 0):,}", "Installs", C["muted"])
+        rt = b.get("rating")
+        _chip("★", f"{rt:.1f}" if rt else "—", "Rating",
+              C["yellow"] if rt else C["muted"])
+        chips.addStretch()
+        cw = QWidget(); cw.setLayout(chips)
+        v.addWidget(cw)
+
+        # ── Description — hidden until the card is clicked ───────
         desc = QLabel(b.get("description") or "No description provided.")
-        desc.setStyleSheet(
-            f"color:{C['text']};font-size:11px;line-height:1.5;")
+        desc.setStyleSheet(f"color:{C['muted']};font-size:11px;line-height:1.5;")
         desc.setWordWrap(True)
-        desc.setMinimumHeight(40)
+        desc.setVisible(False)
         v.addWidget(desc)
+        card.set_toggle(desc)
 
-        # AI + broker info row (V4.1.0)
-        ai_row = QHBoxLayout()
-        ai_row.setSpacing(16)
-        for prefix, ai_field, icon in (
-            ("Created by", "creator_ai", "🤖"),
-            ("Runs with",  "runner_ai",  "⚡"),
-            ("Works on",   "broker",     "🏦"),
-        ):
-            ai_val = b.get(ai_field, "").strip()
-            if ai_val:
-                ai_chip = QLabel(f"{icon} {prefix}: {ai_val}")
-                ai_chip.setStyleSheet(
-                    f"color:{C['muted']};font-size:9px;letter-spacing:1px;")
-                ai_row.addWidget(ai_chip)
-        ai_row.addStretch()
-        arw = QWidget(); arw.setLayout(ai_row)
-        v.addWidget(arw)
-
-        # Stat strip — 4 columns
-        stat_row = QHBoxLayout()
-        stat_row.setSpacing(10)
-        for label, value, val_color in [
-            ("PHILOSOPHY",
-             (b.get("philosophy") or "general").upper(),
-             C["text"]),
-            ("WIN RATE",
-             f"{b['win_rate_pct']:.0f}%" if b.get("win_rate_pct") else "—",
-             C["green"] if (b.get("win_rate_pct") or 0) >= 50 else C["muted"]),
-            ("DOWNLOADS",
-             f"{b.get('downloads', 0):,}",
-             C["muted"]),
-            ("RATING",
-             f"★ {b['rating']:.1f}" if b.get("rating") else "—",
-             C["yellow"] if b.get("rating") else C["muted"]),
-        ]:
-            stat = QVBoxLayout()
-            stat.setSpacing(2)
-            lbl = QLabel(label)
-            lbl.setStyleSheet(
-                f"color:{C['muted']};font-size:8px;letter-spacing:2px;")
-            val = QLabel(value)
-            val.setStyleSheet(
-                f"color:{val_color};font-size:12px;font-weight:700;")
-            stat.addWidget(lbl)
-            stat.addWidget(val)
-            sw = QWidget(); sw.setLayout(stat)
-            stat_row.addWidget(sw)
-        sr = QWidget(); sr.setLayout(stat_row)
-        v.addWidget(sr)
-
-        # Bottom — price + action
-        bottom = QHBoxLayout()
-        bottom.setSpacing(8)
+        # ── Bottom: price + Install button ──────────────────────
+        bottom = QHBoxLayout(); bottom.setSpacing(8)
         price = int(b.get("price_credits", 0))
         if price > 0:
-            price_lbl = QLabel(f"◊  {price:,} credits")
+            price_lbl = QLabel(f"◊ {price:,}  ·  ${price/100:.2f}")
             price_lbl.setStyleSheet(
-                f"color:{C['yellow']};font-size:13px;font-weight:700;")
+                f"color:{C['yellow']};font-size:12px;font-weight:700;")
         else:
             price_lbl = QLabel("FREE")
             price_lbl.setStyleSheet(
@@ -514,14 +504,14 @@ class BotMarketTab(QWidget):
                 f"font-weight:800;")
         bottom.addWidget(price_lbl)
         bottom.addStretch()
-
         if owned:
-            stat = QLabel(f"📊  {b.get('downloads', 0)} installs")
-            stat.setStyleSheet(f"color:{C['green']};font-size:11px;")
-            bottom.addWidget(stat)
+            st = QLabel(f"✓ {b.get('downloads', 0)} installs")
+            st.setStyleSheet(f"color:{C['green']};font-size:11px;")
+            bottom.addWidget(st)
         else:
-            install = QPushButton("⬇  Install")
-            install.setObjectName("addBotBtn")
+            install = QPushButton("INSTALL")
+            install.setObjectName("installBotBtn")
+            install.setCursor(Qt.CursorShape.PointingHandCursor)
             install.clicked.connect(
                 lambda _, slug=b["slug"], name=b["name"]:
                     self._install(slug, name))

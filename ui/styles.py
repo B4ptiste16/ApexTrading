@@ -467,6 +467,28 @@ QPushButton#addBotBtn:hover {{
     background: rgba(122,181,162,0.28);
 }}
 
+/* V4.6.115 — marketplace Install: a real, solid button that clearly
+   changes colour on hover (was a faint link-like chip). */
+QPushButton#installBotBtn {{
+    background: {c['green']};
+    color: {c['bg']};
+    border: none;
+    border-radius: 8px;
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 1px;
+    padding: 8px 22px;
+}}
+
+QPushButton#installBotBtn:hover {{
+    background: {c['text']};
+    color: {c['bg']};
+}}
+
+QPushButton#installBotBtn:pressed {{
+    background: {c['muted']};
+}}
+
 QPushButton#silenceBtn {{
     background: rgba(92,107,130,0.07);
     color: {c['muted']};

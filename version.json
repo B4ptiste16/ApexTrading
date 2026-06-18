@@ -1,4 +1,4 @@
 {
-  "version": "4.6.114",
-  "notes": "v4.6.114 — Day P/L now shows for every bot (not just Energy)\n\n📊 Fixed: after the market closed, every bot's Day P/L read $0.00 except one. The daily change was being measured from the MOST-RECENT close — which, right after the bell, is today's close, so there was nothing to compare against. It now measures the full session (since the PREVIOUS close), the way brokers do, so each bot shows its real day's gain/loss. A guard also stops a deleted-then-re-added bot (like Energy) from showing a garbage number off its old history.\n\nUpdate via the in-app banner.\n"
+  "version": "4.6.115",
+  "notes": "v4.6.115 — Bot market redesign + Day P/L fix\n\n🛒 The bot market now matches the app: compact cards with broker LOGOS (Alpaca / IBKR) and AI-provider icons instead of text, the description tucks away until you click a card, and Install is a solid button that lights up on hover (no more link-y feel).\n\n📊 Day P/L now shows for every bot, not just one — it measures the full session (since the previous close) the way a broker does, with a guard so a deleted-then-re-added bot can't show a garbage number.\n\n🤖 The marketplace starter bots run on BOTH Alpaca and IBKR and are compatible with every AI provider (Claude, GPT, Groq, Gemini).\n\nUpdate via the in-app banner.\n"
 }

@@ -243,10 +243,7 @@ AI_BODY = '''
     import os, json, numpy as np
     if len(bars) < 20:
         return {{"action": "HOLD", "reason": "need 20+ bars"}}
-    key = os.environ.get("ANTHROPIC_API_KEY", "")
     close = bars["Close"].values.astype(float); price = float(close[-1])
-    if not key:
-        return {{"action": "HOLD", "reason": "no ANTHROPIC_API_KEY set (this is an AI-driven bot)"}}
     ret5 = (price / close[-6] - 1) * 100 if len(close) > 6 else 0.0
     ret20 = (price / close[-21] - 1) * 100 if len(close) > 21 else 0.0
     rsi = _rsi(close, 14)
@@ -259,11 +256,14 @@ AI_BODY = '''
         "BUY only if flat and the {thesis} setup is clearly present; SELL only if holding and the thesis has broken."
     )
     try:
-        import anthropic
-        cli = anthropic.Anthropic(api_key=key)
-        msg = cli.messages.create(model="claude-haiku-4-5-20251001", max_tokens=150,
-                                  messages=[{{"role": "user", "content": prompt}}])
-        raw = msg.content[0].text.strip().replace("```json", "").replace("```", "").strip()
+        # Provider-agnostic: uses whichever AI the user configured (Claude,
+        # GPT, Groq or Gemini) via APEX's shared AI client.
+        from core.ai_client import load_ai_config, call_ai_text
+        prov, model, akey, _mode = load_ai_config()
+        if not akey:
+            return {{"action": "HOLD", "reason": "no AI key configured (set one in Tools)"}}
+        raw = call_ai_text(prompt, prov, model, akey, 150)
+        raw = raw.replace("```json", "").replace("```", "").strip()
         sig = json.loads(raw)
     except Exception as e:
         return {{"action": "HOLD", "reason": f"AI call failed: {{e}}"}}
@@ -297,7 +297,7 @@ def _bot_source(*, name, slug, desc, method, ai_used, asset_type, decide_body,
         f"description:        {desc}\n"
         f"method:             {method}\n"
         f"ai_used:            {ai_used}\n"
-        f"compatible_models:  {'anthropic, openai, groq' if ai_used != 'none' else 'none'}\n"
+        f"compatible_models:  {'anthropic, openai, groq, gemini' if ai_used != 'none' else 'none'}\n"
         f"asset_type:         {asset_type}\n"
         f"brokers:            alpaca, ibkr\n"
         f"universe:           {slug}_universe.txt\n"
