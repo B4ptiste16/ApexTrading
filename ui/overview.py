@@ -717,26 +717,62 @@ class OverviewTab(QWidget):
         now_utc = _dt.now(_tz.utc)
         _off = -4 if 3 <= now_utc.month <= 11 else -5     # EDT/EST approx
         _et = now_utc + _td(hours=_off)
-        _close_et = _et.replace(hour=16, minute=0, second=0, microsecond=0)
-        if _et < _close_et:                                # before today's close
-            _close_et -= _td(days=1)
-        while _close_et.weekday() >= 5:                    # skip Sat/Sun
-            _close_et -= _td(days=1)
-        last_close_utc = (_close_et - _td(hours=_off)).replace(tzinfo=_tz.utc)
+        # V4.6.114 — DAY P/L = change over the CURRENT trading session = since the
+        # PREVIOUS close. The old code anchored to the MOST-RECENT close, so right
+        # after the bell (now past today's 16:00 ET) the baseline collapsed onto
+        # today's close and every bot read ~$0. Anchor to the close of the trading
+        # day BEFORE the most-recent session open instead.
+        _open_et = _et.replace(hour=9, minute=30, second=0, microsecond=0)
+        if _et < _open_et:                                 # before today's open
+            _open_et -= _td(days=1)
+        while _open_et.weekday() >= 5:                     # skip Sat/Sun
+            _open_et -= _td(days=1)
+        _base_et = (_open_et - _td(days=1)).replace(hour=16, minute=0,
+                                                    second=0, microsecond=0)
+        while _base_et.weekday() >= 5:
+            _base_et -= _td(days=1)
+        last_close_utc = (_base_et - _td(hours=_off)).replace(tzinfo=_tz.utc)
+        # V4.6.114 — re-seed guard: a deleted-then-re-added bot (e.g. Energy) keeps
+        # its OLD equity in the snapshot file, so a baseline from before the re-seed
+        # gives a garbage day P/L (old $153k vs new $56k). Find the most recent
+        # >40% jump between consecutive snapshots (a 5-min move that big is a
+        # re-seed, not a trade) and never let the baseline predate it.
+        _floor_ts = None
+        _pv = None
+        for s in reversed(bot_hist):
+            try:
+                _v = float(s.get("equity", 0) or 0)
+                _ts = _dt.fromisoformat(s["ts"])
+            except Exception:
+                continue
+            if (_pv is not None and _v > 0 and _pv > 0
+                    and abs(_pv - _v) / max(_pv, _v) > 0.40):
+                _floor_ts = _pts
+                break
+            _pv, _pts = _v, _ts
         today_baseline_eq = None
         for s in reversed(bot_hist):
             try:
                 ts = _dt.fromisoformat(s["ts"])
+                if _floor_ts is not None and ts < _floor_ts:
+                    break                                  # crossed the re-seed
                 if ts <= last_close_utc:
                     today_baseline_eq = float(s.get("equity", eq))
                     break
             except Exception:
                 continue
         if today_baseline_eq is None and bot_hist:
-            # Bot younger than the last close — anchor to its earliest snapshot
-            today_baseline_eq = float(bot_hist[0].get("equity", eq))
+            # Younger than the baseline close (or re-seeded since) — anchor to the
+            # current incarnation's earliest snapshot (at/after the re-seed floor).
+            for s in bot_hist:
+                try:
+                    ts = _dt.fromisoformat(s["ts"])
+                    if _floor_ts is None or ts >= _floor_ts:
+                        today_baseline_eq = float(s.get("equity", eq))
+                        break
+                except Exception:
+                    continue
         if today_baseline_eq is None:
-            # Brand-new bot, no snapshots yet — 0 P/L (just appended above)
             today_baseline_eq = eq
         day_pl = eq - today_baseline_eq
         day_pct = (day_pl / today_baseline_eq * 100
