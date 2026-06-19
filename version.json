@@ -1,4 +1,4 @@
 {
-  "version": "4.6.115",
-  "notes": "v4.6.115 — Bot market redesign + Day P/L fix\n\n🛒 The bot market now matches the app: compact cards with broker LOGOS (Alpaca / IBKR) and AI-provider icons instead of text, the description tucks away until you click a card, and Install is a solid button that lights up on hover (no more link-y feel).\n\n📊 Day P/L now shows for every bot, not just one — it measures the full session (since the previous close) the way a broker does, with a guard so a deleted-then-re-added bot can't show a garbage number.\n\n🤖 The marketplace starter bots run on BOTH Alpaca and IBKR and are compatible with every AI provider (Claude, GPT, Groq, Gemini).\n\nUpdate via the in-app banner.\n"
+  "version": "4.6.116",
+  "notes": "v4.6.116 — Silencing a bot no longer affects the other broker\n\n🔇 Fixed: silencing (or hiding) a bot on Alpaca also silenced its twin on IBKR, because both brokers were sharing one bot list under the hood. Alpaca and IBKR now keep fully independent bot registries, so muting a bot on one broker leaves the other untouched.\n\nNote: your cloud bots were never actually stopped by this — it was a display/registry mix-up. IBKR bots did start at the open; this just makes the per-broker views correct.\n\nUpdate via the in-app banner.\n"
 }

@@ -777,21 +777,39 @@ def load_settings() -> dict:
 
 def bot_registry_key(mode: str | None = None) -> str:
     """Return the per-user, per-broker, per-mode settings key for the bot
-    registry.  Paper and live trading have completely independent bot lists.
-    Falls back to plain "bot_registry" when no user is logged in."""
+    registry.  Paper and live trading — and Alpaca vs IBKR — have completely
+    independent bot lists.
+
+    V4.6.116 — CRITICAL FIX: the uid was read from `auth['user_id']`, which is
+    None (the id lives at `auth['user']['id']`), so the key collapsed to the
+    plain non-broker-scoped "bot_registry". That made Alpaca and IBKR SHARE one
+    registry — silencing a bot on Alpaca also silenced its IBKR twin. We now take
+    the uid from active_account_id() (reliable) and ALWAYS include the broker, so
+    the two brokers can never collide."""
     try:
-        from ui.login import load_auth
-        auth = load_auth() or {}
-        uid = auth.get("user_id") or auth.get("email") or ""
         s = load_settings()
         broker = s.get("broker_mode", "alpaca")
         if mode is None:
             mode = s.get("alpaca_mode", "paper")
-        if uid:
-            return f"bot_registry_{uid}_{broker}_{mode}"
+        uid = ""
+        try:
+            from core.paths import active_account_id
+            uid = active_account_id() or ""
+        except Exception:
+            uid = ""
+        if not uid:
+            try:
+                from ui.login import load_auth
+                auth = load_auth() or {}
+                u = auth.get("user") if isinstance(auth.get("user"), dict) else {}
+                uid = str(auth.get("user_id") or auth.get("email")
+                          or (u or {}).get("id") or (u or {}).get("email") or "")
+            except Exception:
+                uid = ""
+        uid = uid or "default"
+        return f"bot_registry_{uid}_{broker}_{mode}"
     except Exception:
-        pass
-    return "bot_registry"
+        return "bot_registry"
 
 
 def load_bot_registry() -> dict:
