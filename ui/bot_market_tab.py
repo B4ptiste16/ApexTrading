@@ -504,18 +504,23 @@ class BotMarketTab(QWidget):
                 f"font-weight:800;")
         bottom.addWidget(price_lbl)
         bottom.addStretch()
+        # V4.6.118 — ALWAYS show an Install button. Previously a bot you owned
+        # (and every market bot here is yours) showed only an installs count and
+        # NO button, so there was nothing to click. Owners install their own
+        # bots for free (server-side guard); others pay the credit price.
         if owned:
-            st = QLabel(f"✓ {b.get('downloads', 0)} installs")
-            st.setStyleSheet(f"color:{C['green']};font-size:11px;")
-            bottom.addWidget(st)
-        else:
-            install = QPushButton("INSTALL")
-            install.setObjectName("installBotBtn")
-            install.setCursor(Qt.CursorShape.PointingHandCursor)
-            install.clicked.connect(
-                lambda _, slug=b["slug"], name=b["name"]:
-                    self._install(slug, name))
-            bottom.addWidget(install)
+            tag = QLabel("✓ yours")
+            tag.setStyleSheet(f"color:{C['green']};font-size:10px;"
+                              f"letter-spacing:1px;")
+            tag.setToolTip("You published this bot — installing it is free.")
+            bottom.addWidget(tag)
+        install = QPushButton("INSTALL" if (owned or price <= 0) else "BUY")
+        install.setObjectName("installBotBtn")
+        install.setCursor(Qt.CursorShape.PointingHandCursor)
+        install.clicked.connect(
+            lambda _, slug=b["slug"], name=b["name"]:
+                self._install(slug, name))
+        bottom.addWidget(install)
         bw = QWidget(); bw.setLayout(bottom)
         v.addWidget(bw)
         return card

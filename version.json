@@ -1,4 +1,4 @@
 {
-  "version": "4.6.117",
-  "notes": "v4.6.117 — Buy bots in the market + cleaner pricing\n\n🛒 Fixed: installing/buying a paid bot from the market silently failed — the request wasn't signed in, so the server returned 'Sign in to purchase'. Purchases now go through with your account, and any error (e.g. not enough credits) shows a clear message. Downloading a bot YOU published is free (no charge for your own work).\n\n◊ Bot prices now show in credits only (no dollar figure).\n\n🔇 Also: Alpaca and IBKR keep independent bot lists, so silencing a bot on one broker no longer silences its twin on the other.\n\nUpdate via the in-app banner.\n"
+  "version": "4.6.118",
+  "notes": "v4.6.118 — Install/Buy button now always shows in the market\n\n🛒 Fixed: bots you published (and right now every bot in the market is yours) showed only an installs count with NO button — so there was nothing to click to get them. Every card now has an INSTALL button (BUY for paid bots you don't own). Installing your own bot is free.\n\nUpdate via the in-app banner.\n"
 }
