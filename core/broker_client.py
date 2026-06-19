@@ -570,13 +570,17 @@ class _IBKRShim:
         bp   = pick("BuyingPower")
 
         # V4.6.50 — lazy sub-portfolio seed: the first time we know the account
-        # cash, create this bot's ledger slice from its allocation %. Uses the
-        # fallback-aware cash above (the account's base currency may not be
-        # tagged 'USD'). Once seeded, return the slice immediately.
-        if (not self._seed_checked and cash > 0
+        # value, create this bot's ledger slice from its allocation %.
+        # V4.6.119 — seed from NET LIQUIDATION (true total account value), not
+        # TotalCashValue. Short positions add their proceeds to cash, so cash can
+        # be far larger than net-liq — seeding off cash made a "10% allocation"
+        # land at ~15% of the actual portfolio. Net-liq also matches what the
+        # rebalance logic (maybe_rebalance) already targets, so the two agree.
+        _seed_base = eq if eq > 0 else cash
+        if (not self._seed_checked and _seed_base > 0
                 and os.environ.get("APEX_IBKR_ALLOC")):
             self._seed_checked = True
-            self.ledger = self._maybe_seed_ledger(cash)
+            self.ledger = self._maybe_seed_ledger(_seed_base)
             if self.ledger is not None:
                 return self._slice_account()
 

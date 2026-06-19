@@ -1,4 +1,4 @@
 {
-  "version": "4.6.118",
-  "notes": "v4.6.118 — Install/Buy button now always shows in the market\n\n🛒 Fixed: bots you published (and right now every bot in the market is yours) showed only an installs count with NO button — so there was nothing to click to get them. Every card now has an INSTALL button (BUY for paid bots you don't own). Installing your own bot is free.\n\nUpdate via the in-app banner.\n"
+  "version": "4.6.119",
+  "notes": "v4.6.119 — No bot limit, correct IBKR allocation %, day P/L for all bots\n\n♾️ Removed the 5-bot cap — add as many bots as you like (Alpaca needs a key pair per bot; IBKR bots share one connection).\n\n🎯 Fixed the IBKR allocation: '10%' now means 10% of your real account value (NetLiquidation), not 10% of cash. Short positions inflate cash, which is why 10% was landing at ~15% of your portfolio. NEW: re-add (Remove → Add) an over-allocated IBKR bot so it re-seeds at the correct size.\n\n📊 Day P/L now computes for IBKR bots in the summary too (from the previous close), instead of always reading 0.\n\nUpdate via the in-app banner.\n"
 }

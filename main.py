@@ -300,7 +300,9 @@ BUILTIN_BOTS = {
     },
 }
 
-MAX_ACTIVE_BOTS = 5
+MAX_ACTIVE_BOTS = 50   # V4.6.119 — effectively unlimited (IBKR shares one
+# gateway via distinct client IDs; Alpaca is bounded only by how many API key
+# pairs you've added). Was a hard cap of 5 that blocked adding more bots.
 
 
 def _registry_key() -> str:
@@ -420,9 +422,9 @@ class MoreBotsTab(QWidget):
         s.add(SectionHeader("ACTIVE BOTS", C["green"]))
 
         info = QLabel(
-            f"Active bots appear as tabs and can be started. "
-            f"Max {MAX_ACTIVE_BOTS} bots (Alpaca: 1 API key pair per bot; "
-            f"IBKR: multiple bots share one connection via different client IDs)."
+            "Active bots appear as tabs and can be started. "
+            "Add as many as you like — Alpaca needs 1 API key pair per bot; "
+            "IBKR bots share one connection via different client IDs."
         )
         info.setStyleSheet(f"color:{C['muted']};font-size:11px;")
         info.setWordWrap(True)

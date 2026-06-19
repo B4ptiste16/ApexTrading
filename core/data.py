@@ -974,6 +974,66 @@ def remove_cloud_bot(side: str) -> None:
 
 # ── V7.1+: force-update setting ─────────────────────────────────────
 
+def day_pl_baseline(side: str, current_eq: float):
+    """V4.6.119 — the bot's equity at the PREVIOUS market close, derived from its
+    local snapshots, with a re-seed guard. Mirrors the Overview card logic so
+    IBKR bots — whose broker reports last_equity == equity (giving a 0 day P/L) —
+    get a real daily baseline. Returns None when there's no usable history."""
+    from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+    try:
+        snaps = read_bot_snapshots(side)
+    except Exception:
+        snaps = []
+    if not snaps:
+        return None
+    now = _dt.now(_tz.utc)
+    off = -4 if 3 <= now.month <= 11 else -5
+    et = now + _td(hours=off)
+    op = et.replace(hour=9, minute=30, second=0, microsecond=0)
+    if et < op:
+        op -= _td(days=1)
+    while op.weekday() >= 5:
+        op -= _td(days=1)
+    base_et = (op - _td(days=1)).replace(hour=16, minute=0, second=0, microsecond=0)
+    while base_et.weekday() >= 5:
+        base_et -= _td(days=1)
+    last_close = (base_et - _td(hours=off)).replace(tzinfo=_tz.utc)
+    floor_ts = None
+    pv = None
+    pts = None
+    for s in reversed(snaps):
+        try:
+            v = float(s.get("equity", 0) or 0)
+            ts = _dt.fromisoformat(s["ts"])
+        except Exception:
+            continue
+        if pv is not None and v > 0 and pv > 0 and abs(pv - v) / max(pv, v) > 0.40:
+            floor_ts = pts
+            break
+        pv, pts = v, ts
+    base = None
+    for s in reversed(snaps):
+        try:
+            ts = _dt.fromisoformat(s["ts"])
+            if floor_ts is not None and ts < floor_ts:
+                break
+            if ts <= last_close:
+                base = float(s.get("equity", current_eq))
+                break
+        except Exception:
+            continue
+    if base is None:
+        for s in snaps:
+            try:
+                ts = _dt.fromisoformat(s["ts"])
+                if floor_ts is None or ts >= floor_ts:
+                    base = float(s.get("equity", current_eq))
+                    break
+            except Exception:
+                continue
+    return base
+
+
 def get_bot_metrics(side: str) -> dict:
     """V7.1.4 — one-stop summary of all the numbers the Overview sort
     dropdown might key on. Each value falls back to 0.0 when the
@@ -999,6 +1059,14 @@ def get_bot_metrics(side: str) -> dict:
         le  = float(a.get("last_equity") or eq)
         out["day_pl"]  = eq - le
         out["day_pct"] = ((eq - le) / le * 100) if le else 0.0
+        # V4.6.119 — IBKR reports last_equity == equity (no intraday baseline),
+        # so the above is always 0. Fall back to the snapshot-derived previous-
+        # close baseline (same as the Overview cards) for a real daily figure.
+        if abs(eq - le) < 1e-9 and eq > 0:
+            b = day_pl_baseline(side, eq)
+            if b and b > 0:
+                out["day_pl"]  = eq - b
+                out["day_pct"] = (eq - b) / b * 100
     except Exception:
         pass
     try:
