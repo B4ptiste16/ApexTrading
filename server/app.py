@@ -511,12 +511,18 @@ def download_public_bot(slug: str,
         raise HTTPException(404, "Bot file not found.")
     # V4.0.0 — pre-flight balance check for PAID bots
     price = int(bot.get("price_credits", 0))
-    if price > 0:
-        if not authorization:
-            raise HTTPException(401, "Sign in to purchase paid bots.")
+    # V4.6.117 — identify the buyer once; a bot's OWNER downloads their own bot
+    # for FREE (no charge, no balance gate) — you don't buy what you published.
+    user = None
+    if authorization:
         try:
             user = _current_user(authorization)
         except Exception:
+            user = None
+    is_owner = bool(user and int(bot.get("owner_id", -1)) == int(user["id"]))
+    charge = price > 0 and not is_owner
+    if charge:
+        if user is None:
             raise HTTPException(401, "Sign in to purchase paid bots.")
         bal = credits_mod.get_balance(user["id"])
         if bal < price:
@@ -527,20 +533,15 @@ def download_public_bot(slug: str,
     marketplace.increment_downloads(slug)
     # Log purchase + distribute revenue if we can identify the buyer
     try:
-        if authorization:
-            user  = _current_user(authorization)
-            price = int(bot.get("price_credits", 0))
-            moderation.record_purchase(user["id"], slug, credits_paid=price)
-            # V4.0.0 — fan out the buyer's credits across the split
-            if price > 0:
+        if user is not None:
+            moderation.record_purchase(user["id"], slug,
+                                       credits_paid=(price if charge else 0))
+            if charge:
                 revenue.distribute_purchase(
                     seller_id=int(bot["owner_id"]),
                     total_credits=price,
                     bot_slug=slug,
                 )
-                # Also debit the buyer (currently no charge logic exists
-                # on the free /bots/{slug}/download path — paid bots use
-                # this same endpoint). credits.grant with negative delta:
                 from . import credits as _cr
                 _cr.grant(user["id"], -price, f"purchase: {slug}")
     except Exception as _e:
