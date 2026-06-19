@@ -494,7 +494,7 @@ class BotMarketTab(QWidget):
         bottom = QHBoxLayout(); bottom.setSpacing(8)
         price = int(b.get("price_credits", 0))
         if price > 0:
-            price_lbl = QLabel(f"◊ {price:,}  ·  ${price/100:.2f}")
+            price_lbl = QLabel(f"◊ {price:,} credits")
             price_lbl.setStyleSheet(
                 f"color:{C['yellow']};font-size:12px;font-weight:700;")
         else:
@@ -524,21 +524,32 @@ class BotMarketTab(QWidget):
 
     def _install(self, slug: str, name: str):
         from PyQt6.QtCore import QThread as _QT, pyqtSignal as _Sig
-        from ui.login   import load_server_url
+        from ui.login   import load_server_url, load_auth
         from core.paths import ACCOUNT_DIR as DATA_DIR  # V4.6.101 account-scoped
 
         url = load_server_url()
+        # V4.6.117 — send the auth token so PAID bots can be purchased. Without
+        # it the server can't identify the buyer or charge credits, so every
+        # paid install came back 401 "Sign in to purchase paid bots" — i.e. you
+        # couldn't buy anything.
+        _tok = (load_auth() or {}).get("token")
+        _headers = {"Authorization": f"Bearer {_tok}"} if _tok else {}
 
         class _DL(_QT):
             done = _Sig(bool, str, bytes)
             def run(self_):
                 import requests
                 try:
-                    r = requests.get(f"{url}/bots/{slug}/download", timeout=20)
+                    r = requests.get(f"{url}/bots/{slug}/download",
+                                     headers=_headers, timeout=20)
                     if r.ok:
                         self_.done.emit(True, "", r.content)
                     else:
-                        self_.done.emit(False, f"HTTP {r.status_code}", b"")
+                        try:
+                            detail = r.json().get("detail", f"HTTP {r.status_code}")
+                        except Exception:
+                            detail = f"HTTP {r.status_code}"
+                        self_.done.emit(False, str(detail), b"")
                 except Exception as e:
                     self_.done.emit(False, str(e), b"")
 
