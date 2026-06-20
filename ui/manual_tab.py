@@ -135,6 +135,19 @@ class ManualTradingTab(QWidget):
         """Called by main window every time this tab is activated."""
         self._refresh()
 
+    def prefill_symbol(self, symbol: str):
+        """V4.6.121 — populate the order form from the Find Stocks tab's
+        'Trade this stock' button, default to a BUY, and focus the qty field."""
+        sym = (symbol or "").strip().upper()
+        if not sym:
+            return
+        try:
+            self._sym_edit.setText(sym)
+            self._dir_combo.setCurrentText("BUY")
+            self._qty_edit.setFocus()
+        except Exception as e:
+            print(f"[manual] prefill failed: {e}")
+
     # ── Build ──────────────────────────────────────────────────────
 
     def _build(self):

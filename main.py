@@ -42,6 +42,7 @@ from ui.account_tab  import AccountTab    # V3 wave 4
 from ui.admin_tab    import AdminTab      # V3 wave 5
 from ui.bot_market_tab import BotMarketTab  # V3.1.3
 from ui.manual_tab     import ManualTradingTab  # V4.1.0
+from ui.find_stocks_tab import FindStocksTab    # V4.6.121 — manual-mode research
 from ui.credit_shop    import CreditShopDialog  # V4.2.0
 from ui.styles     import DARK_STYLESHEET, COLORS
 from core.updater  import (check_for_update, download_and_apply,
@@ -1615,6 +1616,10 @@ class ApexWindow(QMainWindow):
         self.manual_tab.switch_off_requested.connect(
             lambda: self._toggle_manual_mode(force_off=True))
 
+        # V4.6.121 — Find Stocks research tab (manual mode only)
+        self.find_stocks_tab = FindStocksTab()
+        self.find_stocks_tab.trade_requested.connect(self._on_trade_requested)
+
         self._overview_idx  = self.tabs.addTab(self.overview_tab,  "OVERVIEW")
         self._morebots_idx  = self.tabs.addTab(self.more_bots_tab, "MORE BOTS")
 
@@ -1624,6 +1629,10 @@ class ApexWindow(QMainWindow):
 
         # V4.1.0 — MANUAL TRADING is a "summon-able" tab (shown when toggle is ON)
         self._manual_idx = self.tabs.addTab(self.manual_tab, "MANUAL")
+
+        # V4.6.121 — FIND STOCKS is summon-able too (shown alongside MANUAL)
+        self._findstocks_idx = self.tabs.addTab(self.find_stocks_tab,
+                                                "FIND STOCKS")
 
         # Corner row reads:
         #   UNIVERSE · MAKE BOT · FRIENDS · ACCOUNT · ADMIN · TOOLS
@@ -1635,6 +1644,7 @@ class ApexWindow(QMainWindow):
         self._admin_idx     = self.tabs.addTab(self.admin_tab,    "")
         self._tools_idx     = self.tabs.addTab(self.tools_tab,    "")
         for idx in (self._botmarket_idx, self._manual_idx,
+                    self._findstocks_idx,
                     self._universe_idx, self._makebot_idx,
                     self._friends_idx, self._account_idx,
                     self._admin_idx, self._tools_idx):
@@ -2090,8 +2100,9 @@ class ApexWindow(QMainWindow):
         for idx in self._tab_indices.values():
             tb.setTabVisible(idx, not on)
 
-        # ── MANUAL tab ─────────────────────────────────────────────────
+        # ── MANUAL + FIND STOCKS tabs (manual-mode workspace) ──────────
         tb.setTabVisible(self._manual_idx, on)
+        tb.setTabVisible(self._findstocks_idx, on)
 
         # ── Corner buttons ─────────────────────────────────────────────
         # V4.6.94 — MANUAL mode is a fully separate workspace: hide EVERY
@@ -2491,8 +2502,22 @@ class ApexWindow(QMainWindow):
             if (w is not None and hasattr(w, "refresh")
                     and w in self._bot_tabs.values()):
                 QTimer.singleShot(0, w.refresh)
+            # V4.6.121 — static tabs (MANUAL / FIND STOCKS) refresh via on_shown.
+            elif w is not None and hasattr(w, "on_shown"):
+                QTimer.singleShot(0, w.on_shown)
         except Exception:
             pass
+
+    def _on_trade_requested(self, symbol: str):
+        """Find Stocks → Trade this stock: jump to MANUAL and prefill the
+        order form's symbol so the user just sets qty and submits."""
+        try:
+            if hasattr(self, "manual_tab") and hasattr(self.manual_tab,
+                                                       "prefill_symbol"):
+                self.manual_tab.prefill_symbol(symbol)
+            self.tabs.setCurrentIndex(self._manual_idx)
+        except Exception as e:
+            print(f"[find] trade request failed: {e}")
 
     # ── BOT TAB MANAGEMENT ──────────────────────────────────
 
@@ -2546,6 +2571,7 @@ class ApexWindow(QMainWindow):
         self._morebots_idx  += 1
         self._botmarket_idx += 1
         self._manual_idx    += 1
+        self._findstocks_idx += 1
         self._universe_idx  += 1
         self._makebot_idx   += 1
         self._friends_idx   += 1
@@ -2605,6 +2631,7 @@ class ApexWindow(QMainWindow):
             if idx < self._morebots_idx:  self._morebots_idx  -= 1
             if idx < self._botmarket_idx: self._botmarket_idx -= 1
             if idx < self._manual_idx:    self._manual_idx    -= 1
+            if idx < self._findstocks_idx: self._findstocks_idx -= 1
             if idx < self._universe_idx:  self._universe_idx  -= 1
             if idx < self._makebot_idx:   self._makebot_idx   -= 1
             if idx < self._friends_idx:   self._friends_idx   -= 1

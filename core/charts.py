@@ -954,3 +954,119 @@ def returns_by_confidence(log_df, side: str) -> str:
         return _make_html(bars, layout)
     except Exception as e:
         return empty_chart(f"telemetry error: {e}", 240)
+
+
+# ── Find Stocks — single-symbol price chart ────────────────────────────────
+
+def _ma(values: list, window: int) -> list:
+    """Simple moving average aligned to the end of the series (None until the
+    window fills). Returns a list the same length as *values*."""
+    out = [None] * len(values)
+    if len(values) < window:
+        return out
+    s = sum(values[:window])
+    out[window - 1] = s / window
+    for i in range(window, len(values)):
+        s += values[i] - values[i - window]
+        out[i] = s / window
+    return out
+
+
+def price_history_chart(df: pd.DataFrame, symbol: str, period: str,
+                        chart_type: str = "candle", height: int = 360) -> str:
+    """Broker-style price chart for a single stock: candlesticks (or a line)
+    with MA20/MA50 overlays on top and a volume sub-panel beneath.
+
+    `df` is a yfinance OHLCV frame (DatetimeIndex, columns Open/High/Low/Close
+    /Volume). `period` is one of the Find-Stocks selector labels (1D…5Y)."""
+    if df is None or getattr(df, "empty", True):
+        return empty_chart(f"No data for {symbol} — {period}")
+
+    try:
+        idx = df.index
+        # Intraday periods carry a tz-aware index; show wall-clock local time.
+        try:
+            x = _utc_to_local_strings(idx)
+        except Exception:
+            x = [str(t) for t in idx]
+
+        closes = [float(c) for c in df["Close"].tolist()]
+        opens  = [float(c) for c in df["Open"].tolist()]  if "Open"  in df else closes
+        highs  = [float(c) for c in df["High"].tolist()]  if "High"  in df else closes
+        lows   = [float(c) for c in df["Low"].tolist()]   if "Low"   in df else closes
+        vols   = [float(c) for c in df["Volume"].tolist()] if "Volume" in df else []
+
+        first, last = closes[0], closes[-1]
+        delta = last - first
+        pct   = (delta / first * 100.0) if first else 0.0
+        up    = last >= first
+        line_color = G if up else R
+
+        data = []
+        if chart_type == "line":
+            data.append({
+                "type": "scatter", "x": x, "y": closes, "mode": "lines",
+                "name": symbol, "line": {"width": 2.2, "color": line_color},
+                "fill": "tozeroy",
+                "fillcolor": f"rgba({_rgb(line_color)},0.06)",
+                "hovertemplate": "$%{y:,.2f}<br>%{x}<extra></extra>",
+            })
+        else:
+            data.append({
+                "type": "candlestick", "x": x,
+                "open": opens, "high": highs, "low": lows, "close": closes,
+                "name": symbol,
+                "increasing": {"line": {"color": G}, "fillcolor": G},
+                "decreasing": {"line": {"color": R}, "fillcolor": R},
+                "yaxis": "y",
+            })
+
+        # Moving averages (only meaningful on daily-or-coarser series).
+        if chart_type != "line" or True:
+            for win, col, nm in ((20, OR2, "MA20"), (50, PU, "MA50")):
+                ma = _ma(closes, win)
+                if any(v is not None for v in ma):
+                    data.append({
+                        "type": "scatter", "x": x, "y": ma, "mode": "lines",
+                        "name": nm,
+                        "line": {"width": 1.2, "color": col},
+                        "hovertemplate": nm + " $%{y:,.2f}<extra></extra>",
+                        "connectgaps": False,
+                    })
+
+        # Volume sub-panel
+        if vols and any(v for v in vols):
+            vcolors = [G if closes[i] >= opens[i] else R for i in range(len(closes))]
+            data.append({
+                "type": "bar", "x": x, "y": vols,
+                "marker": {"color": vcolors, "line": {"width": 0}},
+                "opacity": 0.5, "name": "Volume", "yaxis": "y2",
+                "hovertemplate": "Vol %{y:,.0f}<extra></extra>",
+            })
+
+        sign = "+" if delta >= 0 else ""
+        title = (f"{symbol} — {period}    ${last:,.2f}    "
+                 f"{sign}{delta:,.2f} ({pct:+.2f}%)")
+
+        rb = []
+        if period in {"1D", "1W"}:
+            rb = _market_hours_rangebreaks(period)
+        elif period in {"1M", "3M", "6M", "1Y"}:
+            rb = [{"bounds": ["sat", "mon"]}]
+
+        layout = _base_layout(height, title, line_color, {
+            "showlegend": False,
+            "hovermode": "x unified",
+            "xaxis": {"gridcolor": BORDER, "zeroline": False,
+                      "automargin": False, "rangeslider": {"visible": False},
+                      "rangebreaks": rb},
+            "yaxis": {"gridcolor": BORDER, "zeroline": False, "automargin": False,
+                      "tickprefix": "$", "domain": [0.26, 1.0],
+                      "side": "right"},
+            "yaxis2": {"gridcolor": "rgba(0,0,0,0)", "zeroline": False,
+                       "automargin": False, "domain": [0.0, 0.18],
+                       "showticklabels": False},
+        })
+        return _make_html(data, layout)
+    except Exception as e:
+        return empty_chart(f"chart error: {e}")
