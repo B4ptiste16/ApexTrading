@@ -313,6 +313,119 @@ def get_history(symbol: str, period: str):
         return pd.DataFrame()
 
 
+def history_since(symbol: str, start_date):
+    """Daily OHLC from *start_date* (a date / 'YYYY-MM-DD' / None) to now. Used
+    by the portfolio position-growth chart. Falls back to 1y if no start."""
+    import pandas as pd
+    sym = (symbol or "").strip().upper()
+    try:
+        import yfinance as yf
+        t = yf.Ticker(sym)
+        if start_date:
+            df = t.history(start=str(start_date)[:10], interval="1d",
+                           auto_adjust=True)
+        else:
+            df = t.history(period="1y", interval="1d", auto_adjust=True)
+        if df is None or df.empty:
+            df = t.history(period="1y", interval="1d", auto_adjust=True)
+        return df.dropna(subset=["Close"]) if df is not None else pd.DataFrame()
+    except Exception as e:
+        print(f"[stock_research] history_since {sym} failed: {e}")
+        return pd.DataFrame()
+
+
+# ══════════════════════════════════════════════════════════════════════════
+#  Portfolio — per-position trade history (markers on the growth curve)
+# ══════════════════════════════════════════════════════════════════════════
+
+def position_trades(symbol: str) -> list[dict]:
+    """Filled trades for *symbol* on the MANUAL account, oldest first, each
+    classified by what it did to the running position:
+        buy        — first opening buy
+        add        — a buy that increased an existing position
+        sell_some  — a sell that left some position
+        sell_all   — a sell that closed the position
+    Returns [{time, price, kind, qty}]. Empty if no client / no fills."""
+    sym = (symbol or "").strip().upper()
+    client = manual_client()
+    if client is None:
+        return []
+    try:
+        from alpaca.trading.requests import GetOrdersRequest
+        from alpaca.trading.enums import QueryOrderStatus, OrderSide
+        req = GetOrdersRequest(status=QueryOrderStatus.CLOSED,
+                               symbols=[sym], limit=500)
+        orders = client.get_orders(filter=req) or []
+    except Exception as e:
+        print(f"[stock_research] get_orders {sym} failed: {e}")
+        return []
+
+    fills = []
+    for o in orders:
+        try:
+            fq = float(getattr(o, "filled_qty", 0) or 0)
+            fa = getattr(o, "filled_at", None)
+            if fq <= 0 or fa is None:
+                continue
+            px = float(getattr(o, "filled_avg_price", 0) or 0)
+            side = getattr(o, "side", None)
+            is_buy = (side == OrderSide.BUY) or (str(side).upper().endswith("BUY"))
+            fills.append({"time": fa, "price": px, "qty": fq, "is_buy": is_buy})
+        except Exception:
+            continue
+
+    fills.sort(key=lambda f: str(f["time"]))
+    events, running = [], 0.0
+    for f in fills:
+        if f["is_buy"]:
+            kind = "buy" if running <= 1e-9 else "add"
+            running += f["qty"]
+        else:
+            after = running - f["qty"]
+            kind = "sell_all" if after <= 1e-9 else "sell_some"
+            running = max(0.0, after)
+        events.append({"time": f["time"], "price": f["price"],
+                       "kind": kind, "qty": f["qty"]})
+    return events
+
+
+# ══════════════════════════════════════════════════════════════════════════
+#  This week's suggested stocks (deterministic per ISO week — no AI/API cost)
+# ══════════════════════════════════════════════════════════════════════════
+
+# A pool of liquid, widely-followed US names. Each week a deterministic subset
+# is featured — identical for every user (seeded by the week), and picking the
+# list costs nothing (no AI, no network): evaluations are only generated when a
+# user actually opens one of them.
+_SUGGESTION_POOL = [
+    "AAPL", "MSFT", "NVDA", "GOOGL", "AMZN", "META", "TSLA", "AMD", "NFLX",
+    "AVGO", "JPM", "V", "MA", "WMT", "COST", "HD", "DIS", "KO", "PEP", "MCD",
+    "NKE", "CRM", "ADBE", "ORCL", "INTC", "QCOM", "TXN", "CSCO", "BA", "CAT",
+    "GE", "XOM", "CVX", "UNH", "JNJ", "LLY", "ABBV", "PG", "BAC", "GS",
+    "COIN", "PLTR", "UBER", "SHOP", "PYPL", "SBUX",
+]
+
+
+def suggested_symbols(n: int = 8) -> list[dict]:
+    """This week's featured stocks as [{symbol, name}], deterministic per ISO
+    week so everyone sees the same set. Names are filled from the cached broker
+    asset list when available."""
+    import random
+    week = current_week_monday()
+    try:
+        seed = int(week.replace("-", ""))
+    except Exception:
+        seed = 0
+    pool = list(_SUGGESTION_POOL)
+    random.Random(seed).shuffle(pool)
+    picks = pool[:max(1, n)]
+
+    names = {}
+    for a in _load_assets_cache():
+        names[a.get("symbol", "")] = a.get("name", "")
+    return [{"symbol": s, "name": names.get(s, "")} for s in picks]
+
+
 # ══════════════════════════════════════════════════════════════════════════
 #  Weekly AI evaluation (cached per ISO week — refreshed every Monday)
 # ══════════════════════════════════════════════════════════════════════════

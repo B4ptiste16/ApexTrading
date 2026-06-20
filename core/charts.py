@@ -987,6 +987,105 @@ def _x_axis_values(idx, intraday: bool) -> list:
     return s.dt.tz_convert(_LOCAL_TZ).dt.strftime("%Y-%m-%d").tolist()
 
 
+_TRADE_MARKERS = {
+    # kind → (color, plotly symbol, label)
+    "buy":       (G,   "triangle-up",   "Bought"),
+    "add":       (G,   "diamond",       "Bought more"),
+    "sell_some": (OR2, "triangle-down", "Sold some"),
+    "sell_all":  (R,   "x",             "Sold"),
+}
+
+
+def position_growth_chart(df: pd.DataFrame, events: list, ref_price: float,
+                          symbol: str, height: int = 360) -> str:
+    """A single holding's growth as % from its cost basis, with markers on the
+    curve for each trade: bought / bought more / sold some / sold.
+
+    df         — daily OHLC frame (needs 'Close') covering the holding period.
+    events     — list of {time, price, kind, qty} where kind ∈ _TRADE_MARKERS.
+    ref_price  — cost basis the % growth is measured from (falls back to the
+                 first close)."""
+    if df is None or getattr(df, "empty", True):
+        return empty_chart(f"No price history for {symbol}")
+    try:
+        x = _x_axis_values(df.index, intraday=False)
+        closes = [float(c) for c in df["Close"].tolist()]
+        ref = float(ref_price) if ref_price else closes[0]
+        if not ref:
+            ref = closes[0] or 1.0
+        growth = [(c / ref - 1.0) * 100.0 for c in closes]
+
+        last = growth[-1]
+        up = last >= 0
+        line_color = G if up else R
+
+        data = [{
+            "type": "scatter", "x": x, "y": growth, "mode": "lines",
+            "name": symbol, "line": {"width": 2.4, "color": line_color},
+            "fill": "tozeroy", "fillcolor": f"rgba({_rgb(line_color)},0.07)",
+            "hovertemplate": "%{y:+.2f}%<br>%{x}<extra></extra>",
+        }]
+
+        # Cost-basis reference line at 0%.
+        shapes = [{
+            "type": "line", "x0": 0, "x1": 1, "y0": 0, "y1": 0,
+            "xref": "paper", "yref": "y",
+            "line": {"color": MUTED, "width": 1, "dash": "dot"},
+        }]
+        annots = [{
+            "x": 0, "y": 0, "xref": "paper", "yref": "y",
+            "text": "cost basis", "showarrow": False,
+            "font": {"size": 8, "color": MUTED},
+            "xanchor": "left", "yanchor": "bottom",
+        }]
+
+        # One marker trace per kind so each gets its own colour + symbol.
+        by_kind: dict[str, dict] = {}
+        for ev in events or []:
+            kind = ev.get("kind", "buy")
+            color, msym, klabel = _TRADE_MARKERS.get(
+                kind, _TRADE_MARKERS["buy"])
+            t = ev.get("time")
+            try:
+                xs = pd.to_datetime(t, utc=True).tz_convert(
+                    _LOCAL_TZ).strftime("%Y-%m-%d")
+            except Exception:
+                xs = str(t)[:10]
+            price = float(ev.get("price") or 0) or ref
+            y = (price / ref - 1.0) * 100.0
+            qty = ev.get("qty")
+            qtxt = f" {qty:g} sh" if isinstance(qty, (int, float)) else ""
+            label = f"{klabel}{qtxt} @ ${price:,.2f}"
+            d = by_kind.setdefault(kind, {
+                "type": "scatter", "mode": "markers", "x": [], "y": [],
+                "text": [], "name": klabel,
+                "marker": {"size": 12, "color": color, "symbol": msym,
+                           "line": {"color": "#0b0e14", "width": 1}},
+                "hovertemplate": "%{text}<br>%{x}<extra></extra>",
+            })
+            d["x"].append(xs)
+            d["y"].append(y)
+            d["text"].append(label)
+        data.extend(by_kind.values())
+
+        sign = "+" if last >= 0 else ""
+        title = f"{symbol} — position growth   {sign}{last:.2f}%"
+
+        layout = _base_layout(height, title, line_color, {
+            "showlegend": False, "hovermode": "closest",
+            "shapes": shapes, "annotations": annots,
+            "xaxis": {"gridcolor": BORDER, "zeroline": False,
+                      "automargin": False, "type": "date",
+                      "rangebreaks": [{"bounds": ["sat", "mon"]}]},
+            "yaxis": {"gridcolor": BORDER, "zeroline": True,
+                      "zerolinecolor": MUTED, "zerolinewidth": 1,
+                      "automargin": False, "ticksuffix": "%"},
+        })
+        return _make_html(data, layout)
+    except Exception as e:
+        return empty_chart(f"chart error: {e}")
+
+
 def price_history_chart(df: pd.DataFrame, symbol: str, period: str,
                         chart_type: str = "candle", height: int = 360) -> str:
     """Broker-style price chart for a single stock: candlesticks (or a line)

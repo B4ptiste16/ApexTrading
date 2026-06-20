@@ -118,8 +118,6 @@ PERIODS = ["1D", "1W", "1M", "3M", "6M", "1Y", "5Y"]
 class FindStocksTab(QWidget):
     """Search + research any broker-tradable stock (manual mode)."""
 
-    trade_requested = pyqtSignal(str)   # symbol → main switches to MANUAL tab
-
     def __init__(self, parent=None):
         super().__init__(parent)
         self._workers: list = []
@@ -145,6 +143,7 @@ class FindStocksTab(QWidget):
                 return
             w = _WarmWorker()
             w.done.connect(lambda: setattr(self, "_warmed", True))
+            w.done.connect(self._populate_suggestions)   # fill in company names
             w.finished.connect(lambda _w=w: self._drop_worker(_w))
             self._workers.append(w)
             w.start()
@@ -210,6 +209,30 @@ class FindStocksTab(QWidget):
         sv.addWidget(self._results)
         s.add(search_frame)
 
+        # This week's suggested stocks
+        self._sug_frame = QFrame()
+        self._sug_frame.setStyleSheet(
+            f"background:{C['panel']};border:none;border-radius:10px;")
+        sgv = QVBoxLayout(self._sug_frame)
+        sgv.setContentsMargins(16, 14, 16, 14)
+        sgv.setSpacing(10)
+        sg_title = QLabel("★  THIS WEEK'S SUGGESTED STOCKS")
+        sg_title.setStyleSheet(
+            f"color:{C['orange']};font-size:10px;letter-spacing:3px;font-weight:800;")
+        sgv.addWidget(sg_title)
+        sg_note = QLabel("Tap a stock to research it — the AI evaluation is "
+                         "generated on first open and kept for the whole week.")
+        sg_note.setStyleSheet(f"color:{C['muted']};font-size:10px;")
+        sg_note.setWordWrap(True)
+        sgv.addWidget(sg_note)
+        self._sug_grid = QGridLayout()
+        self._sug_grid.setHorizontalSpacing(8)
+        self._sug_grid.setVerticalSpacing(8)
+        sgw = QWidget(); sgw.setLayout(self._sug_grid)
+        sgv.addWidget(sgw)
+        s.add(self._sug_frame)
+        self._populate_suggestions()
+
         # Empty-state hint (before any stock is picked)
         self._hint = QLabel(
             "Type a ticker or company name above to pull up its chart, "
@@ -230,6 +253,30 @@ class FindStocksTab(QWidget):
         s.add(self._detail)
 
         s.add_stretch()
+
+    def _populate_suggestions(self):
+        # Clear any existing chips
+        while self._sug_grid.count():
+            it = self._sug_grid.takeAt(0)
+            w = it.widget()
+            if w is not None:
+                w.deleteLater()
+        try:
+            from core import stock_research as SR
+            picks = SR.suggested_symbols(8)
+        except Exception as e:
+            print(f"[find] suggestions failed: {e}")
+            picks = []
+        cols = 4
+        for i, p in enumerate(picks):
+            sym = p.get("symbol", "")
+            chip = QPushButton(sym)
+            chip.setObjectName("toolBtn")
+            chip.setCursor(Qt.CursorShape.PointingHandCursor)
+            if p.get("name"):
+                chip.setToolTip(p["name"])
+            chip.clicked.connect(lambda _=False, ss=sym: self.load_symbol(ss))
+            self._sug_grid.addWidget(chip, i // cols, i % cols)
 
     def _build_detail(self, layout: QVBoxLayout):
         # Price header
@@ -255,11 +302,6 @@ class FindStocksTab(QWidget):
         self._h_change.setStyleSheet(f"font-size:14px;font-weight:700;")
         top.addWidget(self._h_change)
         top.addStretch()
-        self._trade_btn = QPushButton("⬆  Trade this stock")
-        self._trade_btn.setObjectName("addBotBtn")
-        self._trade_btn.clicked.connect(
-            lambda: self.trade_requested.emit(self._cur_symbol))
-        top.addWidget(self._trade_btn)
         tw = QWidget(); tw.setLayout(top)
         hv.addWidget(tw)
         self._h_name = QLabel("")

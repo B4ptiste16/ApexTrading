@@ -1618,7 +1618,6 @@ class ApexWindow(QMainWindow):
 
         # V4.6.121 — Find Stocks research tab (manual mode only)
         self.find_stocks_tab = FindStocksTab()
-        self.find_stocks_tab.trade_requested.connect(self._on_trade_requested)
 
         self._overview_idx  = self.tabs.addTab(self.overview_tab,  "OVERVIEW")
         self._morebots_idx  = self.tabs.addTab(self.more_bots_tab, "MORE BOTS")
@@ -1627,8 +1626,9 @@ class ApexWindow(QMainWindow):
         self._botmarket_idx = self.tabs.addTab(self.bot_market_tab,
                                                 "BOT MARKET")
 
-        # V4.1.0 — MANUAL TRADING is a "summon-able" tab (shown when toggle is ON)
-        self._manual_idx = self.tabs.addTab(self.manual_tab, "MANUAL")
+        # V4.1.0 — MANUAL TRADING is a "summon-able" tab (shown when toggle is ON).
+        # V4.6.123 — repurposed as a read-only PORTFOLIO overview.
+        self._manual_idx = self.tabs.addTab(self.manual_tab, "PORTFOLIO")
 
         # V4.6.121 — FIND STOCKS is summon-able too (shown alongside MANUAL)
         self._findstocks_idx = self.tabs.addTab(self.find_stocks_tab,
@@ -2507,17 +2507,6 @@ class ApexWindow(QMainWindow):
                 QTimer.singleShot(0, w.on_shown)
         except Exception:
             pass
-
-    def _on_trade_requested(self, symbol: str):
-        """Find Stocks → Trade this stock: jump to MANUAL and prefill the
-        order form's symbol so the user just sets qty and submits."""
-        try:
-            if hasattr(self, "manual_tab") and hasattr(self.manual_tab,
-                                                       "prefill_symbol"):
-                self.manual_tab.prefill_symbol(symbol)
-            self.tabs.setCurrentIndex(self._manual_idx)
-        except Exception as e:
-            print(f"[find] trade request failed: {e}")
 
     # ── BOT TAB MANAGEMENT ──────────────────────────────────
 
