@@ -445,6 +445,9 @@ def lifetime_chart(snaps: pd.DataFrame, side: str) -> str:
         "showlegend": True,
         "legend": {"orientation":"h","y":1.05,"x":0,
                    "bgcolor":"rgba(0,0,0,0)","font":{"size":9}},
+        # V4.6.120 — hide overnight/weekend gaps so the line draws close-to-close.
+        "xaxis": {"gridcolor":BORDER,
+                  "rangebreaks": _market_hours_rangebreaks("1W")},
         "yaxis": {"gridcolor":BORDER,"zeroline":False,
                   "automargin":False,"tickprefix":"$",
                   **({"range": yr} if yr else {})},
@@ -481,6 +484,8 @@ def drawdown_chart(snaps: pd.DataFrame) -> str:
             "bgcolor": PANEL,
             "bordercolor": R,
         }],
+        "xaxis": {"gridcolor":BORDER,
+                  "rangebreaks": _market_hours_rangebreaks("1W")},
         "yaxis": {"gridcolor":BORDER,"ticksuffix":"%",
                   "zeroline":True,"zerolinecolor":MUTED,"automargin":False},
     })

@@ -685,6 +685,7 @@ class OverviewTab(QWidget):
 
         pv = a.get("portfolio_value", 0)
         eq = a.get("equity", 0)
+        alloc = float(a.get("allocated", 0) or 0)   # V4.6.120 — capital in slice
 
         # Append the current snapshot to this bot's JSONL log (throttled
         # to 1 entry per 5 min by core.data). First call establishes the
@@ -692,7 +693,8 @@ class OverviewTab(QWidget):
         try:
             D.append_bot_snapshot(side, equity=eq,
                                    portfolio_value=pv,
-                                   positions_count=len(pos))
+                                   positions_count=len(pos),
+                                   allocated=alloc)
         except Exception as _e:
             print(f"[overview] snapshot append for {side} failed: {_e}",
                   flush=True)
@@ -732,24 +734,31 @@ class OverviewTab(QWidget):
         while _base_et.weekday() >= 5:
             _base_et -= _td(days=1)
         last_close_utc = (_base_et - _td(hours=_off)).replace(tzinfo=_tz.utc)
-        # V4.6.114 — re-seed guard: a deleted-then-re-added bot (e.g. Energy) keeps
-        # its OLD equity in the snapshot file, so a baseline from before the re-seed
-        # gives a garbage day P/L (old $153k vs new $56k). Find the most recent
-        # >40% jump between consecutive snapshots (a 5-min move that big is a
-        # re-seed, not a trade) and never let the baseline predate it.
+        # V4.6.114/120 — capital-event guard: never let the baseline predate the
+        # most recent deposit / withdrawal / re-allocation, so a capital change is
+        # never counted as P/L. Detect it precisely when the recorded `allocated`
+        # changed between two snapshots; fall back to a >40% equity jump for older
+        # snapshots that predate the `allocated` field (a re-seed, not a trade).
         _floor_ts = None
         _pv = None
+        _pa = None
         for s in reversed(bot_hist):
             try:
                 _v = float(s.get("equity", 0) or 0)
                 _ts = _dt.fromisoformat(s["ts"])
+                _a = s.get("allocated")
+                _a = float(_a) if _a is not None else None
             except Exception:
                 continue
-            if (_pv is not None and _v > 0 and _pv > 0
-                    and abs(_pv - _v) / max(_pv, _v) > 0.40):
-                _floor_ts = _pts
-                break
-            _pv, _pts = _v, _ts
+            if _pv is not None:
+                if _a is not None and _pa is not None and abs(_a - _pa) > 1.0:
+                    _floor_ts = _pts
+                    break
+                if (_v > 0 and _pv > 0
+                        and abs(_pv - _v) / max(_pv, _v) > 0.40):
+                    _floor_ts = _pts
+                    break
+            _pv, _pts, _pa = _v, _ts, _a
         today_baseline_eq = None
         for s in reversed(bot_hist):
             try:

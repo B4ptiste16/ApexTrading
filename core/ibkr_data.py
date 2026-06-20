@@ -399,6 +399,10 @@ def _build_cloud_data(mode: str) -> dict:
                 "cash":            cash,
                 "buying_power":    cash,
                 "last_equity":     equity,
+                # V4.6.120 — capital allocated to this slice. The desktop records
+                # it in snapshots so a re-allocation (deposit/withdrawal of the
+                # slice's capital) can be excluded from P/L.
+                "allocated":       float(led.get("allocated", 0.0) or 0.0),
                 "connected":       True,
             },
             "positions": positions,

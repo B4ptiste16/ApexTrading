@@ -1,4 +1,4 @@
 {
-  "version": "4.6.119",
-  "notes": "v4.6.119 — No bot limit, correct IBKR allocation %, day P/L for all bots\n\n♾️ Removed the 5-bot cap — add as many bots as you like (Alpaca needs a key pair per bot; IBKR bots share one connection).\n\n🎯 Fixed the IBKR allocation: '10%' now means 10% of your real account value (NetLiquidation), not 10% of cash. Short positions inflate cash, which is why 10% was landing at ~15% of your portfolio. NEW: re-add (Remove → Add) an over-allocated IBKR bot so it re-seeds at the correct size.\n\n📊 Day P/L now computes for IBKR bots in the summary too (from the previous close), instead of always reading 0.\n\nUpdate via the in-app banner.\n"
+  "version": "4.6.120",
+  "notes": "v4.6.120 — Capital changes don't count as P/L + graphs skip closed hours\n\n💰 Re-allocating a bot (or any deposit/withdrawal of its capital) no longer shows up as profit or loss. Each bot now records how much capital it holds, so when you change an allocation the P/L baseline resets to right after the change — only real trading gains/losses count.\n\n📈 The lifetime and drawdown charts now skip overnight and weekend gaps (like the performance chart already did), so the line draws close-to-close instead of flat-lining when the market is shut.\n\nUpdate via the in-app banner.\n"
 }

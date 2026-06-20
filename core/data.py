@@ -998,19 +998,31 @@ def day_pl_baseline(side: str, current_eq: float):
     while base_et.weekday() >= 5:
         base_et -= _td(days=1)
     last_close = (base_et - _td(hours=off)).replace(tzinfo=_tz.utc)
+    # V4.6.120 — anchor the baseline AFTER the most recent capital event so a
+    # deposit / withdrawal / re-allocation is never counted as P/L. We detect a
+    # re-allocation precisely when the recorded `allocated` changed between two
+    # snapshots; for older snapshots that predate the field, a >40% equity jump
+    # between consecutive points is the fallback (a re-seed, not a trade).
     floor_ts = None
     pv = None
     pts = None
+    pa = None
     for s in reversed(snaps):
         try:
             v = float(s.get("equity", 0) or 0)
             ts = _dt.fromisoformat(s["ts"])
+            a = s.get("allocated")
+            a = float(a) if a is not None else None
         except Exception:
             continue
-        if pv is not None and v > 0 and pv > 0 and abs(pv - v) / max(pv, v) > 0.40:
-            floor_ts = pts
-            break
-        pv, pts = v, ts
+        if pv is not None:
+            if a is not None and pa is not None and abs(a - pa) > 1.0:
+                floor_ts = pts
+                break
+            if v > 0 and pv > 0 and abs(pv - v) / max(pv, v) > 0.40:
+                floor_ts = pts
+                break
+        pv, pts, pa = v, ts, a
     base = None
     for s in reversed(snaps):
         try:
@@ -1541,7 +1553,8 @@ def delete_bot_snapshots(side: str) -> None:
 
 def append_bot_snapshot(side: str, *, equity: float = 0.0,
                         portfolio_value: float = 0.0,
-                        positions_count: int = 0) -> None:
+                        positions_count: int = 0,
+                        allocated: float = 0.0) -> None:
     """Append one snapshot to the bot's lifetime log. Skips writing
     if the most recent entry is less than 5 minutes old (so callers
     can refresh aggressively without ballooning the file)."""
@@ -1573,6 +1586,9 @@ def append_bot_snapshot(side: str, *, equity: float = 0.0,
                 "equity":          float(equity or 0),
                 "portfolio_value": float(portfolio_value or 0),
                 "positions_count": int(positions_count or 0),
+                # V4.6.120 — capital allocated to the bot at this instant, so a
+                # later re-allocation can be detected and excluded from P/L.
+                "allocated":       float(allocated or 0),
             }) + "\n")
     except Exception as e:
         print(f"[snapshot] {side}: append failed: {e}")
