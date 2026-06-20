@@ -972,6 +972,21 @@ def _ma(values: list, window: int) -> list:
     return out
 
 
+def _x_axis_values(idx, intraday: bool) -> list:
+    """Convert a (tz-aware) yfinance index to plain strings Plotly can place.
+
+    Intraday: convert to the user's local wall-clock so the candles line up with
+    the local-time rangebreaks (and so the whole session shows, not a 25-minute
+    sliver — the old code left the index in ET while the rangebreaks were local).
+    Daily+: use the date only (no tz shift that could nudge a bar to the wrong
+    day)."""
+    s = pd.Series(pd.to_datetime(idx, utc=True))
+    if intraday:
+        local = s.dt.tz_convert(_LOCAL_TZ).dt.tz_localize(None)
+        return local.astype(str).tolist()
+    return s.dt.tz_convert(_LOCAL_TZ).dt.strftime("%Y-%m-%d").tolist()
+
+
 def price_history_chart(df: pd.DataFrame, symbol: str, period: str,
                         chart_type: str = "candle", height: int = 360) -> str:
     """Broker-style price chart for a single stock: candlesticks (or a line)
@@ -983,12 +998,11 @@ def price_history_chart(df: pd.DataFrame, symbol: str, period: str,
         return empty_chart(f"No data for {symbol} — {period}")
 
     try:
-        idx = df.index
-        # Intraday periods carry a tz-aware index; show wall-clock local time.
+        intraday = period in {"1D", "1W"}
         try:
-            x = _utc_to_local_strings(idx)
+            x = _x_axis_values(df.index, intraday)
         except Exception:
-            x = [str(t) for t in idx]
+            x = [str(t) for t in df.index]
 
         closes = [float(c) for c in df["Close"].tolist()]
         opens  = [float(c) for c in df["Open"].tolist()]  if "Open"  in df else closes
@@ -1001,6 +1015,13 @@ def price_history_chart(df: pd.DataFrame, symbol: str, period: str,
         pct   = (delta / first * 100.0) if first else 0.0
         up    = last >= first
         line_color = G if up else R
+
+        # Moving averages first — they feed the y-range so the lines never clip.
+        ma_series = []
+        for win, col, nm in ((20, OR2, "MA20"), (50, PU, "MA50")):
+            ma = _ma(closes, win)
+            if any(v is not None for v in ma):
+                ma_series.append((ma, col, nm))
 
         data = []
         if chart_type == "line":
@@ -1021,18 +1042,13 @@ def price_history_chart(df: pd.DataFrame, symbol: str, period: str,
                 "yaxis": "y",
             })
 
-        # Moving averages (only meaningful on daily-or-coarser series).
-        if chart_type != "line" or True:
-            for win, col, nm in ((20, OR2, "MA20"), (50, PU, "MA50")):
-                ma = _ma(closes, win)
-                if any(v is not None for v in ma):
-                    data.append({
-                        "type": "scatter", "x": x, "y": ma, "mode": "lines",
-                        "name": nm,
-                        "line": {"width": 1.2, "color": col},
-                        "hovertemplate": nm + " $%{y:,.2f}<extra></extra>",
-                        "connectgaps": False,
-                    })
+        for ma, col, nm in ma_series:
+            data.append({
+                "type": "scatter", "x": x, "y": ma, "mode": "lines", "name": nm,
+                "line": {"width": 1.2, "color": col},
+                "hovertemplate": nm + " $%{y:,.2f}<extra></extra>",
+                "connectgaps": False,
+            })
 
         # Volume sub-panel
         if vols and any(v for v in vols):
@@ -1044,12 +1060,29 @@ def price_history_chart(df: pd.DataFrame, symbol: str, period: str,
                 "hovertemplate": "Vol %{y:,.0f}<extra></extra>",
             })
 
+        # ── Tight, centred y-range ─────────────────────────────────────────
+        # Zoom the price axis to the data (incl. MA lines) with a little
+        # padding, so the curve fills the panel instead of floating as a flat
+        # line near the top. A line chart keys off closes; candles off hi/lo.
+        if chart_type == "line":
+            yvals = list(closes)
+        else:
+            yvals = list(highs) + list(lows)
+        for ma, _c, _n in ma_series:
+            yvals += [v for v in ma if v is not None]
+        ylo, yhi = min(yvals), max(yvals)
+        spread = (yhi - ylo) or (yhi * 0.01 or 1.0)
+        pad = spread * 0.08
+        yrange = [ylo - pad, yhi + pad]
+
         sign = "+" if delta >= 0 else ""
         title = (f"{symbol} — {period}    ${last:,.2f}    "
                  f"{sign}{delta:,.2f} ({pct:+.2f}%)")
 
+        # Rangebreaks hide non-trading time so candles sit close-to-close. Now
+        # that x is in local wall-clock, the local-hour bounds line up correctly.
         rb = []
-        if period in {"1D", "1W"}:
+        if intraday:
             rb = _market_hours_rangebreaks(period)
         elif period in {"1M", "3M", "6M", "1Y"}:
             rb = [{"bounds": ["sat", "mon"]}]
@@ -1059,10 +1092,10 @@ def price_history_chart(df: pd.DataFrame, symbol: str, period: str,
             "hovermode": "x unified",
             "xaxis": {"gridcolor": BORDER, "zeroline": False,
                       "automargin": False, "rangeslider": {"visible": False},
-                      "rangebreaks": rb},
+                      "rangebreaks": rb, "type": "date"},
             "yaxis": {"gridcolor": BORDER, "zeroline": False, "automargin": False,
                       "tickprefix": "$", "domain": [0.26, 1.0],
-                      "side": "right"},
+                      "side": "right", "range": yrange},
             "yaxis2": {"gridcolor": "rgba(0,0,0,0)", "zeroline": False,
                        "automargin": False, "domain": [0.0, 0.18],
                        "showticklabels": False},

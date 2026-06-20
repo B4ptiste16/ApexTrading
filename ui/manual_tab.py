@@ -156,8 +156,7 @@ class ManualTradingTab(QWidget):
         # ─── HERO ─────────────────────────────────────────────
         hero = QFrame()
         hero.setStyleSheet(
-            f"background:{C['panel']};border:none;"
-            f"border-radius:12px;border-left:4px solid {C['orange']};")
+            f"background:{C['panel']};border:none;border-radius:12px;")
         hv = QVBoxLayout(hero)
         hv.setContentsMargins(26, 20, 26, 20)
         hv.setSpacing(8)
@@ -203,8 +202,7 @@ class ManualTradingTab(QWidget):
     def _build_no_key_frame(self) -> QFrame:
         frame = QFrame()
         frame.setStyleSheet(
-            f"background:{C['panel']};border:none;border-radius:10px;"
-            f"border-left:3px solid {C['red']};")
+            f"background:{C['panel']};border:none;border-radius:10px;")
         v = QVBoxLayout(frame)
         v.setContentsMargins(24, 20, 24, 20)
         v.setSpacing(10)
@@ -412,8 +410,7 @@ class ManualTradingTab(QWidget):
     def _build_challenge_frame(self) -> QFrame:
         frame = QFrame()
         frame.setStyleSheet(
-            f"background:{C['panel']};border:none;border-radius:10px;"
-            f"border-left:3px solid {C['purple']};")
+            f"background:{C['panel']};border:none;border-radius:10px;")
         v = QVBoxLayout(frame)
         v.setContentsMargins(20, 16, 20, 16)
         v.setSpacing(10)

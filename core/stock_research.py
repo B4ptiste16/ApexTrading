@@ -24,15 +24,17 @@ import datetime
 from core.paths import ACCOUNT_DIR
 
 # ── Cache files (per-account) ──────────────────────────────────────────────
+# Weekly AI evaluations are now generated + cached on the SERVER (shared across
+# all users), so there is no local eval cache — see weekly_evaluation().
 _ASSETS_CACHE = ACCOUNT_DIR / "stock_assets_cache.json"
-_EVALS_CACHE  = ACCOUNT_DIR / "stock_ai_evals.json"
 
 _ASSETS_TTL = 24 * 3600            # refresh the broker asset list once a day
 
-# yfinance period selector → (yfinance period, interval)
+# yfinance period selector → (yfinance period, interval). Intraday intervals are
+# kept fine-grained so 1D/1W have plenty of candles (≈195 / ≈130 bars).
 PERIODS: dict[str, tuple[str, str]] = {
-    "1D": ("1d",  "5m"),
-    "1W": ("5d",  "30m"),
+    "1D": ("1d",  "2m"),
+    "1W": ("5d",  "15m"),
     "1M": ("1mo", "1d"),
     "3M": ("3mo", "1d"),
     "6M": ("6mo", "1d"),
@@ -315,140 +317,67 @@ def get_history(symbol: str, period: str):
 #  Weekly AI evaluation (cached per ISO week — refreshed every Monday)
 # ══════════════════════════════════════════════════════════════════════════
 
-_RATINGS = ["STRONG BUY", "BUY", "HOLD", "SELL", "STRONG SELL", "NEUTRAL"]
-
-
 def current_week_monday() -> str:
     today = datetime.date.today()
     return (today - datetime.timedelta(days=today.weekday())).isoformat()
 
 
-def _load_evals() -> dict:
+def _cloud_creds() -> tuple:
+    """(token, server_url) from the desktop auth files, without importing ui."""
+    from core.paths import DATA_DIR
+    tok, url = None, "http://localhost:8000"
     try:
-        return json.loads(_EVALS_CACHE.read_text(encoding="utf-8"))
+        tok = json.loads((DATA_DIR / "apex_auth.json").read_text(
+            encoding="utf-8")).get("token")
     except Exception:
-        return {}
-
-
-def _save_evals(d: dict) -> None:
+        pass
     try:
-        ACCOUNT_DIR.mkdir(parents=True, exist_ok=True)
-        _EVALS_CACHE.write_text(json.dumps(d, indent=2), encoding="utf-8")
-    except Exception as e:
-        print(f"[stock_research] save evals failed: {e}")
-
-
-def _fmt(v, kind="num"):
-    if v is None:
-        return "n/a"
-    if kind == "pct":
-        return f"{v:+.1f}%"
-    if kind == "price":
-        return f"${v:,.2f}"
-    if kind == "cap":
-        for unit, div in (("T", 1e12), ("B", 1e9), ("M", 1e6)):
-            if abs(v) >= div:
-                return f"${v / div:.2f}{unit}"
-        return f"${v:,.0f}"
-    return f"{v:,.2f}"
-
-
-def _build_eval_prompt(snap: dict) -> str:
-    sym = snap.get("symbol", "?")
-    name = snap.get("name") or sym
-    lines = [
-        f"Stock: {sym} ({name})",
-        f"Sector: {snap.get('sector') or 'n/a'} / {snap.get('industry') or 'n/a'}",
-        f"Price: {_fmt(snap.get('price'), 'price')} "
-        f"(today {_fmt(snap.get('change_pct'), 'pct')})",
-        f"52-week range: {_fmt(snap.get('wk_low'), 'price')} – "
-        f"{_fmt(snap.get('wk_high'), 'price')}",
-        f"Market cap: {_fmt(snap.get('market_cap'), 'cap')}   "
-        f"P/E: {_fmt(snap.get('pe'))}   EPS: {_fmt(snap.get('eps'))}   "
-        f"Beta: {_fmt(snap.get('beta'))}",
-        f"Trailing returns — 1M {_fmt(snap.get('ret_1m'), 'pct')}, "
-        f"3M {_fmt(snap.get('ret_3m'), 'pct')}, "
-        f"6M {_fmt(snap.get('ret_6m'), 'pct')}, "
-        f"1Y {_fmt(snap.get('ret_1y'), 'pct')}",
-        f"50-day MA: {_fmt(snap.get('ma50'), 'price')}   "
-        f"200-day MA: {_fmt(snap.get('ma200'), 'price')}",
-    ]
-    data_block = "\n".join(lines)
-    return (
-        "You are a concise equity analyst writing a weekly note for a retail "
-        "investor who trades manually. Using ONLY the data below, evaluate this "
-        "stock.\n\n"
-        "Respond in this exact format:\n"
-        "RATING: <one of STRONG BUY, BUY, HOLD, SELL, STRONG SELL>\n"
-        "Then 3-5 sentences covering price momentum (vs its 50/200-day MAs and "
-        "trailing returns), valuation (P/E vs the move), and the single biggest "
-        "risk. Finish with: 'Not financial advice.'\n\n"
-        f"DATA:\n{data_block}\n"
-    )
-
-
-def _parse_rating(text: str) -> str:
-    head = (text or "").upper()
-    # Look at the first ~120 chars so we catch "RATING: BUY" / "BUY -" etc.
-    head = head[:120]
-    for r in _RATINGS:                       # longest phrases first
-        if r in head:
-            return r.title()
-    return "Review"
+        url = json.loads((DATA_DIR / "apex_server.json").read_text(
+            encoding="utf-8")).get("url", url).rstrip("/")
+    except Exception:
+        pass
+    return tok, url
 
 
 def weekly_evaluation(symbol: str, snap: dict | None = None,
                       force: bool = False) -> dict:
-    """AI rating + write-up for *symbol*, cached for the current ISO week.
+    """Fetch the SHARED weekly evaluation for *symbol* from the server.
 
-    The first time a stock is opened in a new week (i.e. on/after Monday) a
-    fresh evaluation is generated; the rest of the week returns the cache.
-    Returns {symbol, week, rating, text, generated_at, cached, error?}."""
+    The server generates one review per AI provider it has a key for (using the
+    main account's keys) and caches it per ISO week, so every user sees the same
+    multi-model result. The client just sends its market snapshot to seed the
+    first generation. Returns the server's structured dict:
+        {symbol, week, consensus:{rating,score,n}, models:[...], error?}
+    plus a 'cached' flag for the UI."""
+    import requests
     sym = (symbol or "").strip().upper()
     week = current_week_monday()
-    cache = _load_evals()
-    have = cache.get(sym)
-    if (not force and have and have.get("week") == week
-            and (have.get("text") or "").strip()):
-        return {**have, "cached": True}
+    empty = {"symbol": sym, "week": week,
+             "consensus": {"rating": "—", "score": 0.0, "n": 0},
+             "models": [], "cached": False}
+
+    tok, url = _cloud_creds()
+    if not tok:
+        return {**empty, "error": "Sign in to load AI evaluations."}
 
     if snap is None:
         snap = get_snapshot(sym)
 
-    # Need an AI provider key to generate. Be explicit when it's missing rather
-    # than failing silently — the UI surfaces this as a hint.
     try:
-        from core.ai_client import load_ai_config, call_ai_text
-        provider, model, api_key, _mode = load_ai_config()
+        r = requests.post(
+            f"{url}/stocks/{sym}/evaluation",
+            headers={"Authorization": f"Bearer {tok}"},
+            json={"snapshot": snap, "force": bool(force)},
+            timeout=90,
+        )
+        if not r.ok:
+            try:
+                detail = r.json().get("detail", r.text)
+            except Exception:
+                detail = r.text
+            return {**empty, "error": f"Server: {detail}"}
+        data = r.json()
+        data.setdefault("cached", not force)
+        return data
     except Exception as e:
-        return {"symbol": sym, "week": week, "rating": "—",
-                "text": "", "error": f"AI client unavailable: {e}",
-                "generated_at": "", "cached": False}
-
-    if not api_key:
-        return {"symbol": sym, "week": week, "rating": "—", "text": "",
-                "error": "No AI provider key configured. Add one (e.g. "
-                         "ANTHROPIC_API_KEY) in your .env to enable weekly "
-                         "stock evaluations.",
-                "generated_at": "", "cached": False}
-
-    try:
-        prompt = _build_eval_prompt(snap)
-        text = call_ai_text(prompt, provider, model, api_key, max_tokens=400)
-        rating = _parse_rating(text)
-        entry = {
-            "symbol":       sym,
-            "week":         week,
-            "rating":       rating,
-            "text":         text.strip(),
-            "provider":     provider,
-            "model":        model,
-            "generated_at": datetime.datetime.now().isoformat(timespec="minutes"),
-        }
-        cache[sym] = entry
-        _save_evals(cache)
-        return {**entry, "cached": False}
-    except Exception as e:
-        return {"symbol": sym, "week": week, "rating": "—", "text": "",
-                "error": f"Evaluation failed: {e}",
-                "generated_at": "", "cached": False}
+        return {**empty, "error": f"Couldn't reach evaluation server: {e}"}

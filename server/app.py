@@ -20,7 +20,7 @@ from . import (auth, database, credentials as creds,
                friends, oauth as google_oauth, email_send,
                credits as credits_mod,
                similarity, moderation,
-               revenue, payments)
+               revenue, payments, stock_eval)
 from .schemas import SignupRequest, LoginRequest
 
 
@@ -385,6 +385,23 @@ def delete_credentials(authorization: str | None = Header(default=None)):
     user = _current_user(authorization)
     creds.delete_credentials(user["id"])
     return {"ok": True}
+
+
+# ── V4.6.121 — Shared weekly stock evaluation (Find Stocks) ──────────────────
+# The evaluation is generated ON THE SERVER using the main account's AI keys and
+# cached per ISO week, so every user sees the identical multi-model review for a
+# stock. The client may POST its market snapshot to seed the (first) generation.
+@app.post("/stocks/{symbol}/evaluation")
+def stock_evaluation(symbol: str, payload: dict | None = None,
+                     authorization: str | None = Header(default=None)):
+    _current_user(authorization)   # auth-gate; any signed-in user may read
+    body = payload if isinstance(payload, dict) else {}
+    snapshot = body.get("snapshot") if isinstance(body.get("snapshot"), dict) else None
+    force = bool(body.get("force"))
+    try:
+        return stock_eval.evaluate(symbol, snapshot, force=force)
+    except Exception as e:
+        raise HTTPException(500, f"Evaluation failed: {e}")
 
 
 # ── V4.6.101: per-account desktop config (bot registry + per-bot settings +

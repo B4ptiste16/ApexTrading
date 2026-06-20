@@ -159,8 +159,7 @@ class FindStocksTab(QWidget):
         # Hero
         hero = QFrame()
         hero.setStyleSheet(
-            f"background:{C['panel']};border:none;border-radius:12px;"
-            f"border-left:4px solid {C['purple']};")
+            f"background:{C['panel']};border:none;border-radius:12px;")
         hv = QVBoxLayout(hero)
         hv.setContentsMargins(26, 20, 26, 18)
         hv.setSpacing(6)
@@ -338,23 +337,18 @@ class FindStocksTab(QWidget):
 
         layout.addSpacing(12)
 
-        # AI evaluation
+        # AI evaluation (shared, multi-model)
         ai = QFrame()
-        ai.setStyleSheet(
-            f"background:{C['panel']};border:none;border-radius:10px;"
-            f"border-left:3px solid {C['orange']};")
+        ai.setStyleSheet(f"background:{C['panel']};border:none;border-radius:10px;")
         av = QVBoxLayout(ai)
         av.setContentsMargins(20, 16, 20, 16)
-        av.setSpacing(10)
+        av.setSpacing(12)
+
         ai_top = QHBoxLayout()
         ai_title = QLabel("🤖  AI EVALUATION")
         ai_title.setStyleSheet(
             f"color:{C['orange']};font-size:10px;letter-spacing:3px;font-weight:800;")
         ai_top.addWidget(ai_title)
-        ai_top.addSpacing(10)
-        self._ai_badge = QLabel("")
-        self._ai_badge.setStyleSheet("font-size:12px;font-weight:800;")
-        ai_top.addWidget(self._ai_badge)
         ai_top.addStretch()
         self._ai_meta = QLabel("")
         self._ai_meta.setStyleSheet(f"color:{C['muted']};font-size:10px;")
@@ -365,13 +359,39 @@ class FindStocksTab(QWidget):
         ai_top.addWidget(self._ai_refresh)
         atw = QWidget(); atw.setLayout(ai_top)
         av.addWidget(atw)
-        self._ai_text = QLabel("")
-        self._ai_text.setStyleSheet(f"color:{C['text']};font-size:12px;line-height:1.7;")
-        self._ai_text.setWordWrap(True)
-        self._ai_text.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        av.addWidget(self._ai_text)
-        ai_note = QLabel("Evaluations are AI-generated from market data and refresh "
-                         "weekly (every Monday). Informational only — not financial advice.")
+
+        # Consensus banner
+        self._consensus_box = QFrame()
+        self._consensus_box.setStyleSheet(
+            f"background:{C['bg']};border:none;border-radius:8px;")
+        cb = QHBoxLayout(self._consensus_box)
+        cb.setContentsMargins(16, 12, 16, 12)
+        cb.setSpacing(14)
+        clab = QLabel("CONSENSUS")
+        clab.setStyleSheet(
+            f"color:{C['muted']};font-size:9px;letter-spacing:2px;font-weight:700;")
+        cb.addWidget(clab)
+        self._consensus_badge = QLabel("—")
+        self._consensus_badge.setStyleSheet(
+            f"font-family:'Syne',sans-serif;font-size:20px;font-weight:800;"
+            f"color:{C['muted']};")
+        cb.addWidget(self._consensus_badge)
+        cb.addStretch()
+        self._consensus_detail = QLabel("")
+        self._consensus_detail.setStyleSheet(f"color:{C['muted']};font-size:11px;")
+        cb.addWidget(self._consensus_detail)
+        av.addWidget(self._consensus_box)
+
+        # Per-model review cards live here (rebuilt on each load)
+        self._models_container = QWidget()
+        self._models_layout = QVBoxLayout(self._models_container)
+        self._models_layout.setContentsMargins(0, 0, 0, 0)
+        self._models_layout.setSpacing(10)
+        av.addWidget(self._models_container)
+
+        ai_note = QLabel("Evaluations are generated on the APEX server (same for "
+                         "everyone) and refresh weekly, every Monday. "
+                         "Informational only — not financial advice.")
         ai_note.setStyleSheet(f"color:{C['muted']};font-size:9px;line-height:1.5;")
         ai_note.setWordWrap(True)
         av.addWidget(ai_note)
@@ -481,9 +501,7 @@ class FindStocksTab(QWidget):
         self._h_name.setText("Loading…")
         for v in self._stat_cells.values():
             v.setText("—")
-        self._ai_badge.setText("")
-        self._ai_text.setText("Generating evaluation…")
-        self._ai_meta.setText("")
+        self._set_eval_status("Loading shared AI evaluation…")
         self._summary.setText("")
 
         # Snapshot
@@ -531,12 +549,9 @@ class FindStocksTab(QWidget):
                 f"Couldn't load data for {symbol}. "
                 f"{snap.get('error', '') or 'It may not be available.'}")
             self._h_price.setText("—")
-            self._ai_text.setText(
+            self._set_eval_status(
                 "No market data available for this symbol, so it can't be "
                 "evaluated.")
-            self._ai_text.setStyleSheet(
-                f"color:{C['muted']};font-size:12px;line-height:1.7;")
-            self._ai_badge.setText("")
             return
         self._render_snapshot(snap)
 
@@ -583,44 +598,133 @@ class FindStocksTab(QWidget):
         else:
             self._summary.setText("")
 
+    # ── AI evaluation rendering ──────────────────────────────────────────────
+
+    def _clear_models(self):
+        while self._models_layout.count():
+            item = self._models_layout.takeAt(0)
+            w = item.widget()
+            if w is not None:
+                w.deleteLater()
+
+    def _set_eval_status(self, msg: str):
+        """Show a single status/placeholder line in the eval area."""
+        self._clear_models()
+        self._consensus_badge.setText("—")
+        self._consensus_badge.setStyleSheet(
+            f"font-family:'Syne',sans-serif;font-size:20px;font-weight:800;"
+            f"color:{C['muted']};")
+        self._consensus_detail.setText("")
+        self._ai_meta.setText("")
+        lbl = QLabel(msg)
+        lbl.setStyleSheet(f"color:{C['muted']};font-size:12px;line-height:1.6;")
+        lbl.setWordWrap(True)
+        self._models_layout.addWidget(lbl)
+
     def _on_eval(self, symbol: str, ev: dict):
         if symbol != self._cur_symbol:
             return
-        err = ev.get("error")
-        if err and not (ev.get("text") or "").strip():
-            self._ai_badge.setText("")
-            self._ai_text.setText(err)
-            self._ai_text.setStyleSheet(
-                f"color:{C['muted']};font-size:12px;line-height:1.7;")
-            self._ai_meta.setText("")
+        models = ev.get("models") or []
+        if not models:
+            self._set_eval_status(
+                ev.get("error") or "No evaluation available yet.")
             return
-        rating = ev.get("rating", "—")
-        self._ai_badge.setText(rating.upper())
-        self._ai_badge.setStyleSheet(
-            f"font-size:12px;font-weight:800;color:{_rating_color(rating)};")
-        # Strip a leading "RATING: x" line — it's already shown as the badge.
-        text = (ev.get("text") or "").strip()
-        lines = [ln for ln in text.splitlines()]
-        if lines and lines[0].strip().upper().startswith("RATING"):
-            lines = lines[1:]
-        self._ai_text.setText("\n".join(lines).strip())
-        self._ai_text.setStyleSheet(
-            f"color:{C['text']};font-size:12px;line-height:1.7;")
+
+        self._clear_models()
+        cons = ev.get("consensus") or {}
+        crating = cons.get("rating", "—")
+        self._consensus_badge.setText(crating.upper())
+        self._consensus_badge.setStyleSheet(
+            f"font-family:'Syne',sans-serif;font-size:20px;font-weight:800;"
+            f"color:{_rating_color(crating)};")
+        n = cons.get("n", len(models))
+        self._consensus_detail.setText(
+            f"{n} model{'s' if n != 1 else ''} · avg {cons.get('score', 0):.1f}/5")
+
+        for m in models:
+            self._models_layout.addWidget(self._model_card(m))
+
         wk = ev.get("week", "")
-        cached = "cached" if ev.get("cached") else "new"
-        prov = ev.get("provider", "")
-        meta = f"week of {wk}"
-        if prov:
-            meta += f"  ·  {prov}"
-        meta += f"  ·  {cached}"
-        self._ai_meta.setText(meta)
+        cached = "cached" if ev.get("cached") else "fresh"
+        self._ai_meta.setText(f"week of {wk}  ·  {cached}")
+
+    def _model_card(self, m: dict) -> QWidget:
+        prov = m.get("provider", "")
+        label = m.get("label") or prov or "AI"
+        rating = m.get("rating", "—")
+        conf = m.get("confidence", 0)
+        pcol = _provider_color(prov)
+
+        card = QFrame()
+        card.setStyleSheet(f"background:{C['bg']};border:none;border-radius:8px;")
+        v = QVBoxLayout(card)
+        v.setContentsMargins(14, 12, 14, 12)
+        v.setSpacing(8)
+
+        head = QHBoxLayout()
+        name = QLabel(label.upper())
+        name.setStyleSheet(
+            f"color:{pcol};font-size:11px;font-weight:800;letter-spacing:1.5px;")
+        head.addWidget(name)
+        model_id = QLabel(m.get("model", ""))
+        model_id.setStyleSheet(f"color:{C['muted']};font-size:9px;")
+        head.addWidget(model_id)
+        head.addStretch()
+        badge = QLabel(rating.upper())
+        badge.setStyleSheet(
+            f"color:{_rating_color(rating)};font-size:13px;font-weight:800;"
+            f"font-family:'Syne',sans-serif;")
+        head.addWidget(badge)
+        if conf:
+            cf = QLabel(f"{conf}%")
+            cf.setStyleSheet(f"color:{C['muted']};font-size:10px;")
+            head.addWidget(cf)
+        hw = QWidget(); hw.setLayout(head)
+        v.addWidget(hw)
+
+        summ = (m.get("summary") or "").strip()
+        if summ:
+            s = QLabel(summ)
+            s.setStyleSheet(f"color:{C['text']};font-size:12px;line-height:1.6;")
+            s.setWordWrap(True)
+            v.addWidget(s)
+
+        cols = QHBoxLayout()
+        cols.setSpacing(16)
+        cols.addWidget(self._points_col("▲ BULLISH", m.get("bullish") or [],
+                                        C["green"]), 1)
+        cols.addWidget(self._points_col("▼ BEARISH", m.get("bearish") or [],
+                                        C["red"]), 1)
+        cw = QWidget(); cw.setLayout(cols)
+        v.addWidget(cw)
+        return card
+
+    def _points_col(self, title: str, points: list, color: str) -> QWidget:
+        w = QWidget()
+        v = QVBoxLayout(w)
+        v.setContentsMargins(0, 0, 0, 0)
+        v.setSpacing(3)
+        t = QLabel(title)
+        t.setStyleSheet(
+            f"color:{color};font-size:9px;font-weight:800;letter-spacing:1px;")
+        v.addWidget(t)
+        if not points:
+            n = QLabel("—")
+            n.setStyleSheet(f"color:{C['muted']};font-size:11px;")
+            v.addWidget(n)
+        for p in points:
+            pl = QLabel(f"• {p}")
+            pl.setStyleSheet(f"color:{C['text']};font-size:11px;line-height:1.5;")
+            pl.setWordWrap(True)
+            v.addWidget(pl)
+        v.addStretch()
+        return w
 
     def _refresh_eval(self):
         if not self._cur_symbol:
             return
-        self._ai_text.setText("Re-evaluating…")
-        self._ai_badge.setText("")
-        # snap=None → weekly_evaluation re-pulls a fresh snapshot to evaluate.
+        self._set_eval_status("Re-running evaluation on the server…")
+        # snap=None → weekly_evaluation re-pulls a fresh snapshot to send.
         ew = _EvalWorker(self._cur_symbol, None, force=True)
         ew.done.connect(self._on_eval)
         ew.finished.connect(lambda _w=ew: self._drop_worker(_w))
@@ -697,6 +801,15 @@ def _rating_color(rating: str) -> str:
     if "HOLD" in r or "NEUTRAL" in r:
         return C["orange"]
     return C["muted"]
+
+
+def _provider_color(provider: str) -> str:
+    return {
+        "anthropic": C["orange"],
+        "google":    C["purple"],
+        "xai":       C["text"],
+        "groq":      C["green"],
+    }.get((provider or "").lower(), C["text"])
 
 
 def _loading_html() -> str:
