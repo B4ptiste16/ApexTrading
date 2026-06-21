@@ -671,6 +671,18 @@ def _build_env(user_id: int, side: str,
         ss = blob.get(f"ALPACA_SECRET_KEY_{label}")
         if kk: env[f"ALPACA_API_KEY_{label}"]    = kk
         if ss: env[f"ALPACA_SECRET_KEY_{label}"] = ss
+    # V4.6.124 — forward the LIVE-namespaced keys too. Alpaca paper and live are
+    # SEPARATE accounts with separate keys; broker_client._resolve_alpaca_keys
+    # prefers ALPACA_API_KEY_LIVE_<SIDE> when APEX_ALPACA_MODE=live, so without
+    # this a cloud bot in LIVE mode would fall back to the paper keys (or fail).
+    for label in ("LONG", "SHORT", "DAY"):
+        kk = blob.get(f"ALPACA_API_KEY_LIVE_{label}")
+        ss = blob.get(f"ALPACA_SECRET_KEY_LIVE_{label}")
+        if kk: env[f"ALPACA_API_KEY_LIVE_{label}"]    = kk
+        if ss: env[f"ALPACA_SECRET_KEY_LIVE_{label}"] = ss
+    for gk in ("ALPACA_API_KEY_LIVE", "ALPACA_SECRET_KEY_LIVE"):
+        if blob.get(gk):
+            env[gk] = blob[gk]
     # Pass all AI provider API keys that exist in the blob
     for ai_key in ("ANTHROPIC_API_KEY", "GOOGLE_AI_API_KEY",
                    "XAI_API_KEY", "GROQ_API_KEY"):

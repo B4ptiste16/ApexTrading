@@ -2037,6 +2037,8 @@ class ApexWindow(QMainWindow):
                 "All running bots will be migrated to the live Alpaca API on "
                 "their next cycle. Make sure your live API keys are configured "
                 "in Tools → ALPACA · API KEYS before switching.<br><br>"
+                "Your PORTFOLIO tab will also switch to your live Alpaca account "
+                "(enter its live keys there if you haven't).<br><br>"
                 "Continue?")
             box.setStandardButtons(
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
@@ -2068,6 +2070,14 @@ class ApexWindow(QMainWindow):
                 self.tools_tab.rebuild_for_mode(broker)
         except Exception as e:
             print(f"[mode-toggle] tools rebuild: {e}")
+        # V4.6.124 — the Portfolio account is paper/live-aware too; re-evaluate
+        # which account it shows when the mode flips.
+        try:
+            if hasattr(self, "manual_tab") and hasattr(self.manual_tab,
+                                                       "refresh_mode"):
+                self.manual_tab.refresh_mode()
+        except Exception as e:
+            print(f"[mode-toggle] portfolio refresh: {e}")
         # Tell the user the switch landed and that running bots will
         # pick it up on their next cycle (start_bot reads the env var).
         from PyQt6.QtWidgets import QMessageBox as _Q

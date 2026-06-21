@@ -72,31 +72,22 @@ class _PositionDetailWorker(QThread):
         self.done.emit(self.symbol, df, events, self.ref_price)
 
 
+def _manual_mode() -> str:
+    from core import stock_research as SR
+    return SR.manual_mode()
+
+
 def _has_manual_key() -> bool:
-    try:
-        from core import data as D
-        keys = D.read_env_keys()
-        return bool(keys.get("ALPACA_API_KEY_MANUAL", "").strip()
-                    and keys.get("ALPACA_SECRET_KEY_MANUAL", "").strip())
-    except Exception:
-        return False
+    """True if the MANUAL account has keys for the CURRENT (paper/live) mode."""
+    from core import stock_research as SR
+    return SR.has_manual_key()
 
 
 def _manual_client():
-    """Build the dedicated MANUAL Alpaca client DIRECTLY from its keys,
-    independent of the app's active broker."""
-    try:
-        from core import data as D
-        keys = D.read_env_keys()
-        key = keys.get("ALPACA_API_KEY_MANUAL", "").strip()
-        sec = keys.get("ALPACA_SECRET_KEY_MANUAL", "").strip()
-        if not key or not sec:
-            return None
-        from alpaca.trading.client import TradingClient
-        return TradingClient(key, sec, paper=True)
-    except Exception as e:
-        print(f"[manual] client build failed: {e}")
-        return None
+    """Mode-aware MANUAL Alpaca client (paper or live) — see
+    stock_research.manual_client()."""
+    from core import stock_research as SR
+    return SR.manual_client()
 
 
 class ManualTradingTab(QWidget):
@@ -137,6 +128,11 @@ class ManualTradingTab(QWidget):
             f"font-family:'Syne',sans-serif;font-size:22px;font-weight:800;"
             f"color:{C['orange']};letter-spacing:3px;")
         top.addWidget(title)
+        top.addSpacing(12)
+        # LIVE / paper indicator (follows the header Paper/Live toggle)
+        self._mode_chip = QLabel("")
+        self._mode_chip.setStyleSheet("font-size:11px;font-weight:800;")
+        top.addWidget(self._mode_chip)
         top.addStretch()
         off_btn = QPushButton("⚡  Switch to Auto")
         off_btn.setObjectName("toolBtn")
@@ -176,19 +172,17 @@ class ManualTradingTab(QWidget):
         v.setContentsMargins(24, 20, 24, 20)
         v.setSpacing(10)
 
-        title = QLabel("⚠  No manual account configured")
-        title.setStyleSheet(
+        self._nokey_title = QLabel("⚠  No manual account configured")
+        self._nokey_title.setStyleSheet(
             f"font-family:'Syne',sans-serif;font-size:14px;font-weight:800;"
             f"color:{C['text']};letter-spacing:1px;")
-        v.addWidget(title)
+        v.addWidget(self._nokey_title)
 
-        desc = QLabel(
-            "Your portfolio uses its own dedicated Alpaca account, kept completely "
-            "separate from your bots. Paste its API key + secret below and Save to "
-            "see your holdings.")
-        desc.setStyleSheet(f"color:{C['muted']};font-size:11px;line-height:1.7;")
-        desc.setWordWrap(True)
-        v.addWidget(desc)
+        self._nokey_desc = QLabel("")
+        self._nokey_desc.setStyleSheet(
+            f"color:{C['muted']};font-size:11px;line-height:1.7;")
+        self._nokey_desc.setWordWrap(True)
+        v.addWidget(self._nokey_desc)
 
         self._mk_key_edit = QLineEdit()
         self._mk_key_edit.setPlaceholderText("Alpaca API Key ID")
@@ -224,18 +218,22 @@ class ManualTradingTab(QWidget):
     def _save_manual_keys_inline(self):
         try:
             from core import data as D
+            from core import stock_research as SR
             key = self._mk_key_edit.text().strip()
             sec = self._mk_sec_edit.text().strip()
             if not key or not sec:
                 self._mk_msg.setText("Enter both key and secret.")
                 self._mk_msg.setStyleSheet(f"color:{C['red']};font-size:10px;")
                 return
-            D.write_env_keys({
-                "ALPACA_API_KEY_MANUAL":    key,
-                "ALPACA_SECRET_KEY_MANUAL": sec,
-            })
-            self._mk_msg.setText("✓ Saved")
+            # Save under the CURRENT mode's keyset (live keys are separate from
+            # paper keys — different Alpaca accounts).
+            kn, sn = SR.manual_key_names()
+            D.write_env_keys({kn: key, sn: sec})
+            mode = SR.manual_mode()
+            self._mk_msg.setText(f"✓ Saved {mode} keys")
             self._mk_msg.setStyleSheet(f"color:{C['green']};font-size:10px;")
+            self._mk_key_edit.clear()
+            self._mk_sec_edit.clear()
             self._refresh_key_state()
         except Exception as e:
             self._mk_msg.setText(f"Save failed: {e}")
@@ -345,7 +343,41 @@ class ManualTradingTab(QWidget):
 
     # ── Key state ──────────────────────────────────────────────────
 
+    def refresh_mode(self):
+        """Called when the header Paper/Live toggle flips — re-evaluate which
+        account (paper vs live) the portfolio should show."""
+        self._sel_symbol = ""
+        if hasattr(self, "_detail_frame"):
+            self._detail_frame.setVisible(False)
+        self._refresh_key_state()
+
+    def _update_mode_ui(self):
+        live = _manual_mode() == "live"
+        # Hero chip
+        if live:
+            self._mode_chip.setText("◉ LIVE · REAL MONEY")
+            self._mode_chip.setStyleSheet(
+                f"font-size:11px;font-weight:800;color:{C['red']};")
+        else:
+            self._mode_chip.setText("○ paper")
+            self._mode_chip.setStyleSheet(
+                f"font-size:11px;font-weight:800;color:{C['muted']};")
+        # No-key entry copy
+        if live:
+            self._nokey_title.setText("⚠  No LIVE account configured")
+            self._nokey_desc.setText(
+                "You're in LIVE mode. Paste your REAL-money Alpaca live API key + "
+                "secret below and Save. These are different from your paper keys "
+                "and trade real money. Stored only on this machine.")
+        else:
+            self._nokey_title.setText("⚠  No manual account configured")
+            self._nokey_desc.setText(
+                "Your portfolio uses its own dedicated Alpaca paper account, kept "
+                "separate from your bots. Paste its API key + secret below and "
+                "Save to see your holdings.")
+
     def _refresh_key_state(self):
+        self._update_mode_ui()
         has_key = _has_manual_key()
         self._no_key_frame.setVisible(not has_key)
         self._main_frame.setVisible(has_key)

@@ -47,19 +47,52 @@ PERIODS: dict[str, tuple[str, str]] = {
 #  Broker client (dedicated MANUAL Alpaca account)
 # ══════════════════════════════════════════════════════════════════════════
 
-def manual_client():
-    """Build the dedicated MANUAL Alpaca client from its own keys, exactly like
-    the manual trading tab — independent of the app's active broker so search
-    keeps working even while the rest of the app is on IBKR."""
+def manual_mode() -> str:
+    """'paper' (default) or 'live' — follows the app's header Paper/Live toggle
+    (`alpaca_mode` setting). The MANUAL account has separate paper and live
+    Alpaca accounts, exactly like the bots."""
+    try:
+        from core import data as D
+        return (D.load_settings().get("alpaca_mode", "paper") or "paper").lower()
+    except Exception:
+        return "paper"
+
+
+def manual_key_names(mode: str | None = None) -> tuple[str, str]:
+    """(api_key_name, secret_key_name) for the MANUAL account in the given mode.
+    Paper → ALPACA_API_KEY_MANUAL; Live → ALPACA_API_KEY_LIVE_MANUAL (same
+    LIVE-namespacing the bots use)."""
+    mode = (mode or manual_mode()).lower()
+    ns = "LIVE_" if mode == "live" else ""
+    return f"ALPACA_API_KEY_{ns}MANUAL", f"ALPACA_SECRET_KEY_{ns}MANUAL"
+
+
+def has_manual_key(mode: str | None = None) -> bool:
     try:
         from core import data as D
         keys = D.read_env_keys()
-        key = keys.get("ALPACA_API_KEY_MANUAL", "").strip()
-        sec = keys.get("ALPACA_SECRET_KEY_MANUAL", "").strip()
+        kn, sn = manual_key_names(mode)
+        return bool(keys.get(kn, "").strip() and keys.get(sn, "").strip())
+    except Exception:
+        return False
+
+
+def manual_client():
+    """Build the dedicated MANUAL Alpaca client from its own keys, independent
+    of the app's active broker so search/portfolio keep working even while the
+    rest of the app is on IBKR. Honours the Paper/Live toggle: in LIVE mode it
+    uses the live-namespaced keys and connects to the REAL-money account."""
+    try:
+        from core import data as D
+        mode = manual_mode()
+        keys = D.read_env_keys()
+        kn, sn = manual_key_names(mode)
+        key = keys.get(kn, "").strip()
+        sec = keys.get(sn, "").strip()
         if not key or not sec:
             return None
         from alpaca.trading.client import TradingClient
-        return TradingClient(key, sec, paper=True)
+        return TradingClient(key, sec, paper=(mode != "live"))
     except Exception as e:
         print(f"[stock_research] manual client build failed: {e}")
         return None
