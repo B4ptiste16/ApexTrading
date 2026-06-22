@@ -1,4 +1,4 @@
 {
-  "version": "4.6.124",
-  "notes": "v4.6.124 — Live trading (real money) support\n\n⚠ You can now run with REAL MONEY. Flip the header ○ paper → ◉ LIVE toggle (it asks you to confirm). In LIVE mode:\n\n• Bots trade your real Alpaca account using separate live API keys — enter them in Tools → Alpaca API Keys (the slots switch to live keys automatically). Cloud bots now receive the live keys too.\n\n• The PORTFOLIO tab shows your real-money Alpaca account — enter its live key + secret in the tab when prompted. A red 'LIVE · REAL MONEY' badge makes the mode obvious.\n\nNothing trades real money until you add live keys AND switch the toggle to LIVE — paper stays the default.\n\nUpdate via the in-app banner.\n"
+  "version": "4.6.125",
+  "notes": "v4.6.125 — Buy & sell restored in the Portfolio tab\n\n💸 The Portfolio tab can place orders again — a BUY / SELL panel (market or limit) sits next to your holdings, while the position-growth charts and overview stay.\n\n🔁 It follows the Paper/Live toggle: in LIVE mode it trades your real-money account and asks you to confirm each order first.\n\nUpdate via the in-app banner.\n"
 }

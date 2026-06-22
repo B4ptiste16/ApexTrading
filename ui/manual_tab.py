@@ -15,12 +15,12 @@ from __future__ import annotations
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame,
-    QLineEdit, QTableWidget, QTableWidgetItem, QHeaderView,
+    QLineEdit, QTableWidget, QTableWidgetItem, QHeaderView, QGridLayout,
 )
 from PyQt6.QtGui import QColor
 
 from ui.styles  import COLORS
-from ui.widgets import ScrollContent, MetricCard, ChartView
+from ui.widgets import ScrollContent, MetricCard, ChartView, NoScrollComboBox
 
 C = COLORS
 
@@ -49,6 +49,41 @@ class _FetchWorker(QThread):
             self.done.emit(True, {"positions": positions, "account": account})
         except Exception as e:
             self.done.emit(False, {"error": str(e)})
+
+
+class _OrderWorker(QThread):
+    """Place a buy/sell order on the MANUAL account (paper or live, per the
+    current mode — the client is mode-aware)."""
+    done = pyqtSignal(bool, str)
+
+    def __init__(self, symbol: str, qty: float, direction: str,
+                 order_type: str, limit_price: float | None):
+        super().__init__()
+        self.symbol, self.qty = symbol, qty
+        self.direction, self.order_type = direction, order_type
+        self.limit_price = limit_price
+
+    def run(self):
+        try:
+            client = _manual_client()
+            if client is None:
+                self.done.emit(False, "No manual account configured.")
+                return
+            from alpaca.trading.requests import MarketOrderRequest, LimitOrderRequest
+            from alpaca.trading.enums import OrderSide, TimeInForce
+            side_enum = OrderSide.BUY if self.direction == "BUY" else OrderSide.SELL
+            if self.order_type == "MARKET":
+                req = MarketOrderRequest(
+                    symbol=self.symbol.upper(), qty=self.qty,
+                    side=side_enum, time_in_force=TimeInForce.DAY)
+            else:
+                req = LimitOrderRequest(
+                    symbol=self.symbol.upper(), qty=self.qty, side=side_enum,
+                    time_in_force=TimeInForce.GTC, limit_price=self.limit_price)
+            order = client.submit_order(req)
+            self.done.emit(True, f"Order placed: {getattr(order, 'id', '')}")
+        except Exception as e:
+            self.done.emit(False, str(e))
 
 
 class _PositionDetailWorker(QThread):
@@ -253,12 +288,148 @@ class ManualTradingTab(QWidget):
         layout.addWidget(mw)
 
         layout.addSpacing(16)
-        layout.addWidget(self._build_positions_panel())
+        # Order entry + holdings side by side
+        split = QHBoxLayout()
+        split.setSpacing(16)
+        split.addWidget(self._build_order_form(), 1)
+        split.addWidget(self._build_positions_panel(), 2)
+        sw = QWidget(); sw.setLayout(split)
+        layout.addWidget(sw)
 
         layout.addSpacing(16)
         self._detail_frame = self._build_position_detail()
         self._detail_frame.setVisible(False)
         layout.addWidget(self._detail_frame)
+
+    def _build_order_form(self) -> QFrame:
+        frame = QFrame()
+        frame.setStyleSheet(f"background:{C['panel']};border:none;border-radius:10px;")
+        g = QGridLayout(frame)
+        g.setContentsMargins(18, 16, 18, 16)
+        g.setHorizontalSpacing(12)
+        g.setVerticalSpacing(10)
+
+        def lbl(text: str) -> QLabel:
+            w = QLabel(text)
+            w.setStyleSheet(
+                f"color:{C['muted']};font-size:9px;letter-spacing:2px;font-weight:700;")
+            return w
+
+        title = QLabel("BUY / SELL")
+        title.setStyleSheet(
+            f"color:{C['orange']};font-size:10px;letter-spacing:3px;font-weight:800;")
+        g.addWidget(title, 0, 0, 1, 2)
+
+        # Live warning (shown only in live mode by _update_mode_ui)
+        self._order_live_warn = QLabel("")
+        self._order_live_warn.setStyleSheet(
+            f"color:{C['red']};font-size:9px;font-weight:700;")
+        self._order_live_warn.setWordWrap(True)
+        g.addWidget(self._order_live_warn, 1, 0, 1, 2)
+
+        g.addWidget(lbl("SYMBOL"), 2, 0)
+        self._sym_edit = QLineEdit()
+        self._sym_edit.setPlaceholderText("e.g. AAPL")
+        g.addWidget(self._sym_edit, 2, 1)
+
+        g.addWidget(lbl("SIDE"), 3, 0)
+        self._dir_combo = NoScrollComboBox()
+        self._dir_combo.addItems(["BUY", "SELL"])
+        g.addWidget(self._dir_combo, 3, 1)
+
+        g.addWidget(lbl("QUANTITY"), 4, 0)
+        self._qty_edit = QLineEdit()
+        self._qty_edit.setPlaceholderText("shares")
+        g.addWidget(self._qty_edit, 4, 1)
+
+        g.addWidget(lbl("ORDER TYPE"), 5, 0)
+        self._type_combo = NoScrollComboBox()
+        self._type_combo.addItems(["MARKET", "LIMIT"])
+        self._type_combo.currentTextChanged.connect(self._on_type_changed)
+        g.addWidget(self._type_combo, 5, 1)
+
+        self._lp_lbl = lbl("LIMIT PRICE")
+        g.addWidget(self._lp_lbl, 6, 0)
+        self._lp_edit = QLineEdit()
+        self._lp_edit.setPlaceholderText("$ per share")
+        self._lp_edit.setEnabled(False)
+        g.addWidget(self._lp_edit, 6, 1)
+
+        self._submit_btn = QPushButton("⬆  Submit Order")
+        self._submit_btn.setObjectName("addBotBtn")
+        self._submit_btn.clicked.connect(self._submit_order)
+        g.addWidget(self._submit_btn, 7, 0, 1, 2)
+
+        self._order_msg = QLabel("")
+        self._order_msg.setStyleSheet(f"color:{C['green']};font-size:10px;")
+        self._order_msg.setWordWrap(True)
+        g.addWidget(self._order_msg, 8, 0, 1, 2)
+        return frame
+
+    def _on_type_changed(self, otype: str):
+        is_limit = otype == "LIMIT"
+        self._lp_edit.setEnabled(is_limit)
+        self._lp_lbl.setStyleSheet(
+            f"color:{C['text'] if is_limit else C['muted']};"
+            f"font-size:9px;letter-spacing:2px;font-weight:700;")
+
+    def _submit_order(self):
+        sym = self._sym_edit.text().strip().upper()
+        if not sym:
+            self._show_order_msg("Enter a symbol.", ok=False)
+            return
+        try:
+            qty = float(self._qty_edit.text().strip())
+            assert qty > 0
+        except Exception:
+            self._show_order_msg("Enter a valid quantity (> 0).", ok=False)
+            return
+        otype = self._type_combo.currentText()
+        limit_price = None
+        if otype == "LIMIT":
+            try:
+                limit_price = float(self._lp_edit.text().strip())
+                assert limit_price > 0
+            except Exception:
+                self._show_order_msg("Enter a valid limit price.", ok=False)
+                return
+        direction = self._dir_combo.currentText()
+        # Real-money confirm in live mode.
+        if _manual_mode() == "live":
+            from PyQt6.QtWidgets import QMessageBox
+            px = f" @ ${limit_price:,.2f}" if limit_price else " at market"
+            box = QMessageBox(self)
+            box.setIcon(QMessageBox.Icon.Warning)
+            box.setWindowTitle("Confirm LIVE order")
+            box.setText(
+                f"<b>This is a REAL-money order.</b><br><br>"
+                f"{direction} {qty:g} {sym}{px}<br><br>Place it?")
+            box.setStandardButtons(
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+            box.setDefaultButton(QMessageBox.StandardButton.No)
+            if box.exec() != QMessageBox.StandardButton.Yes:
+                return
+        self._show_order_msg("Submitting…", ok=None)
+        w = _OrderWorker(sym, qty, direction, otype, limit_price)
+        w.done.connect(self._on_order_done)
+        w.finished.connect(
+            lambda _w=w: self._workers.remove(_w) if _w in self._workers else None)
+        self._workers.append(w)
+        w.start()
+
+    def _on_order_done(self, ok: bool, msg: str):
+        self._show_order_msg(f"{'✓' if ok else '✗'}  {msg}", ok=ok)
+        if ok:
+            self._sym_edit.clear()
+            self._qty_edit.clear()
+            self._lp_edit.clear()
+            QTimer.singleShot(1500, self._refresh)
+        QTimer.singleShot(8000, lambda: self._show_order_msg(""))
+
+    def _show_order_msg(self, text: str, ok=True):
+        color = C["green"] if ok is True else C["red"] if ok is False else C["muted"]
+        self._order_msg.setText(text)
+        self._order_msg.setStyleSheet(f"color:{color};font-size:10px;")
 
     def _build_positions_panel(self) -> QFrame:
         frame = QFrame()
@@ -362,6 +533,12 @@ class ManualTradingTab(QWidget):
             self._mode_chip.setText("○ paper")
             self._mode_chip.setStyleSheet(
                 f"font-size:11px;font-weight:800;color:{C['muted']};")
+        # Order form live warning + submit label
+        if hasattr(self, "_order_live_warn"):
+            self._order_live_warn.setText(
+                "⚠ LIVE — orders use REAL money." if live else "")
+            self._submit_btn.setText(
+                "⬆  Submit LIVE Order" if live else "⬆  Submit Order")
         # No-key entry copy
         if live:
             self._nokey_title.setText("⚠  No LIVE account configured")
