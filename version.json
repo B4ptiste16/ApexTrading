@@ -1,4 +1,4 @@
 {
-  "version": "4.6.125",
-  "notes": "v4.6.125 — Buy & sell restored in the Portfolio tab\n\n💸 The Portfolio tab can place orders again — a BUY / SELL panel (market or limit) sits next to your holdings, while the position-growth charts and overview stay.\n\n🔁 It follows the Paper/Live toggle: in LIVE mode it trades your real-money account and asks you to confirm each order first.\n\nUpdate via the in-app banner.\n"
+  "version": "4.6.126",
+  "notes": "v4.6.126 — Paper and live bots run separately (no more migration)\n\n🔀 Switching to LIVE no longer 'migrates' your bots. Paper and live each have their own bot instances on the cloud — your paper bots keep running on paper while you start separate bots on your live account, exactly like Alpaca vs IBKR already work.\n\n• Cloud bots are now keyed by paper/live, so the same bot (e.g. LONG) can run on both at once.\n• The Paper/Live switch dialog now explains this instead of warning about migration.\n\nLive still needs your funded live account + live keys. Update via the in-app banner.\n"
 }

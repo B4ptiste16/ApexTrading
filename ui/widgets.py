@@ -478,6 +478,20 @@ class BotProcessWidget(QWidget):
         except Exception:
             return "alpaca"
 
+    def _cloud_broker_token(self) -> str:
+        """V4.6.126 — the broker token sent to the cloud for start/stop/status.
+        In LIVE mode it carries a '-live' suffix (e.g. 'alpaca-live') so the
+        server runs the live bot as a SEPARATE instance from the paper one
+        (paper keeps running, no migration). Paper mode is unchanged."""
+        b = self._broker_mode()
+        try:
+            from core import data as _D
+            if str(_D.load_settings().get("alpaca_mode", "paper")).lower() == "live":
+                return f"{b}-live"
+        except Exception:
+            pass
+        return b
+
     def _ibkr_cloud_enabled(self) -> bool:
         """V4.6.40 — True when the user enabled 'Run IBKR bots on Oracle' for
         the current paper/live mode AND a paper login is stored. APEX runs a
@@ -956,7 +970,7 @@ class BotProcessWidget(QWidget):
         # current broker mode is the broker for this start/stop/status/logs.
         if "/bots/" in path:
             sep = "&" if "?" in path else "?"
-            url = f"{url}{sep}broker={self._broker_mode()}"
+            url = f"{url}{sep}broker={self._cloud_broker_token()}"
 
         class _W(QThread):
             done = _Sig(bool, dict)
@@ -1082,7 +1096,7 @@ class BotProcessWidget(QWidget):
         # made a custom bot launched in Alpaca mode run on IBKR (and uselessly
         # boot the IB gateway, then fail "gateway not ready"). Built-in bots
         # already pass this via _cloud_call; custom bots now do too.
-        _start_broker = self._broker_mode()
+        _start_broker = self._cloud_broker_token()
 
         # V4.6.19 — resolve the universe file the user assigned to
         # this bot (via the bot-tab dropdown) so we can ship its

@@ -632,28 +632,43 @@ def _ibkr_client_id(blob: dict, side: str) -> int:
     return 1 + (zlib.crc32(side.upper().encode()) % 990)
 
 
+def _split_broker(broker: str | None) -> tuple[str, str]:
+    """V4.6.126 — a cloud broker token may carry a paper/live suffix so paper
+    and live bots of the SAME side run as SEPARATE instances (own state dir, pid,
+    desired entry) instead of one being 'migrated' onto the other. Split it into
+    (base_broker, mode):
+        'alpaca'      -> ('alpaca', 'paper')   (legacy / paper — unchanged paths)
+        'alpaca-live' -> ('alpaca', 'live')
+        'ibkr'        -> ('ibkr',   'paper')
+        'ibkr-live'   -> ('ibkr',   'live')
+    The composite token is used as the on-disk/instance key (so separation comes
+    for free from the existing per-broker namespacing); the base broker drives
+    broker semantics (Alpaca vs IBKR gateway), and the mode drives paper/live."""
+    b = (broker or "alpaca").lower()
+    if b.endswith("-live"):
+        return (b[:-5] or "alpaca"), "live"
+    return b, "paper"
+
+
 def _build_env(user_id: int, side: str,
                broker: str = "alpaca") -> dict[str, str]:
     """Return os.environ-style dict for the spawned bot."""
+    base_broker, mode = _split_broker(broker)
     env = os.environ.copy()
     # V4.6.41 — broker-scoped state dir so Alpaca and IBKR instances of the
     # same side keep separate positions / ledger / caches. Alpaca keeps the
     # legacy user_<id> dir (no migration for existing cloud bots).
+    # V4.6.126 — the COMPOSITE token (e.g. 'alpaca-live') is used here so the
+    # live instance gets its own nested state dir, fully separate from paper.
     env["APEX_DATA_DIR"]    = str(_instance_root(user_id, broker))
     env["APEX_BOT_SIDE"]    = side.upper()
     env["PYTHONIOENCODING"] = "utf-8"
     env["PYTHONPATH"]       = str(BOTS_DIR)
-    # V4.6.8 — propagate the desktop's Alpaca paper/live toggle. The
-    # value is stored alongside other creds in the encrypted blob the
-    # client uploaded (key 'APEX_ALPACA_MODE'); fall back to 'paper'.
-    # bot_framework + built-ins read this and construct TradingClient
-    # with paper=False when mode='live'.
-    try:
-        _blob = creds.load_credentials(user_id) or {}
-        env["APEX_ALPACA_MODE"] = str(
-            _blob.get("APEX_ALPACA_MODE", "paper")).lower()
-    except Exception:
-        env["APEX_ALPACA_MODE"] = "paper"
+    # V4.6.126 — paper/live now comes from the broker token (per-instance), not
+    # the single global blob value, so paper and live bots run concurrently with
+    # the correct account each. bot_framework/built-ins read APEX_ALPACA_MODE and
+    # broker_client picks the live-namespaced keys when it's 'live'.
+    env["APEX_ALPACA_MODE"] = mode
 
     # Inject the user's broker credentials. Each individual bot reads
     # ALPACA_API_KEY / ALPACA_SECRET_KEY — for the per-side keys we
@@ -696,12 +711,14 @@ def _build_env(user_id: int, side: str,
     # core.broker_client reads APEX_BROKER=='ibkr' and builds the
     # ledger-backed IBKR shim instead of Alpaca. Each side connects with
     # its own clientId so they share one gateway without colliding.
-    if (broker or "alpaca").lower() == "ibkr":
+    if base_broker == "ibkr":
         from . import ibkr_gateway
-        _ibkr_mode = str(blob.get("IBKR_TRADING_MODE", "paper")).lower()
-        env["APEX_BROKER"]          = "ibkr"
-        env["APEX_ALPACA_MODE"]     = str(
+        # V4.6.126 — the broker token's mode wins (an 'ibkr-live' instance is
+        # live); fall back to the synced IBKR_TRADING_MODE for legacy callers.
+        _ibkr_mode = mode if mode == "live" else str(
             blob.get("IBKR_TRADING_MODE", "paper")).lower()
+        env["APEX_BROKER"]          = "ibkr"
+        env["APEX_ALPACA_MODE"]     = _ibkr_mode
         env["APEX_IBKR_HOST"]       = "127.0.0.1"
         # Use the port the gateway ACTUALLY opened (it may keep its built-in
         # default if it ignored OverrideTwsApiPort), not just the target.
@@ -752,7 +769,7 @@ def _build_env(user_id: int, side: str,
     # V4.6.91 — per-bot, PER-BROKER minimum-positions floor. The desktop syncs
     # APEX_MIN_POSITIONS_<SIDE>_<BROKER>; inject this broker's value as the
     # plain APEX_MIN_POSITIONS_<SIDE> the framework/bots read.
-    _bk = (broker or "alpaca").upper()
+    _bk = base_broker.upper()
     mp = (blob.get(f"APEX_MIN_POSITIONS_{s}_{_bk}")
           or blob.get(f"APEX_MIN_POSITIONS_{s}"))
     if mp not in (None, ""):
@@ -836,7 +853,7 @@ def _start_bot_impl(user_id: int, side: str, broker: Optional[str] = None) -> di
     # live session'), so the bot can never price or fill. Refuse the start and
     # drop it from the desired registry so the watchdog stops trying — the user
     # runs crypto on Alpaca, which supports it natively.
-    if b == "ibkr" and bot_asset_type(user_id, side) == "crypto":
+    if _split_broker(b)[0] == "ibkr" and bot_asset_type(user_id, side) == "crypto":
         try:
             remove_desired(user_id, s, b)
         except Exception:
@@ -868,30 +885,34 @@ def _start_bot_impl(user_id: int, side: str, broker: Optional[str] = None) -> di
     blob = creds.load_credentials(user_id) or {}
     s = side.upper()
     cloud_broker = b
-    if cloud_broker == "ibkr":
-        # V4.6.40 — IBKR cloud: need a synced paper login and a live
-        # server-side IB Gateway BEFORE we spawn the bot, otherwise it
-        # would just fail to connect on every tick.
+    # V4.6.126 — paper and live run as separate instances; validate creds for
+    # the instance's actual base broker + mode (live Alpaca needs LIVE keys; a
+    # live IBKR gateway logs into the live account).
+    base_broker, mode = _split_broker(b)
+    if base_broker == "ibkr":
+        # IBKR cloud: need a synced login and a live server-side IB Gateway
+        # BEFORE we spawn the bot, otherwise it fails to connect every tick.
         if not (blob.get("IBKR_USERNAME") and blob.get("IBKR_PASSWORD")):
             return {"ok": False,
-                    "detail": "No IBKR paper login synced. Open Tools → "
-                              "IBKR, enter your paper username/password and "
+                    "detail": "No IBKR login synced. Open Tools → "
+                              "IBKR, enter your username/password and "
                               "enable 'Run IBKR bots on Oracle', then Sync."}
         try:
             from . import ibkr_gateway as _gw
             _gw.ensure_gateway(
-                user_id, blob["IBKR_USERNAME"], blob["IBKR_PASSWORD"],
-                str(blob.get("IBKR_TRADING_MODE", "paper")).lower())
+                user_id, blob["IBKR_USERNAME"], blob["IBKR_PASSWORD"], mode)
         except Exception as e:
             return {"ok": False, "detail": f"IBKR gateway not ready: {e}"}
     else:
-        if not (blob.get(f"ALPACA_API_KEY_{s}") and
-                blob.get(f"ALPACA_SECRET_KEY_{s}")):
+        ns = "LIVE_" if mode == "live" else ""
+        if not (blob.get(f"ALPACA_API_KEY_{ns}{s}") and
+                blob.get(f"ALPACA_SECRET_KEY_{ns}{s}")):
+            _what = "live " if mode == "live" else ""
             return {"ok": False,
-                    "detail": f"MUST ASSIGN API KEY IN TOOLS. No Alpaca "
-                              f"keys synced for {side}. Open Tools → "
-                              f"ACCOUNT LINKING and Sync your slot keys to "
-                              f"the APEX server."}
+                    "detail": f"MUST ASSIGN API KEY IN TOOLS. No {_what}Alpaca "
+                              f"keys synced for {side}. Open Tools → ALPACA · "
+                              f"API KEYS (in {'LIVE' if mode=='live' else 'paper'} "
+                              f"mode) and Sync your slot keys to the APEX server."}
 
     if not VENV_PYTHON.exists():
         return {"ok": False,

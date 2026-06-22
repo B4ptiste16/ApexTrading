@@ -2034,11 +2034,12 @@ class ApexWindow(QMainWindow):
             box.setWindowTitle("Switch to LIVE trading?")
             box.setText(
                 "<b>LIVE mode places real orders with real money.</b><br><br>"
-                "All running bots will be migrated to the live Alpaca API on "
-                "their next cycle. Make sure your live API keys are configured "
-                "in Tools → ALPACA · API KEYS before switching.<br><br>"
-                "Your PORTFOLIO tab will also switch to your live Alpaca account "
-                "(enter its live keys there if you haven't).<br><br>"
+                "Paper and live are kept SEPARATE — your paper bots keep running "
+                "on paper, and live bots run as their own instances on your live "
+                "account (nothing is migrated). Switching here shows your live "
+                "bot list; start the ones you want trading live.<br><br>"
+                "Make sure your live API keys are in Tools → ALPACA · API KEYS, "
+                "and enter your live keys in the PORTFOLIO tab.<br><br>"
                 "Continue?")
             box.setStandardButtons(
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
@@ -2083,8 +2084,8 @@ class ApexWindow(QMainWindow):
         from PyQt6.QtWidgets import QMessageBox as _Q
         _Q.information(
             self, "Alpaca mode switched",
-            f"Now in {target.upper()} mode. "
-            f"{'Bots already running will pick up the new mode on their next cycle. ' if target == 'paper' else 'Live trading active — bots will trade real money on next start.'}"
+            f"Now showing your {target.upper()} workspace. "
+            f"{'Paper and live keep separate bot lists — your other-mode bots keep running untouched. ' if target == 'live' else 'Your live bots keep running on the live account; this view is back to paper. '}"
             "You can switch back at any time.")
 
     # ── V4.1.0 — manual trading mode toggle ─────────────────
