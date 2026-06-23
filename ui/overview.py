@@ -1018,30 +1018,32 @@ class OverviewTab(QWidget):
                           f"· {_plabel}")
 
         block._cards["PORTFOLIO"].update_value(f"${pv:,.2f}", block_color)
-        if len(bot_hist) < 2:
-            block._cards["DAY P/L"].update_value("$0.00 (0.0%)",
-                                                  C["muted"])
+        # V4.6.130 — DAY P/L uses the broker-authoritative figure from
+        # get_bot_metrics (Alpaca's last_equity; IBKR's ledger day-baseline) — the
+        # SAME value the headline + DAILY RECAP use, so they always agree AND it
+        # doesn't read $0 when this desktop has no local snapshot before the prior
+        # close. The snapshot-derived day_pl is only a fallback. (v4.6.129 made
+        # the snapshot value the source of truth → the $0 regression.)
+        _m = self._last_metrics.get(side) or {}
+        _mday = _m.get("day_pl")
+        if _mday is None:
+            _mday, _mpct = day_pl, day_pct
         else:
-            block._cards["DAY P/L"].update_value(
-                f"{d_arrow} ${abs(day_pl):,.2f} ({day_pct:+.1f}%)",
-                d_color)
+            _mpct = float(_m.get("day_pct") or 0.0)
+        _dc = C["green"] if _mday >= 0 else C["red"]
+        _da = "▲" if _mday >= 0 else "▼"
+        block._cards["DAY P/L"].update_value(
+            f"{_da} ${abs(_mday):,.2f} ({_mpct:+.1f}%)", _dc)
         block._cards["PERIOD P/L"].update_value(period_txt, p_color)
         block._cards["POSITIONS"].update_value(str(len(pos)))
 
-        # V4.6.129 — single source of truth for DAY/PERIOD P/L. The broker
-        # summary, the DAILY RECAP and the sort dropdown all read
-        # self._last_metrics; store the SAME numbers shown on this bot's card so
-        # they can never disagree (the recap used get_bot_metrics' baseline while
-        # the card used the snapshot baseline → different figures on screen).
+        # Keep portfolio/positions fresh for the sort + summary. DAY P/L stays as
+        # get_bot_metrics computed it (line ~763) so the headline, the per-bot
+        # card and the DAILY RECAP all show the same broker-authoritative number.
         try:
             m = self._last_metrics.setdefault(side, {})
-            new_bot = len(bot_hist) < 2
-            m["day_pl"]     = 0.0 if new_bot else day_pl
-            m["day_pct"]    = 0.0 if new_bot else day_pct
-            m["period_pl"]  = 0.0 if new_bot else p_pl
-            m["period_pct"] = 0.0 if new_bot else p_pct
-            m["portfolio"]  = pv
-            m["positions"]  = len(pos)
+            m["portfolio"] = pv
+            m["positions"] = len(pos)
         except Exception:
             pass
 

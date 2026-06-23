@@ -230,6 +230,44 @@ def push_config_to_server() -> None:
         print(f"[config] push desktop-config failed: {e}", flush=True)
 
 
+def push_keys_to_server() -> bool:
+    """V4.6.130 — push the local .env keys (incl. per-bot AI config
+    AI_PROVIDER_<SIDE> / AI_MODEL_<SIDE> / AI_MODE_<SIDE>) to the encrypted
+    /credentials blob, MERGING with what's already there so nothing is wiped.
+    Called after a bot's AI model is changed so the cloud runner uses it on the
+    bot's next start. Returns True on success."""
+    tok, url = _auth()
+    if not tok or not url:
+        return False
+    import requests
+    try:
+        import core.data as D
+        keys = {k: v for k, v in (D.read_env_keys() or {}).items()
+                if isinstance(v, str) and v}
+        try:
+            keys["APEX_ALPACA_MODE"] = D.load_settings().get("alpaca_mode", "paper")
+        except Exception:
+            pass
+    except Exception:
+        return False
+    if not keys:
+        return False
+    hdr = {"Authorization": f"Bearer {tok}"}
+    try:
+        # GET-merge-PUT: /credentials replaces the whole blob, so preserve the
+        # existing fields (IBKR login, other keys) and overlay ours.
+        blob = {}
+        g = requests.get(f"{url}/credentials", headers=hdr, timeout=15)
+        if g.ok and isinstance(g.json(), dict):
+            blob = g.json()
+        blob.update(keys)
+        r = requests.put(f"{url}/credentials", json=blob, headers=hdr, timeout=20)
+        return bool(r.ok)
+    except Exception as e:
+        _log(f"push_keys_to_server failed: {e!r}")
+        return False
+
+
 def clear_local_cache() -> int:
     """Delete this account's disposable local cache (history/charts/logs). Keeps
     .env + apex_settings.json (re-fetchable but cheap, and avoids a re-login).

@@ -178,7 +178,10 @@ class BotTab(QWidget):
         # 3. SIGNAL
         s.add(SectionHeader("LAST AI SIGNAL", self.color))
         s.add(self._build_signal_panel())
-        s.add(self._build_ai_config_panel())
+        # V4.6.130 — only AI bots get the AI MODEL selector. Pure algorithmic /
+        # ML bots don't call an LLM, so a model picker is misleading for them.
+        if self._bot_uses_ai():
+            s.add(self._build_ai_config_panel())
 
         # 4. BOT CONTROLS
         s.add(SectionHeader("BOT CONTROLS", self.color))
@@ -527,6 +530,25 @@ class BotTab(QWidget):
         layout.addWidget(self.sig_time_lbl, 1, 0, 1, 4)
         return frame
 
+    def _bot_uses_ai(self) -> bool:
+        """True if this bot actually calls an LLM at runtime (so the AI MODEL
+        selector is relevant). Detected from the bot's source — built-ins import
+        core.ai_client; pure algorithmic / ML custom bots don't. Cached per tab."""
+        cached = getattr(self, "_uses_ai_cache", None)
+        if cached is not None:
+            return cached
+        uses = True
+        try:
+            from pathlib import Path as _P
+            if self.script and _P(self.script).exists():
+                src = _P(self.script).read_text(encoding="utf-8", errors="replace")
+                uses = ("ai_client" in src or "call_ai" in src
+                        or "load_ai_config" in src or "AI_PROVIDER" in src)
+        except Exception:
+            uses = True            # unknown → keep the selector (safe default)
+        self._uses_ai_cache = uses
+        return uses
+
     def _build_ai_config_panel(self) -> QFrame:
         """Compact AI provider + model + mode selector shown beneath
         LAST AI SIGNAL.  Settings are saved per-bot as AI_PROVIDER_<SIDE>
@@ -629,8 +651,48 @@ class BotTab(QWidget):
         model = self._bot_model_combo.currentText().strip()
         mode  = self._bot_mode_combo.currentData()  or "vision"
         D.set_bot_ai_config(self.side, prov, model, mode)
-        self._ai_cfg_msg.setText("saved ✓  — sync to Oracle for cloud bots")
-        QTimer.singleShot(3000, lambda: self._ai_cfg_msg.setText(""))
+        self._ai_cfg_msg.setText("saving + syncing…")
+        self._ai_cfg_msg.setStyleSheet(f"color:{C['muted']};font-size:10px;")
+
+        # V4.6.130 — auto-push to the server so CLOUD bots actually use the new
+        # provider/model (previously this only wrote .env locally, so cloud bots
+        # kept the default — Claude). The running bot still needs a restart to
+        # pick it up, so tell the user clearly.
+        from PyQt6.QtCore import QThread, pyqtSignal as _Sig
+
+        class _PushWorker(QThread):
+            done = _Sig(bool)
+
+            def run(self):
+                try:
+                    from core import account_store as _AS
+                    self.done.emit(bool(_AS.push_keys_to_server()))
+                except Exception as e:
+                    print(f"[ai-config] push failed: {e}")
+                    self.done.emit(False)
+
+        def _on_done(ok):
+            if ok:
+                self._ai_cfg_msg.setText(
+                    f"✓ saved + synced ({prov}/{model or 'default'}). "
+                    f"RESTART this bot (⏹ then ▶) to trade on the new model.")
+                self._ai_cfg_msg.setStyleSheet(f"color:{C['green']};font-size:10px;")
+            else:
+                self._ai_cfg_msg.setText(
+                    "saved locally — sign in / sync failed, so cloud bots won't "
+                    "use it yet. Use Tools → Sync keys.")
+                self._ai_cfg_msg.setStyleSheet(f"color:{C['orange']};font-size:10px;")
+            QTimer.singleShot(12000, lambda: self._ai_cfg_msg.setText(""))
+
+        w = _PushWorker()
+        w.done.connect(_on_done)
+        w.finished.connect(
+            lambda _w=w: self._ai_workers.remove(_w)
+            if _w in getattr(self, "_ai_workers", []) else None)
+        if not hasattr(self, "_ai_workers"):
+            self._ai_workers = []
+        self._ai_workers.append(w)
+        w.start()
 
     def _period_combo(self) -> NoScrollComboBox:
         self.period_combo = NoScrollComboBox()
