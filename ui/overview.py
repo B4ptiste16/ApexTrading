@@ -1028,6 +1028,23 @@ class OverviewTab(QWidget):
         block._cards["PERIOD P/L"].update_value(period_txt, p_color)
         block._cards["POSITIONS"].update_value(str(len(pos)))
 
+        # V4.6.129 — single source of truth for DAY/PERIOD P/L. The broker
+        # summary, the DAILY RECAP and the sort dropdown all read
+        # self._last_metrics; store the SAME numbers shown on this bot's card so
+        # they can never disagree (the recap used get_bot_metrics' baseline while
+        # the card used the snapshot baseline → different figures on screen).
+        try:
+            m = self._last_metrics.setdefault(side, {})
+            new_bot = len(bot_hist) < 2
+            m["day_pl"]     = 0.0 if new_bot else day_pl
+            m["day_pct"]    = 0.0 if new_bot else day_pct
+            m["period_pl"]  = 0.0 if new_bot else p_pl
+            m["period_pct"] = 0.0 if new_bot else p_pct
+            m["portfolio"]  = pv
+            m["positions"]  = len(pos)
+        except Exception:
+            pass
+
 
 # ─────────────────────────────────────────
 # TOOLS TAB

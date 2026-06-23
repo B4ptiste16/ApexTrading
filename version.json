@@ -1,4 +1,4 @@
 {
-  "version": "4.6.128",
-  "notes": "v4.6.128 — Overview: period P/L, daily recap, IBKR day P/L fixed\n\n📅 New DAILY RECAP at the bottom of Overview: how the market moved today (S&P 500 / Nasdaq / Dow) and how each bot did against it — who beat the market and by how much.\n\n📈 New PERIOD P/L card for the whole portfolio, driven by the period selector at the top of Overview.\n\n🛠 Fixed: IBKR bots showed DAY P/L = $0. Each cloud slice now records a previous-close baseline so the daily figure is real. (Bots pick this up on their next start.)\n\n🎯 The position gauge now always shows every holding instead of dropping ones with no recorded entry price.\n\nUpdate via the in-app banner.\n"
+  "version": "4.6.129",
+  "notes": "v4.6.129 — Daily recap now matches each bot's card\n\n🛠 Fixed the DAILY RECAP numbers: the recap used a different day-P/L baseline than each bot's card, so the figures disagreed. Day P/L is now computed in one place — the recap, the per-bot cards and the headline all show the same number.\n\n🌐 Website (already live): the landing page now has a live S&P 500 / Nasdaq / Dow graph and a BOT TYPES breakdown, and the AI-performance charts now plot each AI model's return over time. The dashboard shows a portfolio curve + each bot's P/L.\n\nUpdate via the in-app banner.\n"
 }

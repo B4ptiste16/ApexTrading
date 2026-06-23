@@ -386,6 +386,14 @@ def landing_page(signed_in_user: dict | None = None) -> HTMLResponse:
     </div>
   </section>
 
+  <!-- V4.6.129 — platform bot-type breakdown (AI / Algorithmic / ML). -->
+  <section style="max-width:920px;margin:24px auto 8px;padding:0 20px;">
+    <h2 style="font-family:'Syne',sans-serif;letter-spacing:3px;
+               font-size:13px;color:var(--muted);text-align:center;
+               margin:0 0 14px;">BOT TYPES</h2>
+    <div id="botTypes" style="max-width:520px;margin:0 auto;min-height:60px;"></div>
+  </section>
+
   <!-- Main download button moved BELOW the AI charts (v4.6.22) -->
   <section style="max-width:920px;margin:0 auto;padding:0 20px;
                   text-align:center;">
@@ -524,8 +532,40 @@ def landing_page(signed_in_user: dict | None = None) -> HTMLResponse:
       el.innerHTML = svg + '<div style="margin-top:4px;">' + legend + '</div>';
     }}
 
+    // V4.6.129 — platform bot-type breakdown as simple sober bars.
+    async function loadBotTypes() {{
+      try {{
+        const r = await fetch('/web/api/bot-types');
+        const j = await r.json();
+        const c = j.counts || {{}};
+        const el = document.getElementById('botTypes');
+        if (!el) return;
+        const items = [['AI (LLM-driven)', c['AI'] || 0, '#3eb8a4'],
+                       ['Algorithmic', c['Algorithmic'] || 0, '#8a93c9'],
+                       ['Machine Learning', c['Machine Learning'] || 0, '#c8a070']];
+        const max = Math.max(1, ...items.map(i => i[1]));
+        let html = '';
+        for (const it of items) {{
+          const w = (it[1] / max * 100).toFixed(0);
+          html += '<div style="margin:10px 0;">'
+            + '<div style="display:flex;justify-content:space-between;'
+            + 'font-size:11px;color:var(--muted);margin-bottom:4px;">'
+            + '<span>' + it[0] + '</span>'
+            + '<span style="color:var(--text);font-weight:700;">' + it[1]
+            + '</span></div>'
+            + '<div style="height:10px;background:rgba(255,255,255,0.05);'
+            + 'border-radius:5px;overflow:hidden;">'
+            + '<div style="height:10px;width:' + w + '%;background:' + it[2]
+            + ';border-radius:5px;"></div></div></div>';
+        }}
+        el.innerHTML = html;
+      }} catch (e) {{ console.error('bot-types fetch failed', e); }}
+    }}
+
     loadMarket();
     setInterval(loadMarket, 600000);     // refresh every 10 min
+    loadBotTypes();
+    setInterval(loadBotTypes, 600000);
     loadAiReturns();
     setInterval(loadAiReturns, 300000);  // refresh every 5 min
   </script>

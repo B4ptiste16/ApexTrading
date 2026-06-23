@@ -1481,13 +1481,40 @@ def web_api_ai_returns():
     if not users_dir.exists():
         return {"creator": {}, "runner": {}}
 
+    # V4.6.129 — readable default model per provider when the user didn't pin one.
+    _PROV_DEFAULT = {"anthropic": "claude-haiku-4-5",
+                     "google": "gemini-2.0-flash", "xai": "grok-2",
+                     "groq": "llama-3.3-70b"}
     for user_dir in users_dir.glob("user_*"):
-        # Walk every *_lifetime.jsonl in this user's tree
-        for ll in user_dir.glob("*_lifetime.jsonl"):
+        # V4.6.129 — resolve this user's synced AI config so BUILT-IN bots
+        # (LONG/SHORT/DAY — no private_bots META) are grouped by the model they
+        # actually run on, instead of 'unknown'.
+        try:
+            _uid = int(str(user_dir.name).split("_")[-1])
+        except Exception:
+            _uid = None
+        _blob = {}
+        if _uid is not None:
+            try:
+                _blob = creds.load_credentials(_uid) or {}
+            except Exception:
+                _blob = {}
+
+        def _model_for(side_slug: str) -> str:
+            s = side_slug.upper()
+            prov = (_blob.get(f"AI_PROVIDER_{s}") or _blob.get("AI_PROVIDER")
+                    or "anthropic").lower()
+            model = (_blob.get(f"AI_MODEL_{s}") or _blob.get("AI_MODEL")
+                     or "").strip()
+            return (model or _PROV_DEFAULT.get(prov, prov)).lower()
+
+        # rglob → catch nested per-broker / per-mode dirs (ibkr/, alpaca-live/),
+        # which is where IBKR + live bots write their lifetime snapshots.
+        for ll in user_dir.rglob("*_lifetime.jsonl"):
             slug = ll.stem.replace("_lifetime", "")
             # Find the bot's META block (creator_ai / runner_ai)
             bot_py = user_dir / "private_bots" / f"{slug.lower()}.py"
-            creator_ai, runner_ai = "unknown", "unknown"
+            creator_ai, runner_ai = "", ""
             if bot_py.exists():
                 try:
                     src = bot_py.read_text(encoding="utf-8",
@@ -1497,14 +1524,19 @@ def web_api_ai_returns():
                     except ImportError:
                         import bot_meta as _bm  # type: ignore
                     meta = _bm.parse_meta(src) or {}
-                    creator_ai = (meta.get("ai_used") or "unknown").lower()
+                    creator_ai = (meta.get("ai_used") or "").lower()
                     runner_ai  = (meta.get("compatible_models") or
                                   [meta.get("ai_used")])
                     runner_ai  = runner_ai[0] if isinstance(runner_ai, list) \
                                  else runner_ai
-                    runner_ai  = (runner_ai or "unknown").lower()
+                    runner_ai  = (runner_ai or "").lower()
                 except Exception:
                     pass
+            # Built-ins / custom bots without META → group by the user's AI model
+            if not creator_ai or creator_ai == "unknown":
+                creator_ai = _model_for(slug)
+            if not runner_ai or runner_ai == "unknown":
+                runner_ai = _model_for(slug)
             # Read snapshots
             try:
                 with open(ll, "r", encoding="utf-8") as f:
@@ -1881,6 +1913,51 @@ def web_api_market():
     data = {"series": out}
     _MARKET_CACHE.update({"ts": _t.time(), "data": data})
     return data
+
+
+@app.get("/web/api/bot-types", include_in_schema=False)
+def web_api_bot_types():
+    """Platform breakdown of bots by kind: AI (LLM-driven), Algorithmic
+    (rules/indicators, no LLM) and Machine Learning. Built-ins LONG/SHORT/DAY
+    are AI; custom bots are classified from their META."""
+    from pathlib import Path as _P
+    import os as _os
+    counts = {"AI": 0, "Algorithmic": 0, "Machine Learning": 0}
+    users_dir = _P(_os.environ.get("APEX_USERS_DIR", "/opt/apex_users"))
+    if not users_dir.exists():
+        return {"counts": counts}
+    try:
+        from . import bot_meta as _bm
+    except ImportError:
+        import bot_meta as _bm  # type: ignore
+    seen = set()
+    for user_dir in users_dir.glob("user_*"):
+        bots = set()
+        for ll in user_dir.rglob("*_lifetime.jsonl"):
+            bots.add(ll.stem.replace("_lifetime", "").lower())
+        for slug in bots:
+            key = (user_dir.name, slug)
+            if key in seen:
+                continue
+            seen.add(key)
+            if slug in ("long", "short", "day"):
+                counts["AI"] += 1
+                continue
+            cat = "Algorithmic"
+            bot_py = user_dir / "private_bots" / f"{slug}.py"
+            if bot_py.exists():
+                try:
+                    meta = _bm.parse_meta(
+                        bot_py.read_text(encoding="utf-8", errors="replace")) or {}
+                    t = str(meta.get("bot_type") or meta.get("type") or "").lower()
+                    if "ml" in t or "machine" in t or "learning" in t:
+                        cat = "Machine Learning"
+                    elif meta.get("ai_used") or meta.get("compatible_models"):
+                        cat = "AI"
+                except Exception:
+                    pass
+            counts[cat] += 1
+    return {"counts": counts}
 
 
 # ──────────────────────────────────────────────────────────────────────────────
