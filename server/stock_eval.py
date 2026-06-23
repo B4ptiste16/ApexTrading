@@ -247,7 +247,7 @@ def _call_anthropic(prompt: str, model: str, key: str) -> str:
     import anthropic
     client = anthropic.Anthropic(api_key=key)
     resp = client.messages.create(
-        model=model, max_tokens=600,
+        model=model, max_tokens=350,
         messages=[{"role": "user", "content": prompt}])
     return "".join(getattr(p, "text", "") for p in resp.content)
 
@@ -258,7 +258,7 @@ def _call_google(prompt: str, model: str, key: str) -> str:
     gm = genai.GenerativeModel(model)
     resp = gm.generate_content(
         prompt,
-        generation_config=genai.types.GenerationConfig(max_output_tokens=600))
+        generation_config=genai.types.GenerationConfig(max_output_tokens=350))
     return resp.text
 
 
@@ -266,7 +266,7 @@ def _call_openai_compat(prompt: str, model: str, key: str, base_url: str) -> str
     from openai import OpenAI
     client = OpenAI(api_key=key, base_url=base_url)
     resp = client.chat.completions.create(
-        model=model, max_tokens=600,
+        model=model, max_tokens=350,
         messages=[{"role": "user", "content": prompt}])
     return resp.choices[0].message.content
 
@@ -340,9 +340,26 @@ def evaluate(symbol: str, snapshot: dict | None = None,
         snap.setdefault("symbol", sym)
         prompt = _build_prompt(snap)
 
+        # V4.6.130 — keep NON-BOT Claude spend down. The stock evaluation is
+        # informational, so by default it uses the FREE / cheap providers
+        # (Groq, Gemini, xAI) and SKIPS Anthropic (paid). Anthropic is only used
+        # when it's the sole key configured. Override the set with
+        # APEX_STOCK_EVAL_PROVIDERS="anthropic,groq" (comma-separated) if you
+        # explicitly want Claude in the panel.
+        override = os.environ.get("APEX_STOCK_EVAL_PROVIDERS", "").strip()
+        if override:
+            use = [p for p in (x.strip().lower() for x in override.split(","))
+                   if p in keys]
+        else:
+            free = [p for p in PROVIDERS if p in keys and p != "anthropic"]
+            use = free if free else [p for p in PROVIDERS if p in keys]
+        if not use:
+            use = [p for p in PROVIDERS if p in keys]
+
         models: list[dict] = []
         errors: list[str] = []
-        for prov, (cred_key, model, label) in PROVIDERS.items():
+        for prov in use:
+            cred_key, model, label = PROVIDERS[prov]
             key = keys.get(prov)
             if not key:
                 continue
