@@ -341,6 +341,19 @@ def landing_page(signed_in_user: dict | None = None) -> HTMLResponse:
        Bring your own Alpaca keys, your own AI keys, your own bots.</p>
   </section>
 
+  <!-- V4.6.129 — live market graph (always has data) so the landing page
+       shows a real chart even before the marketplace fills up. -->
+  <section style="max-width:920px;margin:24px auto 8px;padding:0 20px;">
+    <h2 style="font-family:'Syne',sans-serif;letter-spacing:3px;
+               font-size:13px;color:var(--muted);text-align:center;
+               margin:0 0 14px;">MARKET — LAST 30 DAYS</h2>
+    <div id="marketChart" style="min-height:180px;"></div>
+    <div style="color:var(--muted);font-size:10px;text-align:center;
+                margin-top:8px;">
+      S&amp;P 500 (SPY) · Nasdaq (QQQ) · Dow (DIA), % change over the last month.
+    </div>
+  </section>
+
   <!-- V4.6.22 — AI return charts above the main download button.
        Two SVG line charts: one per role (CREATOR / RUNNER).
        Data from /web/api/ai-returns aggregates marketplace bot
@@ -425,6 +438,23 @@ def landing_page(signed_in_user: dict | None = None) -> HTMLResponse:
       }}
     }}
 
+    // V4.6.129 — live market graph (always populated). Converts the index→%
+    // arrays into the {{name:[{{ts,pct}}]}} shape renderLineChart expects.
+    async function loadMarket() {{
+      try {{
+        const r = await fetch('/web/api/market');
+        const j = await r.json();
+        const series = {{}};
+        const raw = j.series || {{}};
+        Object.keys(raw).forEach(nm => {{
+          series[nm] = (raw[nm] || []).map((v, i) => ({{ ts: i, pct: v }}));
+        }});
+        renderLineChart('marketChart', series);
+      }} catch (e) {{
+        console.error('market fetch failed', e);
+      }}
+    }}
+
     function renderLineChart(targetId, series) {{
       const el = document.getElementById(targetId);
       if (!el) return;
@@ -494,6 +524,8 @@ def landing_page(signed_in_user: dict | None = None) -> HTMLResponse:
       el.innerHTML = svg + '<div style="margin-top:4px;">' + legend + '</div>';
     }}
 
+    loadMarket();
+    setInterval(loadMarket, 600000);     // refresh every 10 min
     loadAiReturns();
     setInterval(loadAiReturns, 300000);  // refresh every 5 min
   </script>

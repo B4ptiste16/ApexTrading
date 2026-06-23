@@ -1852,6 +1852,37 @@ def web_api_portfolio_history(request: Request,
         return {"history": [], "linked": True, "error": str(e)}
 
 
+# V4.6.129 — public market snapshot for the landing page graph (always has data,
+# unlike the marketplace AI-return charts which are empty until users publish).
+_MARKET_CACHE: dict = {"ts": 0.0, "data": None}
+
+
+@app.get("/web/api/market", include_in_schema=False)
+def web_api_market():
+    """S&P 500 / Nasdaq / Dow — last ~30 daily closes as % from the start of the
+    window. Cached 10 min so the landing page never hammers yfinance."""
+    import time as _t
+    if _MARKET_CACHE["data"] and (_t.time() - _MARKET_CACHE["ts"]) < 600:
+        return _MARKET_CACHE["data"]
+    out: dict = {}
+    try:
+        import yfinance as yf
+        for nm, sym in (("S&P 500", "SPY"), ("Nasdaq", "QQQ"), ("Dow", "DIA")):
+            try:
+                h = yf.Ticker(sym).history(period="1mo")
+                closes = [float(c) for c in h["Close"].tolist() if c == c]
+                if len(closes) >= 2 and closes[0]:
+                    base = closes[0]
+                    out[nm] = [round((c / base - 1) * 100, 3) for c in closes]
+            except Exception:
+                pass
+    except Exception as e:
+        print(f"[web_api_market] {e}")
+    data = {"series": out}
+    _MARKET_CACHE.update({"ts": _t.time(), "data": data})
+    return data
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # V3 wave 5 — Credits + admin role hierarchy
 # Role precedence: BOSS_ADMIN > SUB_BOSS_ADMIN > ADMIN > USER
