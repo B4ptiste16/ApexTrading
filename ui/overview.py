@@ -2208,9 +2208,10 @@ class ToolsTab(QWidget):
               "key / secret pairs below (these are different from your paper "
               "keys). ") if _live_mode else
              "Enter up to 3 Alpaca <b>paper</b> API key / secret pairs and ") +
-            "assign each to a built-in bot (LONG / SHORT / DAY). Each "
-            "bot needs its own Alpaca account because Alpaca only "
-            "allows one set of open positions per account. "
+            "assign each to a built-in bot (LONG / SHORT / DAY). "
+            "Give each bot its own account, OR put the SAME key in several "
+            "slots and set an <b>Alloc %</b> on each to split one account into "
+            "sub-portfolios (like IBKR). "
             "Switch Paper / Live via the toggle in the app header.")
         keys_info.setStyleSheet(
             f"color:{C['red'] if _live_mode else C['muted']};font-size:11px;")
@@ -2296,8 +2297,26 @@ class ToolsTab(QWidget):
             fl.addWidget(QLabel("Assigned"), i*3 + 1, 3)
             fl.addWidget(assign,              i*3 + 2, 3)
 
+            # V4.6.127 — optional per-bot allocation %. When the SAME key is put
+            # in several slots, each assigned bot trades only its % slice of the
+            # shared account (a sub-portfolio, like IBKR). Blank = the bot gets a
+            # dedicated account (unchanged behaviour).
+            alloc_pref = (cur.get(f"APEX_ALPACA_ALLOC_{assigned}", "")
+                          if assigned not in ("__none__", "") else "")
+            alloc_ed = QLineEdit(alloc_pref)
+            alloc_ed.setPlaceholderText("e.g. 50")
+            alloc_ed.setFixedWidth(70)
+            alloc_ed.setStyleSheet(key_ed.styleSheet())
+            alloc_ed.setToolTip(
+                "Optional. Percent of the SHARED Alpaca account this bot gets "
+                "when several bots use the SAME key (sub-portfolio, like IBKR). "
+                "Leave blank to give this bot its own dedicated account.")
+            fl.addWidget(QLabel("Alloc %"), i*3 + 1, 4)
+            fl.addWidget(alloc_ed,           i*3 + 2, 4)
+
             self._alpaca_slot_edits.append(
-                {"key": key_ed, "secret": sec_ed, "assign": assign})
+                {"key": key_ed, "secret": sec_ed, "assign": assign,
+                 "alloc": alloc_ed})
 
         # V4.6.24 — remember the side-options template + each combo
         # so refresh_alpaca_slot_assignments() can rebuild contents
@@ -2584,6 +2603,16 @@ class ToolsTab(QWidget):
                 _ns = getattr(self, "_alpaca_key_ns", "")
                 new_writes[f"ALPACA_API_KEY_{_ns}{side}"]    = key_val
                 new_writes[f"ALPACA_SECRET_KEY_{_ns}{side}"] = secret_val
+                # V4.6.127 — per-bot sub-portfolio allocation % (mode-agnostic).
+                _alloc_raw = (slot.get("alloc").text().strip()
+                              if slot.get("alloc") is not None else "")
+                if _alloc_raw:
+                    try:
+                        _p = float(_alloc_raw.rstrip("%"))
+                        if _p > 0:
+                            new_writes[f"APEX_ALPACA_ALLOC_{side}"] = str(_p)
+                    except ValueError:
+                        pass
 
             if missing:
                 self.keys_msg.setText(
@@ -2608,6 +2637,9 @@ class ToolsTab(QWidget):
             to_delete = [f"{p}{_ns}{s}"
                          for s in candidate_sides
                          for p in ("ALPACA_API_KEY_", "ALPACA_SECRET_KEY_")]
+            # V4.6.127 — also clear allocations (mode-agnostic) so removing a %
+            # takes effect; new_writes re-adds the ones still set.
+            to_delete += [f"APEX_ALPACA_ALLOC_{s}" for s in candidate_sides]
             D.delete_env_keys(to_delete)
 
             # 2. Write the new assignments (skips empty — already filtered above)

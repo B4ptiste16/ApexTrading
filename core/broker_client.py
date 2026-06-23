@@ -24,7 +24,7 @@ import os
 import time
 from types import SimpleNamespace
 
-from core.ledger import get_ledger, normalize_symbol
+from core.ledger import get_ledger, normalize_symbol, Ledger, ledger_path
 
 _EPS = 1e-9
 
@@ -43,7 +43,18 @@ def get_broker_client(asset_type: str = "stocks"):
     if broker == "ibkr":
         return _make_ibkr_client(asset_type), "", ""
     key, sec = _resolve_alpaca_keys()
-    return _make_alpaca_client(key, sec), key, sec
+    client = _make_alpaca_client(key, sec)
+    # V4.6.127 — Alpaca sub-portfolios: when this bot was given an allocation %
+    # (APEX_ALPACA_ALLOC), several bots SHARE one Alpaca key, each constrained to
+    # its own ledger slice — the same structure as IBKR. Without an allocation the
+    # raw TradingClient is returned (one account per bot, unchanged behaviour).
+    if (os.environ.get("APEX_ALPACA_ALLOC") or "").strip():
+        try:
+            return _AlpacaShim(client, asset_type), key, sec
+        except Exception as e:
+            print(f"[broker] Alpaca sub-portfolio shim init failed ({e}); "
+                  f"using full account.", flush=True)
+    return client, key, sec
 
 
 def disconnect_broker_client(client) -> None:
@@ -121,6 +132,291 @@ def _make_alpaca_client(key: str = "", sec: str = ""):
     is_paper = (mode != "live")
     print(f"[broker] Alpaca {'PAPER' if is_paper else 'LIVE'}", flush=True)
     return TradingClient(key, sec, paper=is_paper)
+
+
+# ── ALPACA sub-portfolios (V4.6.127) ───────────────────────────────────
+# A ledger-backed wrapper around an Alpaca TradingClient so several bots can
+# SHARE one Alpaca account/key — each seeing and trading ONLY its allocated
+# slice (cash + the shares it bought), exactly like the IBKR sub-portfolio shim.
+# Active only when APEX_ALPACA_ALLOC is set. Alpaca executes market/limit/bracket
+# orders natively, so the shim's only jobs are: cap each order to the slice's
+# cash, place the REAL order on the shared account, and record the fill against
+# the slice's ledger. Reducing exposure (selling a long / covering a short) is
+# never capped so a bot can always exit. Behaviour mirrors _IBKRShim.
+
+def _alpaca_ledger_path() -> "Path | None":
+    from pathlib import Path
+    side = os.environ.get("APEX_BOT_SIDE", "")
+    if not side:
+        return None
+    data_dir = os.environ.get("APEX_DATA_DIR") or "."
+    mode = (os.environ.get("APEX_ALPACA_MODE") or "paper").lower()
+    return ledger_path(side, "alpaca", mode, data_dir)
+
+
+class _AlpacaShim:
+    def __init__(self, client, asset_type: str = "stocks"):
+        self.client = client
+        self.asset_type = asset_type
+        self.account = "ALPACA-SUB"
+        self._path = _alpaca_ledger_path()
+        self.ledger = Ledger.load(self._path) if self._path else None
+        self._seed_checked = self.ledger is not None
+        if self.ledger is not None:
+            print(f"[broker] Alpaca sub-portfolio ledger active for "
+                  f"'{self.ledger.bot_id}' — cash=${self.ledger.cash:.2f}  "
+                  f"holdings={self.ledger.holdings}", flush=True)
+
+    # ── seeding ─────────────────────────────────────────────────────────
+    def _maybe_seed_ledger(self, equity: float):
+        alloc = (os.environ.get("APEX_ALPACA_ALLOC") or "").strip()
+        side  = os.environ.get("APEX_BOT_SIDE", "")
+        if not alloc or not side or equity <= 0 or self._path is None:
+            return None
+        existing = Ledger.load(self._path)
+        if existing is not None:
+            return existing
+        try:
+            pct = float(str(alloc).rstrip("%") or 0)
+        except (TypeError, ValueError):
+            pct = 0.0
+        if pct <= 0:
+            return None
+        grant = max(0.0, pct / 100.0 * float(equity))
+        led = Ledger.create(self._path, bot_id=side, allocated_cash=grant)
+        if led is not None:
+            print(f"[broker] seeded Alpaca sub-portfolio '{side}' = {pct}% "
+                  f"of ${equity:,.0f} -> ${led.cash:,.2f}", flush=True)
+        return led
+
+    # ── account / positions ─────────────────────────────────────────────
+    def get_account(self):
+        if self.ledger is None:
+            a = self.client.get_account()
+            eq = (float(getattr(a, "equity", 0) or 0)
+                  or float(getattr(a, "portfolio_value", 0) or 0))
+            if not self._seed_checked and eq > 0:
+                self._seed_checked = True
+                self.ledger = self._maybe_seed_ledger(eq)
+            if self.ledger is None:
+                return a            # no allocation → full account passthrough
+        return self._slice_account()
+
+    def _slice_account(self):
+        led = self.ledger
+        try:
+            led.backfill_basis_from_fills()
+        except Exception:
+            pass
+        hv = 0.0
+        for sym, qty in led.holdings.items():
+            if abs(qty) <= _EPS:
+                continue
+            hv += qty * self._price(sym)
+        eq = led.cash + hv
+        try:
+            if abs(eq - getattr(led, "last_value", 0.0)) > 0.01:
+                led.last_value = eq
+                led.save()
+        except Exception:
+            pass
+        return SimpleNamespace(
+            id=self.account, portfolio_value=eq, equity=eq, cash=led.cash,
+            buying_power=led.cash, last_equity=eq)
+
+    def get_all_positions(self):
+        if self.ledger is None:
+            return self.client.get_all_positions()
+        try:
+            self.ledger.backfill_basis_from_fills()
+        except Exception:
+            pass
+        ac = "crypto" if self.asset_type == "crypto" else "us_equity"
+        out = []
+        for sym, qty in self.ledger.holdings.items():
+            if abs(qty) <= _EPS:
+                continue
+            nsym = normalize_symbol(sym)
+            px = self._price(sym)
+            entry = float(self.ledger.cost_basis.get(nsym, 0) or 0)
+            mv = qty * px
+            upl = (px - entry) * qty if entry > 0 else 0.0
+            plpc = (upl / (entry * abs(qty))) if (entry > 0 and qty) else 0.0
+            out.append(SimpleNamespace(
+                symbol=sym, qty=qty, market_value=mv, avg_entry_price=entry,
+                unrealized_pl=upl, unrealized_plpc=plpc, current_price=px,
+                side=("short" if qty < 0 else "long"), asset_class=ac))
+        return out
+
+    def get_open_position(self, symbol):
+        for p in self.get_all_positions():
+            if normalize_symbol(p.symbol) == normalize_symbol(symbol):
+                return p
+        raise Exception(f"position does not exist for {symbol}")
+
+    # ── pass-throughs (shared account) ──────────────────────────────────
+    def get_orders(self, filter=None):
+        try:
+            return (self.client.get_orders(filter=filter)
+                    if filter is not None else self.client.get_orders())
+        except Exception:
+            return []
+
+    def get_clock(self):
+        return self.client.get_clock()
+
+    def cancel_order_by_id(self, order_id):
+        try:
+            return self.client.cancel_order_by_id(order_id)
+        except Exception:
+            return None
+
+    def close_position(self, symbol: str):
+        if self.ledger is None:
+            return self.client.close_position(symbol)
+        held = self.ledger.holding(normalize_symbol(symbol))
+        if abs(held) <= _EPS:
+            return None
+        from alpaca.trading.requests import MarketOrderRequest
+        from alpaca.trading.enums import OrderSide, TimeInForce
+        side = OrderSide.SELL if held > 0 else OrderSide.BUY
+        req = MarketOrderRequest(symbol=symbol.upper(), qty=abs(held),
+                                 side=side, time_in_force=TimeInForce.DAY)
+        return self.submit_order(order_data=req)
+
+    # ── orders ──────────────────────────────────────────────────────────
+    def submit_order(self, order_data=None, req=None):
+        req = order_data if order_data is not None else req
+        if req is None:
+            raise ValueError("submit_order: no order request provided")
+        if self.ledger is None:
+            return self.client.submit_order(order_data=req)
+        side_str = str(getattr(req, "side", "")).split(".")[-1].upper()
+        if side_str not in ("BUY", "SELL"):
+            raise ValueError(f"Unsupported order side: {req.side}")
+        sym = normalize_symbol(req.symbol)
+        qty = float(getattr(req, "qty", 0) or 0)
+        notional = float(getattr(req, "notional", 0) or 0)
+        price = self._price(sym)
+        if notional > 0 and qty <= 0:
+            if price <= 0:
+                raise RuntimeError(f"could not price {sym} for notional order")
+            qty = notional / price
+        if price <= 0:
+            price = self._price(sym)
+        if price <= 0:
+            raise RuntimeError(f"could not price {sym} to size against ledger")
+        qty = self._round_qty(self._enforce(side_str, sym, qty, price))
+        if qty <= _EPS:
+            raise RuntimeError(
+                f"sub-portfolio can't {side_str} {sym}: "
+                f"cash=${self.ledger.cash:.2f} held={self.ledger.holding(sym)}")
+        # Place the REAL order on the shared account with the capped qty.
+        try:
+            req = req.model_copy(update={"qty": qty, "notional": None})
+        except Exception:
+            try:
+                req.qty = qty
+                try:
+                    req.notional = None
+                except Exception:
+                    pass
+            except Exception:
+                pass
+        order = self.client.submit_order(order_data=req)
+        self._settle(order, sym, side_str, qty, price)
+        return order
+
+    # ── ledger enforcement / settlement (mirrors _IBKRShim) ─────────────
+    def _enforce(self, side: str, sym: str, qty: float, price: float) -> float:
+        led = self.ledger
+        held = led.holding(sym)
+        if side == "BUY":
+            if held < -_EPS:
+                cover = min(qty, -held)
+                long_extra = qty - cover
+                if long_extra > _EPS and not led.can_buy(long_extra * price):
+                    long_extra = min(long_extra, led.affordable_qty(price))
+                return cover + long_extra
+            if not led.can_buy(qty * price):
+                return min(qty, led.affordable_qty(price))
+            return qty
+        long_part = min(qty, max(held, 0.0))
+        short_part = qty - long_part
+        if short_part > _EPS:
+            already_short = max(0.0, -held)
+            room = max(0.0, led.affordable_qty(price) - already_short)
+            short_part = min(short_part, room)
+        return long_part + short_part
+
+    def _settle(self, order, sym: str, side: str,
+                req_qty: float, est_price: float) -> None:
+        if self.ledger is None:
+            return
+        status = str(getattr(order, "status", "") or "").split(".")[-1].lower()
+        if status in ("canceled", "cancelled", "rejected", "expired", "suspended"):
+            print(f"  [ledger] {side} {sym} NOT recorded — order {status}",
+                  flush=True)
+            return
+        filled = 0.0
+        avg = 0.0
+        try:
+            filled = float(getattr(order, "filled_qty", 0) or 0)
+        except Exception:
+            filled = 0.0
+        try:
+            avg = float(getattr(order, "filled_avg_price", 0) or 0)
+        except Exception:
+            avg = 0.0
+        if filled <= _EPS:
+            filled = req_qty            # accepted/pending — assume market fill
+        px = avg if avg > 0 else est_price
+        if px <= 0:
+            px = self._price(sym)
+        if side == "BUY":
+            self.ledger.record_buy(sym, filled, px)
+        else:
+            self.ledger.record_sell(sym, filled, px)
+        print(f"  [ledger] {side} {sym} {filled:g} @ ${px:.4f} -> "
+              f"cash=${self.ledger.cash:.2f} held={self.ledger.holding(sym):g}",
+              flush=True)
+        self._record_fill(sym, side, filled, px)
+
+    def _record_fill(self, sym: str, side: str, qty: float, px: float) -> None:
+        if self.ledger is None:
+            return
+        try:
+            import json as _json
+            from datetime import datetime as _dt, timezone as _tz
+            f = self.ledger.path.with_name(self.ledger.path.stem + ".fills.jsonl")
+            with open(f, "a", encoding="utf-8") as fh:
+                fh.write(_json.dumps({
+                    "ts":     _dt.now(_tz.utc).isoformat(timespec="seconds"),
+                    "symbol": sym, "side": side,
+                    "qty":    round(float(qty), 6),
+                    "price":  round(float(px), 6),
+                }) + "\n")
+        except Exception as e:
+            print(f"  [fills] write failed: {e}", flush=True)
+
+    def _round_qty(self, qty: float) -> float:
+        if self.asset_type == "crypto":
+            return max(0.0, float(qty))
+        return float(math.floor(max(0.0, qty)))
+
+    def _price(self, symbol: str) -> float:
+        sym = normalize_symbol(symbol)
+        try:
+            import yfinance as yf
+            yf_sym = (sym + "-USD") if self.asset_type == "crypto" else sym
+            h = yf.Ticker(yf_sym).history(period="1d")
+            if not h.empty:
+                v = float(h["Close"].iloc[-1])
+                if v == v and v > 0:
+                    return v
+        except Exception:
+            pass
+        return 0.0
 
 
 # ── IBKR (ib_async) ────────────────────────────────────────────────────

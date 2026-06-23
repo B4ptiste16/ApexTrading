@@ -777,6 +777,18 @@ def _build_env(user_id: int, side: str,
             env[f"APEX_MIN_POSITIONS_{s}"] = str(int(float(mp)))
         except (TypeError, ValueError):
             pass
+    # V4.6.127 — Alpaca sub-portfolios: when this bot has an allocation %, it
+    # shares one Alpaca key with other bots and trades only its ledger slice
+    # (broker_client wraps it in _AlpacaShim). Only for Alpaca; IBKR uses
+    # APEX_IBKR_ALLOC above.
+    if base_broker == "alpaca":
+        _aa = blob.get(f"APEX_ALPACA_ALLOC_{s}")
+        if _aa not in (None, ""):
+            try:
+                if float(str(_aa).rstrip("%")) > 0:
+                    env["APEX_ALPACA_ALLOC"] = str(_aa)
+            except (TypeError, ValueError):
+                pass
     return env
 
 

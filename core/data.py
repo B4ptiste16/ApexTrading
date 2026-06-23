@@ -1384,7 +1384,8 @@ def read_env_keys() -> dict:
                         or k.startswith("ALPACA_SECRET_KEY_")
                         or k.startswith("AI_PROVIDER_")
                         or k.startswith("AI_MODEL_")
-                        or k.startswith("AI_MODE_")):
+                        or k.startswith("AI_MODE_")
+                        or k.startswith("APEX_ALPACA_ALLOC_")):
                     out[k] = v
     except Exception:
         pass
@@ -1468,7 +1469,8 @@ def write_env_keys(values: dict) -> None:
                 or k.startswith("ALPACA_SECRET_KEY_")
                 or k.startswith("AI_PROVIDER_")
                 or k.startswith("AI_MODEL_")
-                or k.startswith("AI_MODE_"))
+                or k.startswith("AI_MODE_")
+                or k.startswith("APEX_ALPACA_ALLOC_"))
     vals = {k: str(v).strip() for k, v in values.items()
             if _allow(k) and str(v).strip()}
     if not vals:
