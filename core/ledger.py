@@ -113,6 +113,33 @@ class Ledger:
             for k, v in (data.get("cost_basis") or {}).items()
             if _is_num(v)
         }
+        # V4.6.128 — daily P/L baseline: the slice's value as of the previous
+        # trading day's close, captured at the first pricing of each new day.
+        # Display-only (never touches cash/holdings) — lets the desktop show a
+        # real DAY P/L for cloud bots, which otherwise reported last_equity ==
+        # equity (so DAY P/L was always 0).
+        self.day_baseline = float(data.get("day_baseline", 0.0) or 0.0)
+        self.day_baseline_date = str(data.get("day_baseline_date", "") or "")
+
+    def roll_day_baseline(self, current_value: float,
+                          today: Optional[str] = None) -> float:
+        """On the first call of a new (US/Eastern) trading day, snapshot the
+        slice's PRIOR value (yesterday's last_value) as the day's baseline.
+        Returns the current baseline. Persists only the two baseline fields."""
+        try:
+            if today is None:
+                from datetime import timedelta
+                now = datetime.now(timezone.utc)
+                off = -4 if 3 <= now.month <= 11 else -5
+                today = (now + timedelta(hours=off)).date().isoformat()
+            if self.day_baseline_date != today:
+                prior = float(self.last_value or 0.0)
+                self.day_baseline = prior if prior > 0 else float(current_value or 0.0)
+                self.day_baseline_date = today
+                self.save()
+        except Exception as e:
+            print(f"  [ledger] roll_day_baseline failed: {e}", flush=True)
+        return self.day_baseline
 
     # ── persistence ─────────────────────────────────────────────────
 
@@ -162,6 +189,8 @@ class Ledger:
                 "last_value": self.last_value,
                 "marks": self.marks,
                 "cost_basis": self.cost_basis,
+                "day_baseline": self.day_baseline,
+                "day_baseline_date": self.day_baseline_date,
             }, indent=2), encoding="utf-8")
         except Exception as e:
             print(f"  [ledger] save failed: {e}", flush=True)

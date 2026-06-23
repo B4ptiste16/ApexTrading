@@ -161,7 +161,142 @@ class OverviewTab(QWidget):
         cw.setLayout(cost_grid)
         s.add(cw)
 
+        # ── Daily recap (end-of-day market + bots-vs-market) ──
+        s.add(self._build_daily_recap())
+
         s.add_stretch()
+
+    def _build_daily_recap(self) -> QWidget:
+        """V4.6.128 — an end-of-day recap: how the market moved today and how
+        each bot did against it. Refreshed on the normal overview cycle; the
+        market figures come from a throttled yfinance fetch."""
+        wrap = QWidget()
+        v = QVBoxLayout(wrap)
+        v.setContentsMargins(0, 0, 0, 0)
+        v.setSpacing(0)
+        v.addWidget(SectionHeader("DAILY RECAP", C["purple"]))
+        frame = QFrame()
+        frame.setStyleSheet(f"background:{C['panel']};border:none;border-radius:10px;")
+        fv = QVBoxLayout(frame)
+        fv.setContentsMargins(20, 16, 20, 16)
+        fv.setSpacing(10)
+        self._recap_market = QLabel("Loading market…")
+        self._recap_market.setStyleSheet(
+            f"color:{C['text']};font-size:13px;font-weight:700;")
+        self._recap_market.setWordWrap(True)
+        fv.addWidget(self._recap_market)
+        self._recap_bots = QLabel("")
+        self._recap_bots.setStyleSheet(
+            f"color:{C['text']};font-size:12px;line-height:1.8;")
+        self._recap_bots.setWordWrap(True)
+        self._recap_bots.setTextFormat(Qt.TextFormat.RichText)
+        fv.addWidget(self._recap_bots)
+        self._recap_verdict = QLabel("")
+        self._recap_verdict.setStyleSheet(
+            f"color:{C['muted']};font-size:11px;font-style:italic;")
+        self._recap_verdict.setWordWrap(True)
+        fv.addWidget(self._recap_verdict)
+        v.addWidget(frame)
+        return wrap
+
+    def _refresh_daily_recap(self):
+        """Fetch market index moves (throttled ~5 min) then rebuild the recap
+        text from the cached market data + current per-bot day metrics."""
+        import time as _t
+        mkt = getattr(self, "_recap_market_data", None)
+        if (mkt is None
+                or (_t.time() - getattr(self, "_recap_market_ts", 0)) > 300):
+            from PyQt6.QtCore import QThread, pyqtSignal as _Sig
+
+            class _MktWorker(QThread):
+                done = _Sig(dict)
+
+                def run(self):
+                    out = {}
+                    try:
+                        import yfinance as yf
+                        for nm, sym in (("S&P 500", "SPY"), ("Nasdaq", "QQQ"),
+                                        ("Dow", "DIA")):
+                            try:
+                                h = yf.Ticker(sym).history(period="2d")
+                                if len(h) >= 2:
+                                    pv = float(h["Close"].iloc[-2])
+                                    lv = float(h["Close"].iloc[-1])
+                                    out[nm] = ((lv - pv) / pv * 100) if pv else 0.0
+                            except Exception:
+                                pass
+                    except Exception:
+                        pass
+                    self.done.emit(out)
+
+            w = _MktWorker()
+            self._recap_market_ts = _t.time()
+            w.done.connect(self._on_recap_market)
+            w.finished.connect(
+                lambda _w=w: self._recap_workers.remove(_w)
+                if _w in getattr(self, "_recap_workers", []) else None)
+            if not hasattr(self, "_recap_workers"):
+                self._recap_workers = []
+            self._recap_workers.append(w)
+            w.start()
+        else:
+            self._render_recap(mkt)
+
+    def _on_recap_market(self, mkt: dict):
+        self._recap_market_data = mkt
+        self._render_recap(mkt)
+
+    def _render_recap(self, mkt: dict):
+        try:
+            if mkt:
+                parts = []
+                for nm in ("S&P 500", "Nasdaq", "Dow"):
+                    if nm in mkt:
+                        v = mkt[nm]
+                        col = C["green"] if v >= 0 else C["red"]
+                        parts.append(
+                            f"{nm} <span style='color:{col}'>{v:+.2f}%</span>")
+                self._recap_market.setText(
+                    "📊  Market today:&nbsp;&nbsp;" + " &nbsp;·&nbsp; ".join(parts)
+                    if parts else "Market data unavailable right now.")
+                self._recap_market.setTextFormat(Qt.TextFormat.RichText)
+            spy = mkt.get("S&P 500") if mkt else None
+
+            lines = []
+            for meta in self._displayable_bots():
+                side = meta["side"]
+                m = self._last_metrics.get(side) or {}
+                dp = float(m.get("day_pl", 0) or 0)
+                dpc = float(m.get("day_pct", 0) or 0)
+                col = C["green"] if dp >= 0 else C["red"]
+                vs = ""
+                if spy is not None:
+                    diff = dpc - spy
+                    vcol = C["green"] if diff >= 0 else C["red"]
+                    word = "beat" if diff >= 0 else "lagged"
+                    vs = (f" &nbsp;—&nbsp; <span style='color:{vcol}'>{word} "
+                          f"the market by {abs(diff):.2f} pts</span>")
+                lines.append(
+                    f"<b>{side}</b>: <span style='color:{col}'>"
+                    f"{'+' if dp>=0 else ''}${dp:,.0f} ({dpc:+.2f}%)</span>{vs}")
+            self._recap_bots.setText("<br>".join(lines) if lines
+                                     else "No active bots today.")
+
+            # Verdict
+            if spy is not None and self._last_metrics:
+                dpcts = [float((self._last_metrics.get(b["side"]) or {})
+                               .get("day_pct", 0) or 0)
+                         for b in self._displayable_bots()]
+                dpcts = [x for x in dpcts if x is not None]
+                if dpcts:
+                    avg = sum(dpcts) / len(dpcts)
+                    beat = sum(1 for x in dpcts if x >= spy)
+                    self._recap_verdict.setText(
+                        f"Your bots averaged {avg:+.2f}% vs the S&P's {spy:+.2f}% "
+                        f"— {beat}/{len(dpcts)} beat the market today. "
+                        f"Not financial advice.")
+        except Exception as e:
+            print(f"[overview] recap render: {e}")
 
     # ── Active-bot block management (V7.1.2) ────────────────
 
@@ -481,7 +616,8 @@ class OverviewTab(QWidget):
         self._broker_cards = {}
         # V4.6.111 — "FULL ACCOUNT" shows the whole IBKR account NetLiquidation
         # (bots + unallocated cash); "BOTS VALUE" is the sum of the bot slices.
-        for lbl in ("FULL ACCOUNT", "BOTS VALUE", "DAY P/L", "TOTAL P/L", "POSITIONS"):
+        for lbl in ("FULL ACCOUNT", "BOTS VALUE", "DAY P/L", "PERIOD P/L",
+                    "TOTAL P/L", "POSITIONS"):
             card = MetricCard(lbl, "—", C["text"])
             card.setFixedHeight(74)
             self._broker_cards[lbl] = card
@@ -490,6 +626,25 @@ class OverviewTab(QWidget):
         self._broker_cards["TOTAL VALUE"] = self._broker_cards["BOTS VALUE"]
         outer.addLayout(cards_row)
         return frame
+
+    def _portfolio_period_pl(self, period: str):
+        """V4.6.128 — whole-portfolio P/L over the selected period, from the
+        combined equity history (sum of every active bot). Returns (pl, pct) or
+        (None, 0.0) when there isn't enough history yet."""
+        try:
+            df = D.get_combined_history(period)
+        except Exception:
+            df = None
+        if df is None or getattr(df, "empty", True) or len(df) < 2:
+            return (None, 0.0)
+        try:
+            eq = df["equity"]
+            first = float(eq.iloc[0]); last = float(eq.iloc[-1])
+            pl = last - first
+            pct = (pl / first * 100.0) if first else 0.0
+            return (pl, pct)
+        except Exception:
+            return (None, 0.0)
 
     def _refresh_broker_summary(self):
         """Aggregate self._last_metrics across every displayed bot and update
@@ -570,6 +725,24 @@ class OverviewTab(QWidget):
             self._broker_cards["DAY P/L"].update_value(
                 f"{'+' if day_pl>=0 else ''}${day_pl:,.0f} ({day_pct:+.1f}%)", dcol)
             self._broker_cards["POSITIONS"].update_value(str(positions), C["text"])
+
+            # V4.6.128 — PERIOD P/L: whole-portfolio change over the selected
+            # period (the period selector at the top). Deposit-adjusted via the
+            # combined history's profit_loss when present, else equity delta.
+            pcard = self._broker_cards.get("PERIOD P/L")
+            if pcard is not None:
+                try:
+                    period = self._current_period()
+                    pl_p, pct_p = self._portfolio_period_pl(period)
+                    if pl_p is None:
+                        pcard.update_value("—", C["muted"], sub=period)
+                    else:
+                        pcol = C["green"] if pl_p >= 0 else C["red"]
+                        pcard.update_value(
+                            f"{'+' if pl_p>=0 else ''}${pl_p:,.0f} ({pct_p:+.1f}%)",
+                            pcol, sub=period)
+                except Exception as _e:
+                    print(f"[overview] period P/L: {_e}")
         except Exception as e:
             print(f"[overview] broker summary: {e}")
 
@@ -608,6 +781,11 @@ class OverviewTab(QWidget):
                 self._refresh_broker_summary()
             except Exception as e:
                 print(f"[overview] broker summary: {e}")
+            # V4.6.128 — end-of-day recap (market + bots-vs-market)
+            try:
+                self._refresh_daily_recap()
+            except Exception as e:
+                print(f"[overview] daily recap: {e}")
         finally:
             self.setUpdatesEnabled(True)
 

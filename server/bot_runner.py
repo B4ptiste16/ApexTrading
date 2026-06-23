@@ -349,6 +349,9 @@ def list_ibkr_ledgers(user_id: int) -> list[dict]:
                 "holdings":   holdings,
                 "marks":      j.get("marks", {}),     # V4.6.61 — per-holding exact marks
                 "cost_basis": cost_basis,             # V4.6.108 — per-slice avg entry
+                # V4.6.128 — previous-day-close baseline so the desktop can show
+                # a real DAY P/L (= value - day_baseline) for cloud IBKR bots.
+                "day_baseline": float(j.get("day_baseline", 0.0) or 0.0),
                 "file":       f.stem,
             })
         except Exception:

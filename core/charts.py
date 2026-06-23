@@ -666,10 +666,24 @@ def position_gauge(positions: list, side: str,
         # silently, leaving a stale "No open positions" while OTHER charts on
         # the page rendered fine. Fall back to the current price (position
         # shown at break-even) so the gauge always renders.
+        # V4.6.128 — NEVER drop a position from the gauge. If neither price is
+        # available yet, fall back to the position's market value / qty, then to
+        # a nominal 1.0 so the row still appears (at break-even) instead of the
+        # ticker silently vanishing from the gauge ("stuck"/missing positions).
         if entry <= 0:
             entry = current
         if entry <= 0:
-            continue  # no usable price at all — can't place this row
+            try:
+                _mv  = abs(float(p.get("market_value", 0) or 0))
+                _qty = abs(float(p.get("qty", 0) or 0))
+                if _mv > 0 and _qty > 0:
+                    entry = current = _mv / _qty
+            except Exception:
+                pass
+        if entry <= 0:
+            entry = current = 1.0      # last resort — show row at break-even
+        if current <= 0:
+            current = entry            # missing live price → sit at entry (0%)
         unr     = float(p.get("unrealized_pl", 0) or 0)
         unr_pct = float(p.get("unrealized_plpc", 0) or 0) * 100
 

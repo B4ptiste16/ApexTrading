@@ -214,6 +214,7 @@ class _AlpacaShim:
                 continue
             hv += qty * self._price(sym)
         eq = led.cash + hv
+        baseline = led.roll_day_baseline(eq)   # before last_value update
         try:
             if abs(eq - getattr(led, "last_value", 0.0)) > 0.01:
                 led.last_value = eq
@@ -222,7 +223,8 @@ class _AlpacaShim:
             pass
         return SimpleNamespace(
             id=self.account, portfolio_value=eq, equity=eq, cash=led.cash,
-            buying_power=led.cash, last_equity=eq)
+            buying_power=led.cash,
+            last_equity=(baseline if baseline > 0 else eq))
 
     def get_all_positions(self):
         if self.ledger is None:
@@ -681,6 +683,7 @@ class _IBKRShim:
                 "upl":       round((px - avg) * qty, 2),
             }
         eq = led.cash + holdings_val
+        baseline = led.roll_day_baseline(eq)   # before last_value update
         # V4.6.51/61 — snapshot the live slice value + per-holding marks so the
         # desktop can show a performance-tracking allocation % AND exact P/L.
         try:
@@ -705,7 +708,7 @@ class _IBKRShim:
             id=self.account,         # V4.6.53 — bots read account.id
             portfolio_value=eq, equity=eq, cash=led.cash,
             buying_power=led.cash,   # a slice can only spend its own cash
-            last_equity=eq,
+            last_equity=(baseline if baseline > 0 else eq),
         )
 
     def _account_netliq(self) -> float:

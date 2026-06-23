@@ -392,13 +392,17 @@ def _build_cloud_data(mode: str) -> dict:
         equity = float(led.get("value", 0.0) or 0.0)
         if equity <= 0:
             equity = cash + held_val
+        # V4.6.128 — DAY P/L = equity − previous-close baseline. The bot records
+        # day_baseline (yesterday's slice value) in its ledger; without it
+        # last_equity == equity so DAY P/L always read 0 for cloud IBKR bots.
+        day_base = float(led.get("day_baseline", 0.0) or 0.0)
         out[bid] = {
             "account": {
                 "portfolio_value": equity,
                 "equity":          equity,
                 "cash":            cash,
                 "buying_power":    cash,
-                "last_equity":     equity,
+                "last_equity":     day_base if day_base > 0 else equity,
                 # V4.6.120 — capital allocated to this slice. The desktop records
                 # it in snapshots so a re-allocation (deposit/withdrawal of the
                 # slice's capital) can be excluded from P/L.
