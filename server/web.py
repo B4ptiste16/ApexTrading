@@ -614,6 +614,9 @@ def dashboard_page(user: dict, tab: str = "overview") -> HTMLResponse:
     # because Python 3.11 rejects backslash escapes inside f-string
     # {...} expressions.
     overview_html = (
+        '<div class="card"><h2>PORTFOLIO VALUE</h2>'
+        '<div id="pvchart"><span style="color:var(--muted);font-size:11px;">'
+        'Loading…</span></div></div>'
         '<div class="card"><h2>BOTS SNAPSHOT</h2>'
         '<div id="botsmini"></div></div>'
         '<div class="card"><h2>QUICK ACTIONS</h2>'
@@ -899,6 +902,9 @@ def dashboard_page(user: dict, tab: str = "overview") -> HTMLResponse:
         const running = s.running === true;
         const silenced = s.silenced === true;
         const dotCls = running ? "dot run" : "dot stop";
+        const plCol = (s.today_pl == null) ? "var(--muted)"
+                      : (s.today_pl >= 0 ? "var(--green)" : "var(--red)");
+        const pos = (s.positions == null) ? "—" : s.positions;
         c.insertAdjacentHTML("beforeend", `
           <div class="stat${{silenced ? ' silenced' : ''}}">
             <span class="k">
@@ -906,12 +912,75 @@ def dashboard_page(user: dict, tab: str = "overview") -> HTMLResponse:
                 margin-right:8px;"></span>${{side}}${{silenced ? ' <span class="badge-sil">SILENCED</span>' : ''}}
             </span>
             <span class="v">${{fmt$(s.equity)}}
-              <span style="font-size:10px;color:var(--muted);">
-                · ${{fmtPct(s.today_pct)}}
-              </span>
+              <span style="font-size:10px;color:${{plCol}};">
+                ${{fmt$(s.today_pl)}} (${{fmtPct(s.today_pct)}})</span>
+              <span style="font-size:10px;color:var(--muted);"> · ${{pos}} pos</span>
             </span>
           </div>`);
       }}
+    }}
+
+    // V4.6.129 — combined portfolio-value curve on the overview (sober inline
+    // SVG, no chart lib). Sums each bot's equity history aligned from the end.
+    async function renderPortfolioChart() {{
+      const el = document.getElementById("pvchart");
+      if (!el) return;
+      let per = "1M";
+      const sel = document.getElementById("periodSel");
+      if (sel && sel.value) per = (sel.value === "1D") ? "1W" : sel.value;
+      let lists = [];
+      try {{
+        for (const side of SIDES) {{
+          const r = await fetch(
+            `/web/api/portfolio/history?side=${{side}}&period=${{per}}`);
+          if (!r.ok) continue;
+          const j = await r.json();
+          if (j.history && j.history.length > 1)
+            lists.push(j.history.map(h => h.equity));
+        }}
+      }} catch (e) {{
+        el.innerHTML = '<span style="color:var(--red);font-size:11px;">'
+                     + 'Could not load history.</span>';
+        return;
+      }}
+      if (!lists.length) {{
+        el.innerHTML = '<span style="color:var(--muted);font-size:11px;">'
+          + 'No equity history yet — once your bots run, the curve fills in.'
+          + '</span>';
+        return;
+      }}
+      const n = Math.min(...lists.map(a => a.length));
+      let series = [];
+      for (let i = 0; i < n; i++) {{
+        let sum = 0;
+        for (const a of lists) sum += (a[a.length - n + i] || 0);
+        series.push(sum);
+      }}
+      if (series.length < 2) {{
+        el.innerHTML = '<span style="color:var(--muted);font-size:11px;">'
+                     + 'Not enough history yet.</span>';
+        return;
+      }}
+      const W = 600, H = 170, P = 10;
+      const mn = Math.min(...series), mx = Math.max(...series);
+      const rng = (mx - mn) || 1;
+      const pts = series.map((v, i) => {{
+        const x = P + (i / (series.length - 1)) * (W - 2 * P);
+        const y = H - P - ((v - mn) / rng) * (H - 2 * P);
+        return x.toFixed(1) + "," + y.toFixed(1);
+      }}).join(" ");
+      const first = series[0], last = series[series.length - 1];
+      const up = last >= first;
+      const col = up ? "var(--green)" : "var(--red)";
+      const pl = last - first, pct = first ? (pl / first * 100) : 0;
+      el.innerHTML =
+        `<div style="font-size:13px;margin-bottom:6px;">${{fmt$(last)}}`
+        + ` <span style="color:${{col}};font-size:11px;">${{fmt$(pl)}}`
+        + ` (${{pct >= 0 ? '+' : ''}}${{pct.toFixed(2)}}%) · ${{per}}</span></div>`
+        + `<svg viewBox="0 0 ${{W}} ${{H}}" preserveAspectRatio="none" `
+        + `style="width:100%;height:170px;">`
+        + `<polyline fill="none" stroke="${{col}}" stroke-width="2" `
+        + `points="${{pts}}"/></svg>`;
     }}
 
     function computeTotals(state) {{
@@ -939,6 +1008,7 @@ def dashboard_page(user: dict, tab: str = "overview") -> HTMLResponse:
       const lbl = document.getElementById("periodLabel");
       const map = {{"1D":"TODAY","1W":"THIS WEEK","1M":"THIS MONTH"}};
       lbl.textContent = map[sel.value] || "TODAY";
+      renderPortfolioChart();
       if (sel.value === "1D") {{
         // Use cached today data
         if (_lastState) {{
@@ -1089,6 +1159,7 @@ def dashboard_page(user: dict, tab: str = "overview") -> HTMLResponse:
         }}
         renderBots(j);
         renderBotsMini(j);
+        renderPortfolioChart();
         const rc = document.getElementById("runcount");
         if (rc) {{
           const n = j.running_count || 0;

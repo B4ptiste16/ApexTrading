@@ -1220,8 +1220,14 @@ def _bot_state(user_id: int, side: str, broker: str = "alpaca") -> dict:
                     h = led.get("holdings", {}) or {}
                     npos = len([1 for v in h.values()
                                 if abs(float(v or 0)) > 1e-9])
-                    return {"equity": led.get("value"), "today_pl": None,
-                            "today_pct": None, "positions": npos,
+                    # V4.6.129 — real DAY P/L from the slice's previous-close
+                    # baseline (was always None, so the site showed no IBKR P/L).
+                    val  = float(led.get("value", 0) or 0)
+                    base = float(led.get("day_baseline", 0) or 0)
+                    tpl  = (val - base) if base > 0 else None
+                    tpct = ((val - base) / base * 100) if base > 0 else None
+                    return {"equity": led.get("value"), "today_pl": tpl,
+                            "today_pct": tpct, "positions": npos,
                             "running": running, "broker": "ibkr"}
         except Exception:
             pass
