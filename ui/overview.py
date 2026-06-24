@@ -196,6 +196,33 @@ class OverviewTab(QWidget):
             f"color:{C['muted']};font-size:11px;font-style:italic;")
         self._recap_verdict.setWordWrap(True)
         fv.addWidget(self._recap_verdict)
+
+        # V4.6.131 — "See more" expands a chart of every bot's return over time
+        # vs the market.
+        self._recap_more_btn = QPushButton("See more  ▾")
+        self._recap_more_btn.setObjectName("toolBtn")
+        self._recap_more_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._recap_more_btn.clicked.connect(self._toggle_recap_chart)
+        more_row = QHBoxLayout()
+        more_row.addWidget(self._recap_more_btn)
+        more_row.addStretch()
+        mrw = QWidget(); mrw.setLayout(more_row)
+        fv.addWidget(mrw)
+
+        self._recap_chart_box = QWidget()
+        rcb = QVBoxLayout(self._recap_chart_box)
+        rcb.setContentsMargins(0, 6, 0, 0)
+        rcb.setSpacing(4)
+        cap = QLabel("Cumulative return of each bot vs the market (S&P 500), "
+                     "over the selected period.")
+        cap.setStyleSheet(f"color:{C['muted']};font-size:10px;")
+        cap.setWordWrap(True)
+        rcb.addWidget(cap)
+        self._recap_chart = ChartView(height=340)
+        rcb.addWidget(self._recap_chart)
+        self._recap_chart_box.setVisible(False)
+        fv.addWidget(self._recap_chart_box)
+
         v.addWidget(frame)
         return wrap
 
@@ -297,6 +324,79 @@ class OverviewTab(QWidget):
                         f"Not financial advice.")
         except Exception as e:
             print(f"[overview] recap render: {e}")
+
+    def _toggle_recap_chart(self):
+        """Expand/collapse the bots-vs-market returns chart in the recap."""
+        show = not self._recap_chart_box.isVisible()
+        self._recap_chart_box.setVisible(show)
+        self._recap_more_btn.setText("See less  ▴" if show else "See more  ▾")
+        if show:
+            self._load_recap_chart()
+
+    def _load_recap_chart(self):
+        """V4.6.131 — build each bot's cumulative %-return curve over the
+        selected period + the market (SPY) benchmark, off the GUI thread."""
+        period = self._current_period()
+        self._recap_chart.load_chart(CH.empty_chart("Loading…", height=340))
+        from PyQt6.QtCore import QThread, pyqtSignal as _Sig
+        sides = [b["side"] for b in self._displayable_bots()]
+
+        class _RecapChartWorker(QThread):
+            done = _Sig(list, str)
+
+            def run(self):
+                series = []
+                for side in sides:
+                    try:
+                        df = D.get_history(side, period)
+                        if df is None or getattr(df, "empty", True) or len(df) < 2:
+                            continue
+                        if "equity" not in df or "time" not in df:
+                            continue
+                        eq = [float(v) for v in df["equity"].tolist()]
+                        base = next((v for v in eq if v and v > 0), 0.0)
+                        if base <= 0:
+                            continue
+                        xs = [str(t) for t in df["time"].tolist()]
+                        ys = [(v / base - 1.0) * 100.0 for v in eq]
+                        series.append({"name": side, "x": xs, "y": ys,
+                                       "market": False})
+                    except Exception as e:
+                        print(f"[recap-chart] {side}: {e}")
+                # Market benchmark (S&P 500 via SPY)
+                try:
+                    import yfinance as yf
+                    ymap = {"1D": "5d", "1W": "5d", "1M": "1mo", "3M": "3mo",
+                            "6M": "6mo", "1Y": "1y"}
+                    yp = ymap.get(period, "1y")
+                    h = yf.Ticker("SPY").history(period=yp)
+                    cl = [float(c) for c in h["Close"].tolist() if c == c]
+                    if len(cl) >= 2 and cl[0]:
+                        xs = [str(t) for t in h.index]
+                        ys = [(c / cl[0] - 1.0) * 100.0 for c in cl]
+                        series.append({"name": "S&P 500", "x": xs, "y": ys,
+                                       "market": True})
+                except Exception as e:
+                    print(f"[recap-chart] spy: {e}")
+                self.done.emit(series, period)
+
+        w = _RecapChartWorker()
+        w.done.connect(self._on_recap_chart)
+        w.finished.connect(
+            lambda _w=w: self._recap_workers.remove(_w)
+            if _w in getattr(self, "_recap_workers", []) else None)
+        if not hasattr(self, "_recap_workers"):
+            self._recap_workers = []
+        self._recap_workers.append(w)
+        w.start()
+
+    def _on_recap_chart(self, series: list, period: str):
+        try:
+            html = CH.returns_vs_market_chart(
+                series, f"Bot returns vs market — {period}")
+            self._recap_chart.load_chart(html)
+        except Exception as e:
+            print(f"[overview] recap chart render: {e}")
 
     # ── Active-bot block management (V7.1.2) ────────────────
 

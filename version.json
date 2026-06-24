@@ -1,4 +1,4 @@
 {
-  "version": "4.6.130",
-  "notes": "v4.6.130 — AI model selection now reaches cloud bots; day P/L fix\n\n🤖 Changing a bot's AI provider/model now SYNCS to the server automatically when you hit Save (it only saved locally before, so cloud bots kept using the default — Claude). After saving, RESTART the bot (⏹ then ▶) so it trades on the new model. Make sure that provider's API key is entered + synced in Tools.\n\n🧹 Bots that don't use an LLM (algorithmic / ML bots) no longer show the AI MODEL selector.\n\n🛠 Fixed: per-bot DAY P/L showed $0.00. Each bot's card now shows the same broker-authoritative daily figure as the headline (Alpaca last-close / IBKR ledger baseline) instead of a desktop-snapshot value that could read $0.\n\nUpdate via the in-app banner.\n"
+  "version": "4.6.131",
+  "notes": "v4.6.131 — Daily Recap: 'See more' returns-vs-market graph\n\n📈 The DAILY RECAP now has a 'See more' button that expands a graph plotting every bot's cumulative % return over time against the market (S&P 500), so you can see at a glance which bots are beating the benchmark across the period (use the Period selector at the top to change the window).\n\nUpdate via the in-app banner.\n"
 }

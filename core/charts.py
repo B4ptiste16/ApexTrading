@@ -1216,3 +1216,53 @@ def price_history_chart(df: pd.DataFrame, symbol: str, period: str,
         return _make_html(data, layout)
     except Exception as e:
         return empty_chart(f"chart error: {e}")
+
+
+def returns_vs_market_chart(series: list, title: str = "",
+                            height: int = 340) -> str:
+    """Overlay each bot's cumulative % return against the market over time.
+
+    `series` is a list of {"name", "x" (date/time strings), "y" (% return),
+    "market" (bool)}. The market line is drawn thick + dashed; bots are solid
+    coloured lines. Used by the Overview daily-recap 'See more' expander."""
+    series = [s for s in (series or []) if s.get("x") and s.get("y")]
+    if not series:
+        return empty_chart("Not enough history yet to compare returns", height)
+    palette = [G, PU, OR2, Y, R, "#67a8d6", "#a3c98a", "#d68f9c"]
+    data = []
+    ci = 0
+    last_for_title = None
+    for s in series:
+        if s.get("market"):
+            data.append({
+                "type": "scatter", "mode": "lines",
+                "x": s["x"], "y": s["y"], "name": s.get("name", "Market"),
+                "line": {"width": 3, "color": MUTED, "dash": "dash"},
+                "hovertemplate": s.get("name", "Market") + " %{y:+.2f}%<extra></extra>",
+            })
+        else:
+            col = palette[ci % len(palette)]; ci += 1
+            data.append({
+                "type": "scatter", "mode": "lines",
+                "x": s["x"], "y": s["y"], "name": s.get("name", "Bot"),
+                "line": {"width": 2, "color": col},
+                "hovertemplate": s.get("name", "Bot") + " %{y:+.2f}%<extra></extra>",
+            })
+            last_for_title = s["y"][-1]
+    shapes = [{
+        "type": "line", "x0": 0, "x1": 1, "y0": 0, "y1": 0,
+        "xref": "paper", "yref": "y",
+        "line": {"color": MUTED, "width": 1, "dash": "dot"},
+    }]
+    layout = _base_layout(height, title or "Bot returns vs market", TEXT, {
+        "showlegend": True,
+        "legend": {"orientation": "h", "y": -0.18, "font": {"size": 9},
+                   "bgcolor": "rgba(0,0,0,0)"},
+        "hovermode": "x unified",
+        "shapes": shapes,
+        "xaxis": {"gridcolor": BORDER, "zeroline": False, "automargin": False,
+                  "type": "date"},
+        "yaxis": {"gridcolor": BORDER, "zeroline": True, "zerolinecolor": MUTED,
+                  "automargin": False, "ticksuffix": "%"},
+    })
+    return _make_html(data, layout)
