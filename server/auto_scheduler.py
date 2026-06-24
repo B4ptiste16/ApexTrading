@@ -228,6 +228,46 @@ _START_BACKOFF: dict = {}          # (uid, side, broker) -> retry-after epoch
 _START_BACKOFF_SECS = 300
 
 
+_LAST_RECON: dict = {}        # (uid, mode) -> epoch of last reconcile
+_RECON_INTERVAL = 3600        # hourly
+
+
+def _maybe_reconcile_ibkr(br, is_open) -> None:
+    """V4.6.133 — hourly (market hours only), flatten any IBKR positions that
+    have drifted away from the bots' sub-portfolio ledgers (optimistic-fill /
+    bracket drift) so the live account never silently diverges from what the app
+    shows. Self-healing: a no-op when there's no drift, and reconcile_ibkr_orphans
+    refuses to act if the ledgers are empty (whole-account safety guard)."""
+    if is_open is not True:
+        return
+    try:
+        seen = set()
+        for uid, side, broker in br.list_all_desired():
+            base, mode = br._split_broker(broker)
+            if base != "ibkr":
+                continue
+            key = (uid, mode)
+            if key in seen:
+                continue
+            seen.add(key)
+            if time.time() - _LAST_RECON.get(key, 0) < _RECON_INTERVAL:
+                continue
+            _LAST_RECON[key] = time.time()
+            try:
+                res = br.reconcile_ibkr_orphans(uid, mode, execute=True)
+                n = len(res.get("sold", []) or [])
+                if n:
+                    print(f"[reconcile] user={uid} {mode}: flattened {n} "
+                          f"orphan position(s): {res.get('sold')}", flush=True)
+                elif not res.get("ok"):
+                    print(f"[reconcile] user={uid} {mode}: "
+                          f"{res.get('detail')}", flush=True)
+            except Exception as e:
+                print(f"[reconcile] user={uid} {mode} failed: {e}", flush=True)
+    except Exception as e:
+        print(f"[reconcile] sweep error: {e}", flush=True)
+
+
 def _watchdog_sweep() -> None:
     try:
         _maybe_generate_universes()
@@ -293,6 +333,12 @@ def _watchdog_sweep() -> None:
         except Exception as e:
             print(f"[watchdog] user={uid} {side}/{broker} exception: {e}",
                   flush=True)
+
+    # V4.6.133 — keep IBKR accounts in sync with the bots' ledgers (hourly).
+    try:
+        _maybe_reconcile_ibkr(br, is_open)
+    except Exception as e:
+        print(f"[reconcile] tick error: {e}", flush=True)
 
 
 def start_cron():

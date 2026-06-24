@@ -487,6 +487,130 @@ def liquidate_ibkr_bot(user_id: int, side: str, mode: str = "paper") -> dict:
             "detail": f"Sold {sold} position(s); {s} removed and cash freed."}
 
 
+def reconcile_ibkr_orphans(user_id: int, mode: str = "paper",
+                           execute: bool = False) -> dict:
+    """V4.6.133 — reconcile the REAL IBKR account against the SUM of all bot
+    sub-portfolio ledgers and report (or, with execute=True, MARKET-flatten) the
+    ORPHAN excess: shares IBKR holds beyond what any bot tracks, caused by
+    optimistic-fill drift, unreconciled bracket TP/SL fills, or crashes.
+
+    Safety rules:
+      • Only the EXCESS in the same direction as the real position is flattened
+        (real long beyond ledger → SELL the surplus; real short beyond ledger →
+        BUY to cover the surplus). The bots' tracked holdings are never touched.
+      • Never flips a position and never BUYS to 'fix' a ledger that over-counts
+        (that's reported as `ledger_over` only).
+    """
+    import json as _j
+    s_mode = mode.lower()
+    led_dir = _ibkr_ledger_dir(user_id)
+    expected: dict[str, float] = {}
+    for f in led_dir.glob(f"*_{s_mode}.json"):
+        if f.name.startswith("account_") or ".rebalance" in f.name:
+            continue
+        try:
+            d = _j.loads(f.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        for sym, q in (d.get("holdings") or {}).items():
+            ns = _norm_sym(sym)
+            expected[ns] = expected.get(ns, 0.0) + float(q or 0)
+
+    # SAFETY GUARD: never flatten when there are NO ledger holdings at all — that
+    # would make EVERY real position look like an orphan and liquidate the whole
+    # account (e.g. if ledger files went missing). Only blocks execute; the
+    # read-only report still runs.
+    if execute and not any(abs(v) > 1e-9 for v in expected.values()):
+        return {"ok": False, "executed": False,
+                "detail": "Refusing to flatten: no bot ledger holdings found "
+                          "(would liquidate the whole account). Manual review "
+                          "needed."}
+
+    blob = creds.load_credentials(user_id) or {}
+    try:
+        from . import ibkr_gateway
+        if blob.get("IBKR_USERNAME") and blob.get("IBKR_PASSWORD"):
+            ibkr_gateway.ensure_gateway(user_id, blob["IBKR_USERNAME"],
+                                        blob["IBKR_PASSWORD"], s_mode)
+        port = ibkr_gateway.active_port(user_id, s_mode)
+    except Exception as e:
+        return {"ok": False, "detail": f"gateway not ready: {e}"}
+
+    from ib_async import IB, Stock, Crypto, MarketOrder
+    import asyncio
+    try:
+        asyncio.get_event_loop()
+    except RuntimeError:
+        asyncio.set_event_loop(asyncio.new_event_loop())
+    ib = IB()
+    try:
+        ib.connect("127.0.0.1", int(port), clientId=9102, timeout=20,
+                   readonly=(not execute))
+    except Exception as e:
+        return {"ok": False, "detail": f"gateway connect failed: {e}"}
+    try:
+        real: dict[str, float] = {}
+        for p in ib.positions():
+            sym = _norm_sym(getattr(p.contract, "symbol", "") or "")
+            if sym:
+                real[sym] = real.get(sym, 0.0) + float(p.position or 0)
+
+        orphans: dict[str, float] = {}      # sym -> signed excess to flatten
+        ledger_over: dict[str, float] = {}  # sym -> shares ledgers claim but IBKR lacks
+        for sym, rq in real.items():
+            eq = expected.get(sym, 0.0)
+            if rq > 0:
+                excess = max(0.0, rq - max(eq, 0.0))
+            elif rq < 0:
+                excess = min(0.0, rq - min(eq, 0.0))
+            else:
+                excess = 0.0
+            if abs(excess) > 1e-6:
+                orphans[sym] = round(excess, 8)
+        for sym, eq in expected.items():
+            rq = real.get(sym, 0.0)
+            if abs(eq) - abs(rq) > 1e-6 and (eq == 0 or (eq > 0) == (rq >= 0) or rq == 0):
+                ledger_over[sym] = round(eq - rq, 8)
+
+        report = {"expected": expected, "real": real, "orphans": orphans,
+                  "n_orphans": len(orphans), "ledger_over": ledger_over}
+        if not execute:
+            return {"ok": True, "executed": False, **report}
+
+        sold, failures = [], []
+        for sym, excess in orphans.items():
+            action = "SELL" if excess > 0 else "BUY"
+            qty = abs(excess)
+            placed = False
+            for contract in (Stock(sym, "SMART", "USD"),
+                             Crypto(sym, "PAXOS", "USD")):
+                try:
+                    ib.qualifyContracts(contract)
+                    if not getattr(contract, "conId", 0):
+                        continue
+                    o = MarketOrder(action, qty)
+                    if isinstance(contract, Crypto):
+                        o.tif = "IOC"
+                    else:
+                        o.tif = "DAY"; o.outsideRth = True
+                    ib.placeOrder(contract, o)
+                    ib.sleep(1)
+                    placed = True
+                    sold.append([sym, action, qty])
+                    break
+                except Exception:
+                    continue
+            if not placed:
+                failures.append(sym)
+        return {"ok": not failures, "executed": True, "sold": sold,
+                "failures": failures, **report}
+    finally:
+        try:
+            ib.disconnect()
+        except Exception:
+            pass
+
+
 def request_ibkr_rebalance(user_id: int, side: str, target_pct: float,
                            mode: str = "paper") -> dict:
     """V4.6.51 — drop a rebalance request next to the bot's ledger. The

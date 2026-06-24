@@ -1557,6 +1557,34 @@ def web_api_ai_returns():
                 except Exception:
                     continue
 
+        # V4.6.129 — ledgers are the server-side source of truth for cloud bots
+        # (there are no *_lifetime.jsonl server-side). Derive a start->now return
+        # line per slice (allocated_cash -> last_value) so the AI charts plot
+        # real data, grouped by the model each bot runs on.
+        from datetime import datetime as _dt2
+        for lg in user_dir.rglob("ledgers/*.json"):
+            nm = lg.name
+            if nm.startswith("account_") or nm.endswith(".rebalance.json"):
+                continue
+            try:
+                lj = _j.loads(lg.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            alloc = float(lj.get("allocated_cash") or 0)
+            lastv = float(lj.get("last_value") or 0)
+            if alloc <= 0 or lastv <= 0:
+                continue
+            lslug = str(lj.get("bot_id") or lg.stem.split("_")[0]).lower()
+            lmodel = _model_for(lslug)
+            try:
+                t0 = _dt2.fromisoformat(lj.get("created")).timestamp()
+                t1 = _dt2.fromisoformat(lj.get("updated")).timestamp()
+            except Exception:
+                continue
+            lret = (lastv / alloc - 1.0) * 100.0
+            out_creator[lmodel] += [(t0, 0.0), (t1, lret)]
+            out_runner[lmodel]  += [(t0, 0.0), (t1, lret)]
+
     # Aggregate: average pct per timestamp per AI (rounded to nearest
     # 5 minutes so points from different bots align)
     def _aggregate(series):
@@ -1756,6 +1784,16 @@ def api_ibkr_rebalance(side: str, target_pct: float, mode: str = "paper",
     return bot_runner.request_ibkr_rebalance(user["id"], side, target_pct, mode)
 
 
+@app.post("/ibkr/reconcile")
+def api_ibkr_reconcile(mode: str = "paper", execute: bool = False,
+                       authorization: str | None = Header(default=None)):
+    """V4.6.133 — reconcile the real IBKR account vs the bots' sub-portfolio
+    ledgers. execute=false → report orphan (untracked) positions; execute=true →
+    market-flatten the untracked excess so the account matches the bots."""
+    user = _current_user(authorization)
+    return bot_runner.reconcile_ibkr_orphans(user["id"], mode, execute=execute)
+
+
 @app.get("/bots/running")
 def api_bots_running(authorization: str | None = Header(default=None)):
     user = _current_user(authorization)
@@ -1921,7 +1959,7 @@ def web_api_bot_types():
     (rules/indicators, no LLM) and Machine Learning. Built-ins LONG/SHORT/DAY
     are AI; custom bots are classified from their META."""
     from pathlib import Path as _P
-    import os as _os
+    import os as _os, json
     counts = {"AI": 0, "Algorithmic": 0, "Machine Learning": 0}
     users_dir = _P(_os.environ.get("APEX_USERS_DIR", "/opt/apex_users"))
     if not users_dir.exists():
@@ -1933,8 +1971,16 @@ def web_api_bot_types():
     seen = set()
     for user_dir in users_dir.glob("user_*"):
         bots = set()
-        for ll in user_dir.rglob("*_lifetime.jsonl"):
-            bots.add(ll.stem.replace("_lifetime", "").lower())
+        # Server-side bots are tracked by their slice ledgers (no lifetime files).
+        for lg in user_dir.rglob("ledgers/*.json"):
+            nm = lg.name
+            if nm.startswith("account_") or nm.endswith(".rebalance.json"):
+                continue
+            try:
+                bid = json.loads(lg.read_text(encoding="utf-8")).get("bot_id")
+            except Exception:
+                bid = None
+            bots.add(str(bid or lg.stem.split("_")[0]).lower())
         for slug in bots:
             key = (user_dir.name, slug)
             if key in seen:
