@@ -79,11 +79,17 @@ class RefreshWorker(QThread):
             # placeholders so _apply_* never KeyErrors before phase 2 lands
             "account": {}, "positions": [], "position_meta": {},
             "history": pd.DataFrame(),
+            # V4.6.132 — flag the fast phase so the tab does NOT overwrite the
+            # live widgets (positions, gauge, account, P/L) with these empty
+            # placeholders. Without this, re-entering a tab flashed the gauge to
+            # 0/fewer positions until phase 2 landed.
+            "_partial": True,
         }
         try:
             self.partial.emit(dict(data))
         except Exception:
             pass
+        data["_partial"] = False
 
         # ── Phase 2: live broker data (may be slow / unreachable) ─────────
         positions = S(lambda: D.get_positions(self.side), [], "positions")

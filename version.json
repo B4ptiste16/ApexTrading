@@ -1,4 +1,4 @@
 {
-  "version": "4.6.131",
-  "notes": "v4.6.131 — Daily Recap: 'See more' returns-vs-market graph\n\n📈 The DAILY RECAP now has a 'See more' button that expands a graph plotting every bot's cumulative % return over time against the market (S&P 500), so you can see at a glance which bots are beating the benchmark across the period (use the Period selector at the top to change the window).\n\nUpdate via the in-app banner.\n"
+  "version": "4.6.132",
+  "notes": "v4.6.132 — Stable position gauge + Daily Recap 'See more' graph\n\n🛠 Fixed: a bot's position gauge/count flashing to fewer (or zero) positions when you switch tabs and come back. The fast first-paint no longer overwrites the live positions, account and P/L — they only update with real broker data.\n\n📈 The DAILY RECAP now has a 'See more' button that expands a graph of every bot's cumulative % return over time vs the market (S&P 500).\n\nUpdate via the in-app banner.\n"
 }

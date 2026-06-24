@@ -999,7 +999,16 @@ class BotTab(QWidget):
              _apply_risk) can't strand everything after it (API COST
              row + POSITION MANAGEMENT table used to never load).
         """
-        self._cached = data
+        # Cache only the full (done) snapshot so cached re-renders (e.g. the
+        # show-P/L toggle) never replay the partial phase's empty positions.
+        if not data.get("_partial"):
+            self._cached = data
+        # V4.6.132 — the fast (partial) phase carries empty live-data
+        # placeholders; skip the appliers that render LIVE broker data so the
+        # gauge / positions / account / P/L never flash to 0 / fewer positions
+        # when you re-enter a tab. They update on the 'done' phase.
+        partial = bool(data.get("_partial"))
+        _live_only = {"account", "gauge", "positions", "pl"}
         self.setUpdatesEnabled(False)
         try:
             for name, fn in (
@@ -1014,6 +1023,8 @@ class BotTab(QWidget):
                 ("costs",         self._apply_costs),
                 ("positions",     self._apply_positions),
             ):
+                if partial and name in _live_only:
+                    continue
                 try:
                     fn(data)
                 except Exception as e:
