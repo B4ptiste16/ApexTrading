@@ -611,6 +611,184 @@ def reconcile_ibkr_orphans(user_id: int, mode: str = "paper",
             pass
 
 
+def reconcile_ledger_to_broker(user_id: int, mode: str = "paper",
+                               execute: bool = False) -> dict:
+    """V4.6.134 — the MIRROR of reconcile_ibkr_orphans: correct the bot
+    sub-portfolio LEDGERS *down* to match the real IBKR account.
+
+    Where the SUM of bot ledgers claims MORE of a symbol than IBKR actually
+    holds (phantom shares from optimistic-fill recording — a sell/exit the
+    ledger marked as filled that IBKR never executed), snap each holding bot's
+    quantity down to its share of the real position and TRUE-UP cash at the
+    ledger's last mark price, so the bot's equity is preserved (no fake P/L is
+    injected — the written-off shares simply convert back to cash at market).
+
+    Safety rules:
+      • NEVER increases a holding (an under-count means IBKR holds shares no bot
+        tracks — that's an orphan, handled by reconcile_ibkr_orphans).
+      • Never flips a position (sign mismatches are reported, not corrected).
+      • Places NO orders — IBKR is read-only here; only ledger JSONs are written.
+      • Refuses to act if IBKR returns zero positions (a gateway hiccup would
+        otherwise make every holding look phantom and wipe the whole app).
+    """
+    import json as _j
+    s_mode = mode.lower()
+    led_dir = _ibkr_ledger_dir(user_id)
+
+    ledgers: list = []                 # (path, parsed-dict)
+    expected: dict[str, float] = {}
+    for f in led_dir.glob(f"*_{s_mode}.json"):
+        if f.name.startswith("account_") or ".rebalance" in f.name:
+            continue
+        try:
+            d = _j.loads(f.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        ledgers.append((f, d))
+        for sym, q in (d.get("holdings") or {}).items():
+            ns = _norm_sym(sym)
+            expected[ns] = expected.get(ns, 0.0) + float(q or 0)
+
+    if not any(abs(v) > 1e-9 for v in expected.values()):
+        return {"ok": False, "executed": False,
+                "detail": "No bot ledger holdings found — nothing to correct."}
+
+    blob = creds.load_credentials(user_id) or {}
+    try:
+        from . import ibkr_gateway
+        if blob.get("IBKR_USERNAME") and blob.get("IBKR_PASSWORD"):
+            ibkr_gateway.ensure_gateway(user_id, blob["IBKR_USERNAME"],
+                                        blob["IBKR_PASSWORD"], s_mode)
+        port = ibkr_gateway.active_port(user_id, s_mode)
+    except Exception as e:
+        return {"ok": False, "detail": f"gateway not ready: {e}"}
+
+    from ib_async import IB
+    import asyncio
+    try:
+        asyncio.get_event_loop()
+    except RuntimeError:
+        asyncio.set_event_loop(asyncio.new_event_loop())
+    ib = IB()
+    try:
+        ib.connect("127.0.0.1", int(port), clientId=9103, timeout=20,
+                   readonly=True)
+    except Exception as e:
+        return {"ok": False, "detail": f"gateway connect failed: {e}"}
+    try:
+        real: dict[str, float] = {}
+        got_any = False
+        for p in ib.positions():
+            got_any = True
+            sym = _norm_sym(getattr(p.contract, "symbol", "") or "")
+            if sym:
+                real[sym] = real.get(sym, 0.0) + float(p.position or 0)
+    finally:
+        try:
+            ib.disconnect()
+        except Exception:
+            pass
+
+    if not got_any:
+        return {"ok": False, "executed": False,
+                "detail": "IBKR returned no positions — refusing to zero the "
+                          "ledgers (gateway likely not fully synced). Retry."}
+
+    tol = 1e-6
+    plan: list = []
+    skipped: list = []
+    holders: dict[str, list] = {}
+    for path, d in ledgers:
+        for sym, q in (d.get("holdings") or {}).items():
+            if abs(float(q or 0)) > 1e-9:
+                holders.setdefault(_norm_sym(sym), []).append(
+                    (path, d, sym, float(q)))
+
+    changed: set = set()
+    for sym, hs in holders.items():
+        ledger_qty = sum(q for *_, q in hs)        # signed ledger total
+        real_qty = real.get(sym, 0.0)              # signed real total
+        if abs(ledger_qty) - abs(real_qty) <= tol:
+            continue                               # consistent or under-count
+        if not (real_qty == 0 or (ledger_qty > 0) == (real_qty >= 0)):
+            skipped.append({"symbol": sym, "ledger": ledger_qty,
+                            "real": real_qty,
+                            "reason": "sign mismatch — manual review"})
+            continue
+        factor = (real_qty / ledger_qty) if abs(ledger_qty) > 1e-12 else 0.0
+        for path, d, raw_sym, q in hs:
+            new_q = q * factor
+            if abs(new_q - round(new_q)) < 1e-6:   # whole shares for stocks
+                new_q = float(round(new_q))
+            delta = q - new_q                      # shares written off
+            if abs(delta) < 1e-9:
+                continue
+            marks = d.get("marks") or {}
+            cb = d.get("cost_basis") or {}
+            m = marks.get(raw_sym) or marks.get(sym)
+            price = None
+            if isinstance(m, dict) and m.get("price"):
+                price = float(m["price"])
+            elif cb.get(raw_sym) or cb.get(sym):
+                price = float(cb.get(raw_sym) or cb.get(sym))
+            if price is None:
+                skipped.append({"symbol": sym, "bot": d.get("bot_id"),
+                                "reason": "no mark price — manual review"})
+                continue
+            d["cash"] = float(d.get("cash", 0.0)) + delta * price
+            if abs(new_q) < 1e-9:
+                (d.get("holdings") or {}).pop(raw_sym, None)
+                (d.get("marks") or {}).pop(raw_sym, None)
+                (d.get("cost_basis") or {}).pop(raw_sym, None)
+            else:
+                d["holdings"][raw_sym] = new_q
+                if isinstance(m, dict):
+                    m["mv"] = new_q * price
+            plan.append({"bot": d.get("bot_id"), "symbol": sym,
+                         "from": q, "to": new_q,
+                         "shares_written_off": round(delta, 6),
+                         "cash_credit": round(delta * price, 2),
+                         "price": price})
+            changed.add(path)
+
+    for path, d in ledgers:                        # recompute equity snapshot
+        if path not in changed:
+            continue
+        marks = d.get("marks") or {}
+        cb = d.get("cost_basis") or {}
+        val = float(d.get("cash", 0.0))
+        for s, q in (d.get("holdings") or {}).items():
+            mm = marks.get(s)
+            if isinstance(mm, dict) and mm.get("price"):
+                pr = float(mm["price"])
+            elif cb.get(s):
+                pr = float(cb.get(s))
+            else:
+                pr = 0.0
+            val += float(q or 0) * pr
+        d["last_value"] = val
+
+    report = {"expected": expected, "real": real, "plan": plan,
+              "n_changes": len(plan), "skipped": skipped}
+    if not execute:
+        return {"ok": True, "executed": False, **report}
+
+    import datetime as _dt, os as _os
+    written: list = []
+    for path, d in ledgers:
+        if path not in changed:
+            continue
+        d["updated"] = _dt.datetime.now(_dt.timezone.utc).isoformat()
+        try:
+            tmp = path.with_suffix(".json.tmp")
+            tmp.write_text(_j.dumps(d, indent=2), encoding="utf-8")
+            _os.replace(tmp, path)
+            written.append(path.name)
+        except Exception as e:
+            skipped.append({"file": path.name, "reason": f"write failed: {e}"})
+    return {"ok": True, "executed": True, "written": written, **report}
+
+
 def request_ibkr_rebalance(user_id: int, side: str, target_pct: float,
                            mode: str = "paper") -> dict:
     """V4.6.51 — drop a rebalance request next to the bot's ledger. The

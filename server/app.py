@@ -1794,6 +1794,17 @@ def api_ibkr_reconcile(mode: str = "paper", execute: bool = False,
     return bot_runner.reconcile_ibkr_orphans(user["id"], mode, execute=execute)
 
 
+@app.post("/ibkr/reconcile_ledger")
+def api_ibkr_reconcile_ledger(mode: str = "paper", execute: bool = False,
+                              authorization: str | None = Header(default=None)):
+    """V4.6.134 — mirror of /ibkr/reconcile: correct the bots' sub-portfolio
+    ledgers DOWN to the real IBKR account. execute=false → report the phantom
+    over-counts; execute=true → snap each over-counting ledger to reality and
+    true-up cash at the mark price (writes ledger files only, places no orders)."""
+    user = _current_user(authorization)
+    return bot_runner.reconcile_ledger_to_broker(user["id"], mode, execute=execute)
+
+
 @app.get("/bots/running")
 def api_bots_running(authorization: str | None = Header(default=None)):
     user = _current_user(authorization)
