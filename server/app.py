@@ -1183,20 +1183,26 @@ def _web_user(request: Request) -> dict:
     return user
 
 
-def _alpaca_client_for(user_id: int, side: str):
+def _alpaca_client_for(user_id: int, side: str, mode: str = "paper"):
     """Build an Alpaca TradingClient from the user's stored credentials,
-    or return None when keys aren't linked or alpaca-py isn't installed."""
+    or return None when keys aren't linked or alpaca-py isn't installed.
+
+    V4.6.135 — `mode` selects the account: 'paper' uses ALPACA_API_KEY_<SIDE>
+    (paper=True); 'live' uses the separate ALPACA_API_KEY_LIVE_<SIDE> namespace
+    (paper=False). Defaults to paper so existing callers are unaffected."""
     try:
         from alpaca.trading.client import TradingClient
     except ImportError:
         return None
     data = creds.load_credentials(user_id) or {}
-    k = data.get(f"ALPACA_API_KEY_{side}")
-    s = data.get(f"ALPACA_SECRET_KEY_{side}")
+    live = str(mode).lower() == "live"
+    suffix = "LIVE_" if live else ""
+    k = data.get(f"ALPACA_API_KEY_{suffix}{side}")
+    s = data.get(f"ALPACA_SECRET_KEY_{suffix}{side}")
     if not k or not s:
         return None
     try:
-        return TradingClient(k, s, paper=True)
+        return TradingClient(k, s, paper=not live)
     except Exception:
         return None
 
@@ -2493,6 +2499,103 @@ def _pl_for_user(user_id: int, shows: dict) -> dict:
         result[label] = {"pl": round(total_pl, 2),
                           "pct": round(pct, 2)}
     return result
+
+
+# ── leaderboard (V4.6.135) ──────────────────────────────────────────────────
+_LB_PERIODS = {"daily": "1D", "weekly": "1W", "monthly": "1M"}
+_LB_CACHE: dict = {}          # (user_id, period, mode) -> (ts, {"pct","pl"})
+_LB_TTL = 300                 # seconds — re-use a user's return for 5 min
+
+
+def _period_perf(user_id: int, period: str, mode: str):
+    """Aggregate % return + $ P/L across a user's LONG/SHORT/DAY Alpaca
+    accounts for one period+mode. Returns None when the user has no linked
+    keys / no data for that account type (so they're left off the board).
+    Cached per (user, period, mode) for _LB_TTL seconds."""
+    import time as _t
+    key = (user_id, period, mode)
+    hit = _LB_CACHE.get(key)
+    if hit and (_t.time() - hit[0]) < _LB_TTL:
+        return hit[1]
+    alpaca_period = _LB_PERIODS.get(period, "1D")
+    total_pl = 0.0
+    first_eq = 0.0
+    last_eq  = 0.0
+    have_data = False
+    try:
+        from alpaca.trading.requests import GetPortfolioHistoryRequest
+        for side in ("LONG", "SHORT", "DAY"):
+            c = _alpaca_client_for(user_id, side, mode)
+            if c is None:
+                continue
+            try:
+                h = c.get_portfolio_history(
+                    GetPortfolioHistoryRequest(period=alpaca_period,
+                                               timeframe="1D"))
+            except Exception:
+                continue
+            eq = [e for e in (getattr(h, "equity", []) or []) if e]
+            if len(eq) >= 2:
+                have_data = True
+                total_pl += eq[-1] - eq[0]
+                first_eq += eq[0]
+                last_eq  += eq[-1]
+    except Exception:
+        pass
+    if not have_data:
+        _LB_CACHE[key] = (_t.time(), None)
+        return None
+    pct = ((last_eq / first_eq) - 1) * 100 if first_eq else 0.0
+    out = {"pct": round(pct, 2), "pl": round(total_pl, 2)}
+    _LB_CACHE[key] = (_t.time(), out)
+    return out
+
+
+@app.get("/leaderboard")
+def api_leaderboard(period: str = "daily", mode: str = "paper",
+                    scope: str = "global",
+                    authorization: str | None = Header(default=None)):
+    """V4.6.135 — ranked % return for opted-in users.
+      period ∈ daily|weekly|monthly   mode ∈ paper|live   scope ∈ global|friends
+    Opt-in only (friends.leaderboard_user_ids). The viewer always sees their own
+    row even if not opted in; everyone else must have leaderboard_optin=1."""
+    viewer = _current_user(authorization)
+    period = period if period in _LB_PERIODS else "daily"
+    mode   = "live" if str(mode).lower() == "live" else "paper"
+    scope  = "friends" if str(scope).lower() == "friends" else "global"
+
+    ids = friends.leaderboard_user_ids(viewer["id"], scope)
+    entries = []
+    for uid in ids:
+        perf = _period_perf(uid, period, mode)
+        if perf is None:
+            # Keep the viewer visible (as 0) even with no data for this account.
+            if uid != viewer["id"]:
+                continue
+            perf = {"pct": 0.0, "pl": 0.0}
+        u = database.get_user_by_id(uid) or {}
+        entries.append({
+            "user_id":      uid,
+            "username":     u.get("username", "?"),
+            "display_name": u.get("display_name") or u.get("username", "?"),
+            "pct":          perf["pct"],
+            "pl":           perf["pl"],
+            "is_self":      uid == viewer["id"],
+            "opted_in":     uid != viewer["id"] or _viewer_opted_in(viewer["id"]),
+        })
+    entries.sort(key=lambda e: e["pct"], reverse=True)
+    for i, e in enumerate(entries, 1):
+        e["rank"] = i
+    return {"period": period, "mode": mode, "scope": scope,
+            "you_opted_in": _viewer_opted_in(viewer["id"]),
+            "entries": entries}
+
+
+def _viewer_opted_in(user_id: int) -> bool:
+    try:
+        return bool(friends.get_share_settings(user_id).get("leaderboard_optin"))
+    except Exception:
+        return False
 
 
 @app.post("/web/api/bots/{side}/liquidate", include_in_schema=False)

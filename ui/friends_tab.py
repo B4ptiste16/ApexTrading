@@ -91,6 +91,7 @@ class FriendsTab(QWidget):
     def refresh(self):
         self._refresh_friends()
         self._refresh_settings()
+        self._load_leaderboard()
 
     # ── Layout ──────────────────────────────────────────────────────
 
@@ -126,6 +127,17 @@ class FriendsTab(QWidget):
         _bv.addWidget(_bsub)
         self._manual_banner.setVisible(False)
         s.add(self._manual_banner)
+
+        # ─── LEADERBOARD (V4.6.135) ──────────────────────────────
+        s.add(SectionHeader("LEADERBOARD", C["purple"]))
+        lb_intro = QLabel(
+            "Highest % return for the period. Flip Global ⟷ Friends, "
+            "Paper ⟷ Live, and the period. Opt in under SHARING below to "
+            "appear in the ranking.")
+        lb_intro.setStyleSheet(f"color:{C['muted']};font-size:11px;")
+        lb_intro.setWordWrap(True)
+        s.add(lb_intro)
+        s.add(self._build_leaderboard())
 
         # ─── SEARCH / ADD ────────────────────────────────────────
         s.add(SectionHeader("ADD A FRIEND", C["purple"]))
@@ -208,6 +220,153 @@ class FriendsTab(QWidget):
 
         s.add_stretch()
 
+    # ── Leaderboard (V4.6.135) ──────────────────────────────────────
+    def _seg_css(self) -> str:
+        return (
+            f"QPushButton{{background:{C['panel2']};color:{C['muted']};"
+            f"border:none;border-radius:6px;padding:6px 14px;"
+            f"font-size:11px;font-weight:700;}}"
+            f"QPushButton:hover{{color:{C['text']};}}"
+            f"QPushButton:checked{{background:{C['purple']};color:#ffffff;}}"
+        )
+
+    def _seg(self, label: str, options: list, group: str, current: str):
+        """A small segmented (single-choice) button control. `group` is the
+        key X behind self._lb_<X> / self._lb_<X>_btns; clicking reloads."""
+        wrap = QHBoxLayout()
+        wrap.setContentsMargins(0, 0, 0, 0)
+        wrap.setSpacing(6)
+        lbl = QLabel(label)
+        lbl.setStyleSheet(
+            f"color:{C['muted']};font-size:9px;letter-spacing:1px;"
+            f"font-weight:700;min-width:62px;")
+        wrap.addWidget(lbl)
+        btns: dict = {}
+        for val, text in options:
+            b = QPushButton(text)
+            b.setCheckable(True)
+            b.setChecked(val == current)
+            b.setCursor(Qt.CursorShape.PointingHandCursor)
+            b.setStyleSheet(self._seg_css())
+            b.clicked.connect(lambda _=False, g=group, v=val: self._seg_select(g, v))
+            btns[val] = b
+            wrap.addWidget(b)
+        wrap.addStretch()
+        cont = QWidget(); cont.setLayout(wrap)
+        return cont, btns
+
+    def _seg_select(self, group: str, value: str):
+        setattr(self, f"_lb_{group}", value)
+        for v, b in getattr(self, f"_lb_{group}_btns").items():
+            b.setChecked(v == value)
+        self._load_leaderboard()
+
+    def _build_leaderboard(self) -> QWidget:
+        self._lb_period = "daily"
+        self._lb_scope  = "global"
+        self._lb_mode   = "paper"
+        frame = QFrame()
+        frame.setStyleSheet(f"background:{C['panel']};border:none;border-radius:8px;")
+        v = QVBoxLayout(frame)
+        v.setContentsMargins(16, 12, 16, 14)
+        v.setSpacing(9)
+
+        pc, self._lb_period_btns = self._seg(
+            "PERIOD", [("daily", "Daily"), ("weekly", "Weekly"),
+                       ("monthly", "Monthly")], "period", self._lb_period)
+        sc, self._lb_scope_btns = self._seg(
+            "SCOPE", [("global", "Global"), ("friends", "Friends")],
+            "scope", self._lb_scope)
+        mc, self._lb_mode_btns = self._seg(
+            "ACCOUNT", [("paper", "Paper"), ("live", "Live")],
+            "mode", self._lb_mode)
+        v.addWidget(pc); v.addWidget(sc); v.addWidget(mc)
+
+        self._lb_status = QLabel("")
+        self._lb_status.setStyleSheet(
+            f"color:{C['muted']};font-size:10px;padding:2px 0;")
+        self._lb_status.setWordWrap(True)
+        v.addWidget(self._lb_status)
+
+        self._lb_results = QWidget()
+        self._lb_results_layout = QVBoxLayout(self._lb_results)
+        self._lb_results_layout.setContentsMargins(0, 0, 0, 0)
+        self._lb_results_layout.setSpacing(5)
+        v.addWidget(self._lb_results)
+        return frame
+
+    def _load_leaderboard(self):
+        if not hasattr(self, "_lb_results_layout"):
+            return
+        self._lb_status.setText("Loading…")
+        self._clear_layout(self._lb_results_layout)
+        w = _HttpWorker("GET", "/leaderboard", params={
+            "period": self._lb_period, "mode": self._lb_mode,
+            "scope": self._lb_scope})
+        self._spawn(w, self._on_leaderboard)
+
+    def _on_leaderboard(self, ok: bool, body: dict):
+        if not hasattr(self, "_lb_results_layout"):
+            return
+        self._clear_layout(self._lb_results_layout)
+        if not ok:
+            self._lb_status.setText(
+                body.get("detail", "Couldn't load the leaderboard."))
+            return
+        entries = body.get("entries", []) or []
+        you_in  = bool(body.get("you_opted_in"))
+        if not entries:
+            self._lb_status.setText(
+                "No one's opted in for this view yet — turn on "
+                "“Show me on leaderboards” under SHARING below.")
+            return
+        if body.get("scope") == "global" and not you_in:
+            self._lb_status.setText(
+                "You're not listed publicly — enable “Show me on "
+                "leaderboards” under SHARING to appear here.")
+        else:
+            self._lb_status.setText("")
+        for e in entries:
+            self._lb_results_layout.addWidget(self._make_lb_row(e))
+
+    def _make_lb_row(self, e: dict) -> QWidget:
+        is_self = bool(e.get("is_self"))
+        row = QFrame()
+        accent = C["purple"] if is_self else "transparent"
+        row.setStyleSheet(
+            f"background:{C['panel2']};border:none;border-radius:8px;"
+            f"border-left:3px solid {accent};")
+        hl = QHBoxLayout(row)
+        hl.setContentsMargins(12, 8, 14, 8)
+        hl.setSpacing(10)
+
+        rank = QLabel(f"#{e.get('rank', '?')}")
+        rank.setStyleSheet(
+            f"color:{C['muted']};font-size:13px;font-weight:800;min-width:34px;")
+        hl.addWidget(rank)
+
+        nm = (e.get("display_name") or e.get("username") or "?")
+        if is_self:
+            nm += "  (you)"
+        name = QLabel(nm)
+        name.setStyleSheet(f"color:{C['text']};font-size:12px;font-weight:700;")
+        hl.addWidget(name, 1)
+
+        pct = float(e.get("pct", 0.0) or 0.0)
+        pl  = float(e.get("pl", 0.0) or 0.0)
+        col = C["green"] if pct >= 0 else C["red"]
+        arrow = "▲" if pct >= 0 else "▼"
+        val = QLabel(f"{arrow} {pct:+.2f}%")
+        val.setStyleSheet(f"color:{col};font-size:13px;font-weight:800;")
+        hl.addWidget(val)
+
+        dol = QLabel(f"{'+' if pl >= 0 else '−'}${abs(pl):,.0f}")
+        dol.setStyleSheet(f"color:{col};font-size:11px;min-width:74px;")
+        dol.setAlignment(Qt.AlignmentFlag.AlignRight |
+                         Qt.AlignmentFlag.AlignVCenter)
+        hl.addWidget(dol)
+        return row
+
     def _build_share_grid(self) -> QWidget:
         frame = QFrame()
         frame.setStyleSheet(
@@ -240,6 +399,12 @@ class FriendsTab(QWidget):
         self._chk_allow_dl.stateChanged.connect(self._on_share_changed)
         g.addWidget(self._chk_allow_dl, 2, 0, 1, 3)
 
+        # V4.6.135 — opt in to appear on the leaderboards (rank by % return)
+        self._chk_leaderboard = QCheckBox("Show me on leaderboards (rank by % return)")
+        self._chk_leaderboard.setStyleSheet(f"color:{C['text']};font-size:11px;")
+        self._chk_leaderboard.stateChanged.connect(self._on_share_changed)
+        g.addWidget(self._chk_leaderboard, 3, 0, 1, 3)
+
         # Per-stat toggles — friends and public columns
         self._share_widgets: dict[str, dict[str, QCheckBox]] = {}
         rows = [
@@ -249,7 +414,7 @@ class FriendsTab(QWidget):
             ("yearly",  "Yearly P/L"),
             ("bots",    "Bot library (names + presence)"),
         ]
-        row_idx = 3
+        row_idx = 4
         for key, label in rows:
             lbl = QLabel(label)
             lbl.setStyleSheet(f"color:{C['text']};font-size:11px;")
@@ -579,6 +744,7 @@ class FriendsTab(QWidget):
         self._settings_loaded = False
         self._chk_discoverable.setChecked(bool(body.get("discoverable")))
         self._chk_allow_dl.setChecked(bool(body.get("allow_bot_download")))
+        self._chk_leaderboard.setChecked(bool(body.get("leaderboard_optin")))
         for key, pair in self._share_widgets.items():
             pair["friends"].setChecked(bool(body.get(f"share_{key}_friends")))
             pair["public"].setChecked(bool(body.get(f"share_{key}_public")))
@@ -590,6 +756,7 @@ class FriendsTab(QWidget):
         patch = {
             "discoverable":       int(self._chk_discoverable.isChecked()),
             "allow_bot_download": int(self._chk_allow_dl.isChecked()),
+            "leaderboard_optin":  int(self._chk_leaderboard.isChecked()),
         }
         for key, pair in self._share_widgets.items():
             patch[f"share_{key}_friends"] = int(pair["friends"].isChecked())
@@ -604,6 +771,7 @@ class FriendsTab(QWidget):
             self._share_status.setText("Saved ✓")
             self._share_status.setStyleSheet(
                 f"color:{C['green']};font-size:10px;")
+            self._load_leaderboard()   # opt-in change reflects immediately
         else:
             self._share_status.setText(
                 body.get("detail", "Save failed."))

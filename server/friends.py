@@ -42,6 +42,7 @@ _SHARE_FIELDS = {
     "share_yearly_friends",  "share_yearly_public",
     "share_bots_friends",    "share_bots_public",
     "allow_bot_download",
+    "leaderboard_optin",     # V4.6.135 — opt in to appear on leaderboards
 }
 
 
@@ -74,11 +75,21 @@ def init_friends_db() -> None:
                 share_bots_friends     INTEGER NOT NULL DEFAULT 0,
                 share_bots_public      INTEGER NOT NULL DEFAULT 0,
                 allow_bot_download     INTEGER NOT NULL DEFAULT 0,
+                leaderboard_optin      INTEGER NOT NULL DEFAULT 0,
                 updated_at             TEXT    NOT NULL
             )
         """)
         c.execute("CREATE INDEX IF NOT EXISTS idx_friend_a ON friendships(user_a_id)")
         c.execute("CREATE INDEX IF NOT EXISTS idx_friend_b ON friendships(user_b_id)")
+        # V4.6.135 — migrate older DBs that predate leaderboard_optin.
+        try:
+            cols = {r[1] for r in c.execute(
+                "PRAGMA table_info(share_settings)").fetchall()}
+            if "leaderboard_optin" not in cols:
+                c.execute("ALTER TABLE share_settings "
+                          "ADD COLUMN leaderboard_optin INTEGER NOT NULL DEFAULT 0")
+        except sqlite3.OperationalError:
+            pass
         c.commit()
 
 
@@ -263,6 +274,7 @@ def _default_settings(user_id: int) -> dict:
         "share_yearly_friends":  0, "share_yearly_public":  0,
         "share_bots_friends":    0, "share_bots_public":    0,
         "allow_bot_download":    0,
+        "leaderboard_optin":     0,
         "updated_at":            _now(),
     }
 
@@ -301,3 +313,40 @@ def set_share_settings(user_id: int, patch: dict) -> dict:
         c.execute(f"UPDATE share_settings SET {sets} WHERE user_id=?", vals)
         c.commit()
     return get_share_settings(user_id)
+
+
+# ── leaderboard ─────────────────────────────────────────────────────
+
+def leaderboard_user_ids(viewer_id: int, scope: str) -> list[int]:
+    """V4.6.135 — the set of users eligible to appear on a leaderboard for
+    this viewer. Opt-in only: a user must have leaderboard_optin=1.
+
+      scope='global'  → every active, opted-in user.
+      scope='friends' → the viewer's accepted friends who opted in.
+
+    The viewer themselves is ALWAYS included (so you can always see your own
+    rank), even if they haven't opted in — their row just isn't shown to anyone
+    else until they do."""
+    ids: set[int] = {viewer_id}
+    with _conn() as c:
+        if scope == "friends":
+            rows = c.execute(
+                """SELECT CASE WHEN f.user_a_id=? THEN f.user_b_id
+                               ELSE f.user_a_id END AS peer
+                   FROM friendships f
+                   JOIN share_settings s
+                     ON s.user_id = (CASE WHEN f.user_a_id=? THEN f.user_b_id
+                                          ELSE f.user_a_id END)
+                   WHERE (f.user_a_id=? OR f.user_b_id=?)
+                     AND f.status='accepted'
+                     AND s.leaderboard_optin=1""",
+                (viewer_id, viewer_id, viewer_id, viewer_id)).fetchall()
+        else:  # global
+            rows = c.execute(
+                """SELECT u.id AS peer
+                   FROM users u
+                   JOIN share_settings s ON s.user_id = u.id
+                   WHERE u.is_active = 1 AND s.leaderboard_optin = 1""").fetchall()
+    for r in rows:
+        ids.add(int(r["peer"]))
+    return sorted(ids)
