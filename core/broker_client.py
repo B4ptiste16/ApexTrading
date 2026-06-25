@@ -1188,6 +1188,26 @@ class _IBKRShim:
         if self.ledger is None:
             return
         filled, avg = self._fill_info(trade)
+        # V4.6.134 — ROOT-CAUSE FIX for ledger drift. Don't settle the instant
+        # after placing the order. A market order usually fills in <2s during
+        # RTH, but a slow report or a PARTIAL fill previously got booked as the
+        # FULL requested qty, leaving phantom holdings (ledger over-counts — e.g.
+        # MSTR booked at 194 when only 67 actually filled). Poll up to ~8s for
+        # the order to reach a terminal state or fully fill, then book what
+        # ACTUALLY filled. Breaks the moment it's done, so adds ~0 latency to the
+        # common fast fill; only genuinely-pending orders wait the full budget.
+        try:
+            _waited = 0.0
+            while _waited < 8.0:
+                _st = str(getattr(trade.orderStatus, "status", "") or "")
+                if _st in ("Filled", "Cancelled", "ApiCancelled", "Inactive") \
+                        or filled + _EPS >= req_qty:
+                    break
+                self.ib.sleep(0.5)
+                _waited += 0.5
+                filled, avg = self._fill_info(trade)
+        except Exception:
+            pass
         # V4.6.62 — CRITICAL: never book a fill the broker didn't make. The
         # ledger used to assume req_qty filled whenever the gateway reported
         # filled=0 — but a CANCELLED / REJECTED order (e.g. IBKR Error 10349)

@@ -1,4 +1,4 @@
 {
-  "version": "4.6.132",
-  "notes": "v4.6.132 — Stable position gauge + Daily Recap 'See more' graph\n\n🛠 Fixed: a bot's position gauge/count flashing to fewer (or zero) positions when you switch tabs and come back. The fast first-paint no longer overwrites the live positions, account and P/L — they only update with real broker data.\n\n📈 The DAILY RECAP now has a 'See more' button that expands a graph of every bot's cumulative % return over time vs the market (S&P 500).\n\nUpdate via the in-app banner.\n"
+  "version": "4.6.134",
+  "notes": "v4.6.134 — Positions now match your broker, and stay matched\n\n🛠 Root-cause fix: bots now wait for the REAL broker fill before recording a trade, instead of assuming the full order filled instantly. That was the source of 'phantom' positions — holdings the app showed that your IBKR account didn't actually hold (e.g. an order that only partially filled was booked in full).\n\n🔁 New automatic hourly two-way reconcile keeps the live account and the bots' books in sync in BOTH directions: it sells off any untracked positions the broker holds, AND corrects any phantom over-counts in the bots' ledgers — so the app and your broker can't silently drift apart.\n\nUpdate via the in-app banner.\n"
 }

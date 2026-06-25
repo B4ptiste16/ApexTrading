@@ -233,11 +233,15 @@ _RECON_INTERVAL = 3600        # hourly
 
 
 def _maybe_reconcile_ibkr(br, is_open) -> None:
-    """V4.6.133 — hourly (market hours only), flatten any IBKR positions that
-    have drifted away from the bots' sub-portfolio ledgers (optimistic-fill /
-    bracket drift) so the live account never silently diverges from what the app
-    shows. Self-healing: a no-op when there's no drift, and reconcile_ibkr_orphans
-    refuses to act if the ledgers are empty (whole-account safety guard)."""
+    """V4.6.134 — hourly (market hours only), keep the live IBKR account and the
+    bots' sub-portfolio ledgers in sync IN BOTH DIRECTIONS so the account never
+    silently diverges from what the app shows:
+      (1) correct the LEDGERS down to IBKR  (phantom over-counts — ledger claims
+          more than IBKR holds; writes ledger files, no orders), then
+      (2) flatten IBKR ORPHANS  (IBKR holds more than any bot tracks; market
+          orders the untracked excess).
+    Self-healing: a no-op when there's no drift; both halves refuse to act on an
+    empty/zero-position read (whole-account safety guards)."""
     if is_open is not True:
         return
     try:
@@ -253,6 +257,22 @@ def _maybe_reconcile_ibkr(br, is_open) -> None:
             if time.time() - _LAST_RECON.get(key, 0) < _RECON_INTERVAL:
                 continue
             _LAST_RECON[key] = time.time()
+            # (1) ledgers DOWN to IBKR first, so (2) then sees corrected ledgers.
+            try:
+                lr = br.reconcile_ledger_to_broker(uid, mode, execute=True)
+                fixed = lr.get("plan", []) or [] if lr.get("executed") else []
+                if fixed:
+                    print(f"[reconcile] user={uid} {mode}: corrected "
+                          f"{len(fixed)} ledger over-count(s) down to IBKR: "
+                          f"{[(p['bot'], p['symbol'], p['from'], p['to']) for p in fixed]}",
+                          flush=True)
+                elif not lr.get("ok"):
+                    print(f"[reconcile] user={uid} {mode} ledger-correct: "
+                          f"{lr.get('detail')}", flush=True)
+            except Exception as e:
+                print(f"[reconcile] user={uid} {mode} ledger-correct failed: "
+                      f"{e}", flush=True)
+            # (2) flatten IBKR orphans (untracked excess).
             try:
                 res = br.reconcile_ibkr_orphans(uid, mode, execute=True)
                 n = len(res.get("sold", []) or [])
