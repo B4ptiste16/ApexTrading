@@ -999,6 +999,16 @@ class OverviewTab(QWidget):
             bot_hist = D.read_bot_snapshots(side)
         except Exception:
             pass
+        # V4.6.142 — drop invalid snapshots (equity<=0 pre-gateway points, and
+        # pre-allocation rows with no `allocated`) BEFORE picking a period
+        # baseline. Otherwise a long period (1M/ALL) whose cutoff predates the
+        # bot's real history fell back to a garbage equity=0 baseline → the card
+        # showed the FULL equity as "P/L" at +0.0% (base 0), or a wild % off an
+        # early bad value. A valid baseline also lets the deposit-adjustment fire.
+        if bot_hist:
+            bot_hist = [s for s in bot_hist
+                        if float(s.get("equity", 0) or 0) > 0
+                        and float(s.get("allocated", 0) or 0) > 0]
 
         # ── DAY P/L: scoped to BOT lifetime ─────────────────────
         # Find the earliest snapshot from today (UTC midnight).

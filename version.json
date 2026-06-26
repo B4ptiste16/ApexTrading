@@ -1,4 +1,4 @@
 {
-  "version": "4.6.141",
-  "notes": "v4.6.141 \u2014 IBKR lifetime chart + bot Decision fixes\n\n\ud83d\udcc8 The per-bot lifetime equity chart no longer says 'No snapshot data yet' for IBKR bots \u2014 it now reads the bot's recorded lifetime history (empty start-up points are filtered out).\n\n\ud83e\udd16 LAST AI SIGNAL: the Decision now shows BUY / SELL / HOLD even when the model didn't write an explicit verb (derived from its action, or HOLD when it evaluated without trading) instead of a blank '\u2014'.\n\nUpdate via the in-app banner.\n"
+  "version": "4.6.142",
+  "notes": "v4.6.142 \u2014 Fix 1-Month (and longer) Period P/L on IBKR bots\n\n\ud83d\udee0 For IBKR bots, the 1M / 3M / ALL Period P/L could show the bot's FULL portfolio value as 'P/L' at +0.0%, or a wild % \u2014 because the baseline landed on an empty start-up snapshot from before the bot was funded. Those invalid snapshots are now skipped, so every period measures from the bot's first real (funded) point and is deposit-adjusted.\n\nUpdate via the in-app banner.\n"
 }
