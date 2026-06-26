@@ -1,4 +1,4 @@
 {
-  "version": "4.6.139",
-  "notes": "v4.6.139 — UI fixes from a full app walkthrough\n\n🏆 Leaderboard: fixed stray bracket marks that appeared before the rank/name/value on your own highlighted row.\n\n🤖 Bot tab: the LAST AI SIGNAL 'Decision' now shows BUY / SELL / HOLD (derived from the bot's action) instead of being blank.\n\nUpdate via the in-app banner.\n"
+  "version": "4.6.140",
+  "notes": "v4.6.140 \u2014 Correct IBKR multi-period P/L & equity curves\n\n\ud83d\udee0 IBKR bots' Weekly/Monthly Period P/L and equity curves were distorted by capital you added or removed \u2014 a re-allocation showed up as profit/loss (e.g. a bogus '+78% \u00b7 1W' and a boxed equity curve). They're now DEPOSIT-ADJUSTED: performance reflects trading only, using each snapshot's recorded allocation. (Day P/L was already correct.)\n\n\ud83d\udd27 Live mode with no connected bots now shows $0 / \u2014 everywhere instead of a leftover Period/Total P/L carried over from paper.\n\nUpdate via the in-app banner.\n"
 }

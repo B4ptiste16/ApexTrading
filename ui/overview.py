@@ -781,6 +781,23 @@ class OverviewTab(QWidget):
                 positions += int(m.get("positions", 0) or 0)
             if not have:
                 return
+            # V4.6.140 — empty workspace (e.g. LIVE mode with no connected bots):
+            # blank EVERY aggregate so a stale Period/Total P/L carried over from
+            # paper doesn't linger next to $0 value and 0 positions.
+            if tot_val < 1e-6 and positions == 0:
+                self._broker_cards["BOTS VALUE"].update_value("$0", C["muted"])
+                self._broker_cards["DAY P/L"].update_value("$0 (0.0%)", C["muted"])
+                self._broker_cards["POSITIONS"].update_value("0", C["muted"])
+                pc0 = self._broker_cards.get("PERIOD P/L")
+                if pc0 is not None:
+                    pc0.update_value("—", C["muted"], sub=self._current_period())
+                tc0 = self._broker_cards.get("TOTAL P/L")
+                if tc0 is not None:
+                    tc0.update_value("—", C["muted"])
+                fc0 = self._broker_cards.get("FULL ACCOUNT")
+                if fc0 is not None:
+                    fc0.setVisible(False)
+                return
             day_pct = (day_pl / prev_eq * 100) if prev_eq else 0.0
             self._broker_cards["BOTS VALUE"].update_value(
                 f"${tot_val:,.0f}", C["text"])
@@ -1076,6 +1093,7 @@ class OverviewTab(QWidget):
         # "bot lifetime" and used a different baseline than DAY P/L.
         period = self._current_period()
         from datetime import timedelta as _td
+        period_baseline_alloc = None          # V4.6.140 — for deposit-adjust
         if period == "1D":
             # 1D delta-from-last-close is identical to DAY P/L by definition.
             period_baseline_eq = today_baseline_eq
@@ -1083,6 +1101,8 @@ class OverviewTab(QWidget):
             # V4.6.89 — lifetime return of THIS bot: since its first snapshot.
             period_baseline_eq = (float(bot_hist[0].get("equity", eq))
                                   if bot_hist else eq)
+            period_baseline_alloc = (float(bot_hist[0].get("allocated", 0) or 0)
+                                     if bot_hist else None)
         else:
             period_days = {"1W": 7, "1M": 30, "3M": 90,
                            "6M": 180, "1Y": 365}.get(period, 7)
@@ -1094,6 +1114,7 @@ class OverviewTab(QWidget):
                     ts = _dt.fromisoformat(s["ts"])
                     if ts <= cutoff:
                         period_baseline_eq = float(s.get("equity", eq))
+                        period_baseline_alloc = float(s.get("allocated", 0) or 0)
                         break
                 except Exception:
                     continue
@@ -1102,9 +1123,21 @@ class OverviewTab(QWidget):
                 # earliest snapshot ever (= bot's birth equity).
                 period_baseline_eq = (float(bot_hist[0].get("equity", eq))
                                       if bot_hist else eq)
-        p_pl  = eq - period_baseline_eq
-        p_pct = (p_pl / period_baseline_eq * 100
-                 if period_baseline_eq else 0)
+                period_baseline_alloc = (float(bot_hist[0].get("allocated", 0) or 0)
+                                         if bot_hist else None)
+        # V4.6.140 — DEPOSIT-ADJUST: true P/L is (equity − capital allocated), so
+        # adding/removing capital mid-period isn't counted as profit (the cause of
+        # wild multi-day numbers like ENERGY "+78% · 1W"). Needs the allocation at
+        # both ends; falls back to raw equity when a baseline snapshot predates
+        # allocation tracking (v4.6.120). 1D is untouched — it's the broker baseline.
+        if (period != "1D" and alloc > 0
+                and period_baseline_alloc and period_baseline_alloc > 0):
+            p_pl   = (eq - alloc) - (period_baseline_eq - period_baseline_alloc)
+            p_base = period_baseline_alloc
+        else:
+            p_pl   = eq - period_baseline_eq
+            p_base = period_baseline_eq
+        p_pct = (p_pl / p_base * 100 if p_base else 0)
         if len(bot_hist) < 2:
             # First-ever tick — show 0 / 0% (no historical comparison
             # makes sense yet)

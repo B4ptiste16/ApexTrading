@@ -585,11 +585,24 @@ def get_history(side: str, period: str) -> pd.DataFrame:
             if ts.tzinfo is None:
                 ts = ts.replace(tzinfo=_tz.utc)
             if cutoff is None or ts >= cutoff:
-                rows.append((ts, float(s.get("equity", 0) or 0)))
+                eq = float(s.get("equity", 0) or 0)
+                if eq <= 0:                      # drop empty/garbage snapshots
+                    continue
+                al = float(s.get("allocated", 0) or 0)
+                rows.append((ts, eq, al))
         except Exception:
             continue
     if not rows:
         return pd.DataFrame()
-    df = pd.DataFrame(rows, columns=["time", "equity"])
+    df = pd.DataFrame(rows, columns=["time", "equity", "allocated"])
     df["time"] = pd.to_datetime(df["time"], utc=True)
-    return df
+    # V4.6.140 — DEPOSIT-ADJUST the curve. The performance line must reflect
+    # trading P/L, not capital added/removed: when the bot's allocation is
+    # recorded for the whole window, normalise equity by the capital change
+    # since the first sample (equity − (allocated − first_allocated)). Without
+    # this, a mid-period re-allocation showed as a fake equity jump (the boxed
+    # curve and wild multi-day %). Falls back to raw equity for pre-v4.6.120
+    # snapshots that never recorded an allocation.
+    if (df["allocated"] > 0).all():
+        df["equity"] = df["equity"] - (df["allocated"] - float(df["allocated"].iloc[0]))
+    return df.drop(columns=["allocated"]).reset_index(drop=True)
