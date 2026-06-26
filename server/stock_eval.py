@@ -49,8 +49,21 @@ _locks_guard = threading.Lock()
 PROVIDERS = {
     "anthropic": ("ANTHROPIC_API_KEY",  "claude-haiku-4-5-20251001", "Claude"),
     "google":    ("GOOGLE_AI_API_KEY",  "gemini-2.0-flash",          "Gemini"),
-    "xai":       ("XAI_API_KEY",        "grok-2-1212",               "Grok"),
+    "xai":       ("XAI_API_KEY",        "grok-4-fast",               "Grok"),
     "groq":      ("GROQ_API_KEY",       "llama-3.3-70b-versatile",   "Llama"),
+}
+
+# V4.6.137 — DEDICATED SERVER AI keys. A single set of keys owned by the server
+# (not any user's personal account) that bills ALL shared, server-side AI usage:
+# the weekly stock reviews here, and any other server-generated common info. When
+# any of these is set, server AI uses ONLY these keys (so reviews never spend a
+# user's personal credits) — see _server_keys(). Set them in the server's
+# EnvironmentFile, never in git.
+_SERVER_KEY_ENV = {
+    "anthropic": "APEX_SERVER_ANTHROPIC_KEY",
+    "xai":       "APEX_SERVER_XAI_KEY",
+    "google":    "APEX_SERVER_GOOGLE_AI_KEY",
+    "groq":      "APEX_SERVER_GROQ_KEY",
 }
 
 _RATING_SCORE = {
@@ -125,6 +138,32 @@ def _main_account_keys() -> dict[str, str]:
         if key:
             out[prov] = key
     return out
+
+
+def _server_keys() -> tuple[dict[str, str], bool]:
+    """Resolve the AI provider keys for shared server-side reviews.
+
+    Prefers the DEDICATED server keys (APEX_SERVER_<PROVIDER>_KEY) — when ANY is
+    set, ONLY those are used, so reviews are billed to the server's own accounts
+    and never to a user's personal credits. Returns (keys, dedicated); when no
+    server key is configured it falls back to the legacy main-account resolution
+    (dedicated=False) so existing deployments keep working."""
+    out: dict[str, str] = {}
+    for prov, env in _SERVER_KEY_ENV.items():
+        v = (os.environ.get(env) or "").strip()
+        if v and prov in PROVIDERS:
+            out[prov] = v
+    if out:
+        return out, True
+    return _main_account_keys(), False
+
+
+def _model_for(prov: str, default: str) -> str:
+    """Per-provider model override via APEX_SERVER_<PROVIDER>_MODEL, so a model
+    rename (e.g. xAI retiring grok-2-1212) is a one-line env change, not a code
+    deploy. Falls back to the PROVIDERS default."""
+    return (os.environ.get(f"APEX_SERVER_{prov.upper()}_MODEL") or "").strip() \
+        or default
 
 
 # ── Prompt + parsing ─────────────────────────────────────────────────────────
@@ -328,13 +367,12 @@ def evaluate(symbol: str, snapshot: dict | None = None,
             if cached and cached.get("models"):
                 return cached
 
-        keys = _main_account_keys()
+        keys, dedicated = _server_keys()
         if not keys:
             return {"symbol": sym, "week": week,
                     "consensus": {"rating": "—", "score": 0.0, "n": 0},
                     "models": [], "generated_at": "",
-                    "error": "No AI provider keys configured on the server's "
-                             "main account."}
+                    "error": "No AI provider keys configured on the server."}
 
         snap = snapshot or {"symbol": sym}
         snap.setdefault("symbol", sym)
@@ -350,7 +388,15 @@ def evaluate(symbol: str, snapshot: dict | None = None,
         if override:
             use = [p for p in (x.strip().lower() for x in override.split(","))
                    if p in keys]
+        elif dedicated:
+            # V4.6.137 — dedicated server keys (Claude + Grok): run them ALL.
+            # Cost is on the server's own budget and these are the intended
+            # providers, so there's no reason to skip the paid one here.
+            use = [p for p in PROVIDERS if p in keys]
         else:
+            # Legacy main-account path — keep NON-BOT Claude spend down by
+            # preferring the free/cheap providers and only using Anthropic when
+            # it's the sole key.
             free = [p for p in PROVIDERS if p in keys and p != "anthropic"]
             use = free if free else [p for p in PROVIDERS if p in keys]
         if not use:
@@ -360,6 +406,7 @@ def evaluate(symbol: str, snapshot: dict | None = None,
         errors: list[str] = []
         for prov in use:
             cred_key, model, label = PROVIDERS[prov]
+            model = _model_for(prov, model)
             key = keys.get(prov)
             if not key:
                 continue
