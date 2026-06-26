@@ -1760,6 +1760,33 @@ def load_snapshots(side: str) -> pd.DataFrame:
                   .sort_values("time")
                   .reset_index(drop=True))
 
+    # V4.6.141 — IBKR (and any per-broker) bots record their lifetime curve in
+    # <broker>/<side>_lifetime.jsonl (ts / equity / portfolio_value / allocated),
+    # which snapshot_files_for() doesn't cover — so the lifetime chart sat empty
+    # ("No snapshot data yet"). Read it directly, drop empty (equity<=0) points
+    # left over from before the gateway was up, and map ts -> time.
+    try:
+        life = read_bot_snapshots(side)
+    except Exception:
+        life = []
+    if life:
+        recs = []
+        for s in life:
+            try:
+                eq = float(s.get("equity", 0) or 0)
+                pv = float(s.get("portfolio_value", 0) or 0) or eq
+                if pv <= 0:
+                    continue
+                recs.append({"time": s.get("ts"), "portfolio_value": pv})
+            except Exception:
+                continue
+        if recs:
+            df = pd.DataFrame(recs)
+            df["time"] = pd.to_datetime(df["time"], utc=True, errors="coerce")
+            return (df.dropna(subset=["time"])
+                      .sort_values("time")
+                      .reset_index(drop=True))
+
     # Fallback: synthesize from the trade log. Each entry carries the
     # portfolio_value before AND after the run; we pick "after" since
     # that's the latest state the bot saw.

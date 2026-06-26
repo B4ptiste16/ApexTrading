@@ -1148,12 +1148,26 @@ class BotTab(QWidget):
         log = data.get("log")
         if log is None or (hasattr(log,"empty") and log.empty): return
         last = log.iloc[-1]
-        # V4.6.139 — the parser may set decision="" (key present but empty), so a
-        # plain .get(...,"—") default never fires — fall back explicitly.
-        dec  = (str(last.get("decision") or "")).strip() or "—"
         conf = last.get("confidence")
         ana  = str(last.get("analysis","—"))
         act  = str(last.get("action","—"))
+        # V4.6.141 — the parser often leaves decision="" (the model wrote an
+        # analysis + action but no explicit verb). Derive it: use the action's
+        # verb if present, else — when an evaluation clearly ran (analysis or a
+        # confidence number) — treat it as HOLD rather than showing a blank "—".
+        dec = (str(last.get("decision") or "")).strip()
+        if not dec:
+            _a = act.strip().upper()
+            if _a.startswith("BUY"):
+                dec = "BUY"
+            elif _a.startswith(("SELL", "COVER")):
+                dec = "SELL"
+            elif _a.startswith("HOLD"):
+                dec = "HOLD"
+            elif (ana and ana != "—") or (conf not in (None, "", "—")):
+                dec = "HOLD"
+            else:
+                dec = "—"
         t    = last.get("time")
         ts   = t.strftime("%b %d %Y  %H:%M UTC") if hasattr(t,"strftime") else "—"
         dc   = {"BUY":C["green"],"SELL":C["red"],"HOLD":C["muted"],

@@ -1,4 +1,4 @@
 {
-  "version": "4.6.140",
-  "notes": "v4.6.140 \u2014 Correct IBKR multi-period P/L & equity curves\n\n\ud83d\udee0 IBKR bots' Weekly/Monthly Period P/L and equity curves were distorted by capital you added or removed \u2014 a re-allocation showed up as profit/loss (e.g. a bogus '+78% \u00b7 1W' and a boxed equity curve). They're now DEPOSIT-ADJUSTED: performance reflects trading only, using each snapshot's recorded allocation. (Day P/L was already correct.)\n\n\ud83d\udd27 Live mode with no connected bots now shows $0 / \u2014 everywhere instead of a leftover Period/Total P/L carried over from paper.\n\nUpdate via the in-app banner.\n"
+  "version": "4.6.141",
+  "notes": "v4.6.141 \u2014 IBKR lifetime chart + bot Decision fixes\n\n\ud83d\udcc8 The per-bot lifetime equity chart no longer says 'No snapshot data yet' for IBKR bots \u2014 it now reads the bot's recorded lifetime history (empty start-up points are filtered out).\n\n\ud83e\udd16 LAST AI SIGNAL: the Decision now shows BUY / SELL / HOLD even when the model didn't write an explicit verb (derived from its action, or HOLD when it evaluated without trading) instead of a blank '\u2014'.\n\nUpdate via the in-app banner.\n"
 }
