@@ -54,7 +54,6 @@ PROVIDER_MODELS: dict[str, list[str]] = {
         "claude-sonnet-4-6",
         "claude-sonnet-4-5",
         "claude-haiku-4-5-20251001",
-        "claude-3-5-haiku-20241022",
     ],
     "google": [
         "gemini-2.0-flash",
@@ -76,6 +75,34 @@ PROVIDER_MODELS: dict[str, list[str]] = {
 # Providers that cannot send images — automatically forces text mode
 _TEXT_ONLY_PROVIDERS = {"groq"}
 
+# V4.6.138 — retired model IDs → current replacement. A bot/user whose saved
+# AI_MODEL config still names a now-retired model (Anthropic returns 404
+# not_found_error) is auto-migrated at call time, so a stale config can't break
+# AI calls. Replacements per Anthropic's model migration guide.
+_RETIRED_MODEL_MAP: dict[str, str] = {
+    "claude-3-5-haiku-20241022":  "claude-haiku-4-5-20251001",
+    "claude-3-5-haiku-latest":    "claude-haiku-4-5-20251001",
+    "claude-3-haiku-20240307":    "claude-haiku-4-5-20251001",
+    "claude-3-7-sonnet-20250219": "claude-sonnet-4-6",
+    "claude-3-5-sonnet-20241022": "claude-sonnet-4-6",
+    "claude-3-5-sonnet-20240620": "claude-sonnet-4-6",
+    "claude-3-sonnet-20240229":   "claude-sonnet-4-6",
+    "claude-3-opus-20240229":     "claude-opus-4-8",
+    "claude-2.1":                 "claude-sonnet-4-6",
+    "claude-2.0":                 "claude-sonnet-4-6",
+}
+
+
+def _canonical_model(provider: str, model: str) -> str:
+    """Rewrite a retired model ID to its current replacement; otherwise return
+    the model unchanged (falling back to the provider default if blank)."""
+    m = (model or "").strip()
+    repl = _RETIRED_MODEL_MAP.get(m)
+    if repl and repl != m:
+        print(f"[ai_client] model '{m}' is retired — using '{repl}' instead")
+        return repl
+    return m or PROVIDER_DEFAULTS.get(provider, "")
+
 
 def provider_supports_vision(provider: str) -> bool:
     """True if provider can accept image content in prompts."""
@@ -95,6 +122,7 @@ def load_ai_config() -> tuple[str, str, str, str]:
 
     default_model = PROVIDER_DEFAULTS[provider]
     model   = (os.getenv("AI_MODEL", default_model) or default_model).strip()
+    model   = _canonical_model(provider, model)   # migrate retired model IDs
     env_var = PROVIDER_ENV_KEY[provider]
     api_key = os.getenv(env_var, "")
     if not api_key:
@@ -127,6 +155,7 @@ def call_ai_vision(content_parts: list, provider: str, model: str,
     If the provider doesn't support vision, image items are silently
     dropped and a text-only call is made.
     """
+    model = _canonical_model(provider, model)
     if not provider_supports_vision(provider):
         # Strip images, fall back to text path
         text_prompt = "\n".join(
@@ -152,6 +181,7 @@ def call_ai_text(prompt: str, provider: str, model: str,
 
     Works with ALL providers, including text-only ones like Groq.
     """
+    model = _canonical_model(provider, model)
     if provider == "anthropic":
         return _call_anthropic([{"type": "text", "text": prompt}],
                                model, api_key, max_tokens)
