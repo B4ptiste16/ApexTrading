@@ -1799,6 +1799,22 @@ def load_snapshots(side: str) -> pd.DataFrame:
     return df
 
 
+def _derive_decision(action: str) -> str:
+    """V4.6.139 — map a bot's free-text ACTION to a BUY/SELL/HOLD decision for
+    the LAST AI SIGNAL card. The bots don't emit an explicit decision verb, so
+    we infer it from what they did. HOLD/skip is checked first so an action like
+    'Skipped — already open' reads HOLD, not BUY."""
+    a = (action or "").upper()
+    if any(w in a for w in ("SKIP", "NO TRADE", "NOTHING", "ALREADY",
+                            "NEEDED", "HOLD", "NO SETUP")):
+        return "HOLD"
+    if any(w in a for w in ("SOLD", "SELL", "SHORT", "COVER", "CLOSE", "EXIT")):
+        return "SELL"
+    if any(w in a for w in ("BOUGHT", "BUY", "LONG", "ENTER", "ADD")):
+        return "BUY"
+    return ""
+
+
 def _ibkr_cloud_log(side: str) -> pd.DataFrame:
     """V4.6.63 — for a cloud IBKR bot, fetch its server log and extract recent
     AI calls (decision / confidence / analysis / action) so the LAST AI SIGNAL
@@ -1842,6 +1858,12 @@ def _ibkr_cloud_log(side: str) -> pd.DataFrame:
                 cur["confidence"] = float(mc.group(1)) / 100.0
             if "ACTION:" in line or line.strip().startswith("ACTION"):
                 cur["action"] = line.split("ACTION:", 1)[-1].strip()[:160]
+                # V4.6.139 — the bots log CONFIDENCE/REASON/ACTION but no
+                # explicit "Decision:" line (the AI returns ticker+confidence,
+                # not a BUY/SELL verb), so the DECISION field rendered blank.
+                # Derive it from the action when not stated outright.
+                if not cur["decision"]:
+                    cur["decision"] = _derive_decision(cur["action"])
                 rows.append(dict(cur))
         except Exception:
             continue

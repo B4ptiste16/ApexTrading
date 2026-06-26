@@ -1148,7 +1148,9 @@ class BotTab(QWidget):
         log = data.get("log")
         if log is None or (hasattr(log,"empty") and log.empty): return
         last = log.iloc[-1]
-        dec  = str(last.get("decision","—"))
+        # V4.6.139 — the parser may set decision="" (key present but empty), so a
+        # plain .get(...,"—") default never fires — fall back explicitly.
+        dec  = (str(last.get("decision") or "")).strip() or "—"
         conf = last.get("confidence")
         ana  = str(last.get("analysis","—"))
         act  = str(last.get("action","—"))

@@ -1,4 +1,4 @@
 {
-  "version": "4.6.138",
-  "notes": "v4.6.138 — Fix AI bots failing on a retired model\n\n🛠 Bots whose saved AI model was a now-retired Claude model (e.g. claude-3-5-haiku-20241022) were failing every AI call with a 404 'model not found'. Retired model IDs are now auto-migrated to their current replacement at call time, so a stale setting can't break a bot — and the retired model is removed from the picker.\n\nYour DAY/LONG/SHORT bots have already been moved to the current Haiku model on the server.\n\nUpdate via the in-app banner.\n"
+  "version": "4.6.139",
+  "notes": "v4.6.139 — UI fixes from a full app walkthrough\n\n🏆 Leaderboard: fixed stray bracket marks that appeared before the rank/name/value on your own highlighted row.\n\n🤖 Bot tab: the LAST AI SIGNAL 'Decision' now shows BUY / SELL / HOLD (derived from the bot's action) instead of being blank.\n\nUpdate via the in-app banner.\n"
 }

@@ -340,10 +340,15 @@ class FriendsTab(QWidget):
     def _make_lb_row(self, e: dict) -> QWidget:
         is_self = bool(e.get("is_self"))
         row = QFrame()
+        # V4.6.139 — scope the stylesheet to THIS frame (QFrame#lbRow). A bare,
+        # selector-less block cascades `border-left` onto every child QLabel,
+        # drawing a stray accent bar before the rank/name/value on the
+        # highlighted self-row. Scoping keeps the accent on the frame only.
+        row.setObjectName("lbRow")
         accent = C["purple"] if is_self else "transparent"
         row.setStyleSheet(
-            f"background:{C['panel2']};border:none;border-radius:8px;"
-            f"border-left:3px solid {accent};")
+            f"QFrame#lbRow{{background:{C['panel2']};border:none;"
+            f"border-radius:8px;border-left:3px solid {accent};}}")
         hl = QHBoxLayout(row)
         hl.setContentsMargins(12, 8, 14, 8)
         hl.setSpacing(10)
