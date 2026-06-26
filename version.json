@@ -1,4 +1,4 @@
 {
-  "version": "4.6.135",
-  "notes": "v4.6.135 — Leaderboards in the Friends tab\n\n🏆 New LEADERBOARD at the top of the Friends tab: see who's posting the highest % return. Three switches — Daily / Weekly / Monthly, Global / Friends, and Paper / Live — and every entry shows both the % return and the $ P/L.\n\n🔒 Opt-in only: you only appear once you turn on 'Show me on leaderboards' under SHARING. You can always see your own rank even before opting in.\n\nUpdate via the in-app banner.\n"
+  "version": "4.6.136",
+  "notes": "v4.6.136 — Leaderboard polish\n\n🏆 The Friends-tab leaderboard now always shows the selection you're actually on: rapidly flipping Daily/Weekly/Monthly, Global/Friends or Paper/Live can no longer leave a previous view's results on screen (out-of-order responses are now ignored).\n\nUpdate via the in-app banner.\n"
 }

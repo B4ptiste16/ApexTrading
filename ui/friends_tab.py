@@ -298,14 +298,22 @@ class FriendsTab(QWidget):
     def _load_leaderboard(self):
         if not hasattr(self, "_lb_results_layout"):
             return
+        # V4.6.136 — tag each request so out-of-order completions from rapid
+        # toggling (period/scope/mode) can't render a stale selection's results.
+        self._lb_req = getattr(self, "_lb_req", 0) + 1
+        token = self._lb_req
         self._lb_status.setText("Loading…")
         self._clear_layout(self._lb_results_layout)
         w = _HttpWorker("GET", "/leaderboard", params={
             "period": self._lb_period, "mode": self._lb_mode,
             "scope": self._lb_scope})
-        self._spawn(w, self._on_leaderboard)
+        self._spawn(w, lambda ok, body, t=token: self._on_leaderboard(ok, body, t))
 
-    def _on_leaderboard(self, ok: bool, body: dict):
+    def _on_leaderboard(self, ok: bool, body: dict, token: int = 0):
+        # Drop results from a superseded request (the user toggled again before
+        # this one came back), so the board always reflects the live selection.
+        if token and token != getattr(self, "_lb_req", 0):
+            return
         if not hasattr(self, "_lb_results_layout"):
             return
         self._clear_layout(self._lb_results_layout)
