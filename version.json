@@ -1,4 +1,4 @@
 {
-  "version": "4.6.136",
-  "notes": "v4.6.136 — Leaderboard polish\n\n🏆 The Friends-tab leaderboard now always shows the selection you're actually on: rapidly flipping Daily/Weekly/Monthly, Global/Friends or Paper/Live can no longer leave a previous view's results on screen (out-of-order responses are now ignored).\n\nUpdate via the in-app banner.\n"
+  "version": "4.6.137",
+  "notes": "v4.6.137 — Trade Summary shows open trades only\n\n📋 The per-bot TRADE SUMMARY table now lists only your OPEN trades — closed trades no longer clutter it (they still live in the 'Recent closed trades' feed). Each open row now shows its LIVE unrealised P/L instead of a flat $0.\n\n🎯 The table's open trades now match the POSITION GAUGE exactly (both come from your live positions), so nothing open is hidden.\n\nUpdate via the in-app banner.\n"
 }

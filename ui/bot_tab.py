@@ -392,7 +392,7 @@ class BotTab(QWidget):
         s.add(SectionHeader("TRADE HISTORY", self.color))
         self.timeline_chart = LazyChartView(height=260)
         s.add(self.timeline_chart)
-        s.add(QLabel("Trade Summary",
+        s.add(QLabel("Trade Summary — open trades (closed trades are in the feed below)",
                       styleSheet=f"color:{C['muted']};font-size:10px;margin-top:6px;"))
         self.trade_table = DataTable()
         self.trade_table.setFixedHeight(200)
@@ -1196,6 +1196,21 @@ class BotTab(QWidget):
         odf = data.get("orders", pd.DataFrame())
         self.timeline_chart.load_chart(CH.trade_timeline_chart(odf, self.side))
         if odf.empty: return
+        # V4.6.137 — the Trade Summary lists ONLY OPEN trades; closed trades have
+        # their own "Recent closed trades" feed. "Open" is taken from the LIVE
+        # positions, so this table matches the position gauge exactly, and each
+        # open row shows its live UNREALISED P/L instead of a misleading $0.
+        positions = data.get("positions")
+        has_pos   = isinstance(positions, list)
+        upl: dict = {}
+        if has_pos:
+            for p in positions:
+                try:
+                    upl[str(p.get("symbol", "")).upper()] = (
+                        float(p.get("unrealized_pl", 0) or 0),
+                        float(p.get("unrealized_plpc", 0) or 0) * 100.0)
+                except Exception:
+                    pass
         filled = odf[odf["Filled"].notna()].copy()
         now    = pd.Timestamp.now(tz="UTC")
         rows   = []
@@ -1204,25 +1219,23 @@ class BotTab(QWidget):
             buys  = t_ord[t_ord["Side"]=="BUY"]
             sells = t_ord[t_ord["Side"]=="SELL"]
             if buys.empty: continue
-            avg_b = ((buys["Qty"]*buys["Avg Fill"]).sum()/buys["Qty"].sum()
-                     if buys["Qty"].sum()>0 else 0)
-            avg_s = ((sells["Qty"]*sells["Avg Fill"]).sum()/sells["Qty"].sum()
-                     if (not sells.empty and sells["Qty"].sum()>0) else 0)
-            pl    = (avg_s-avg_b)*sells["Qty"].sum() if not sells.empty else 0
-            pl_p  = (avg_s/avg_b-1)*100 if (avg_b>0 and not sells.empty) else 0
-            opened= buys["Filled"].iloc[0]
-            closed= sells["Filled"].iloc[-1] if not sells.empty else None
-            dur   = ((closed or now)-opened).total_seconds()/3600
+            # Open = currently held (matches the gauge). Without live positions,
+            # fall back to "no exit recorded yet".
+            is_open = (str(t).upper() in upl) if has_pos else sells.empty
+            if not is_open:
+                continue
+            pl, pl_p = upl.get(str(t).upper(), (0.0, 0.0))
+            opened   = buys["Filled"].iloc[0]
+            dur      = (now - opened).total_seconds() / 3600
             rows.append({
-                "Ticker": t,
-                "Status": "OPEN" if sells.empty else "CLOSED",
-                "Opened": opened.strftime("%b %d %H:%M") if pd.notna(opened) else "—",
-                "Closed": (closed.strftime("%b %d %H:%M")
-                           if (closed and pd.notna(closed)) else "OPEN"),
-                "Hold(h)":  round(dur,1),
-                "Notional": round(buys["Notional"].sum(),2),
-                "P/L ($)":  round(pl,2),
-                "P/L (%)":  round(pl_p,2),
+                "Ticker":   t,
+                "Status":   "OPEN",
+                "Opened":   opened.strftime("%b %d %H:%M") if pd.notna(opened) else "—",
+                "Closed":   "OPEN",
+                "Hold(h)":  round(dur, 1),
+                "Notional": round(buys["Notional"].sum(), 2),
+                "P/L ($)":  round(pl, 2),
+                "P/L (%)":  round(pl_p, 2),
             })
 
         def pl_color(v):
@@ -1230,7 +1243,7 @@ class BotTab(QWidget):
             except: return None
 
         self.trade_table.load(rows,
-            ["Ticker","Status","Opened","Closed","Hold(h)","Notional","P/L ($)","P/L (%)"],
+            ["Ticker","Opened","Hold(h)","Notional","P/L ($)","P/L (%)"],
             color_rules={"P/L ($)":pl_color,"P/L (%)":pl_color})
 
     def _apply_pl(self, data):
