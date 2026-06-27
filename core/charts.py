@@ -522,8 +522,21 @@ def bracket_gauge(brackets: dict, positions: list,
     for sym, pos in pos_map.items():
         entry = float(pos.get("avg_entry_price", 0))
         qty   = float(pos.get("qty", 0))
+        # V4.6.143 — never drop a position: brokers like IBKR sub-portfolios may
+        # not expose an entry price. Fall back to the live price, then
+        # market_value/qty, so the row still renders (at break-even) instead of
+        # silently vanishing from the gauge.
         if entry <= 0:
-            continue
+            entry = float(pos.get("current_price", 0) or 0)
+        if entry <= 0:
+            try:
+                _mv = abs(float(pos.get("market_value", 0) or 0))
+                if _mv > 0 and abs(qty) > 0:
+                    entry = _mv / abs(qty)
+            except Exception:
+                pass
+        if entry <= 0:
+            entry = 1.0      # last resort — show the row at break-even
         b = brackets.get(sym)
         if b and b.get("stop") and b.get("tp"):
             effective[sym] = {

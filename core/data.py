@@ -389,12 +389,35 @@ def position_meta(positions: list, side: str,
     Returns {symbol: {atr_pct, stop_pct, tp_pct, stop_price, tp_price}}.
     """
     meta: dict = {}
+
+    # V4.6.143 — price reference per position. Some brokers (IBKR sub-portfolios)
+    # don't expose avg_entry_price; without a fallback those positions were
+    # skipped here, so the gauge used a flat 2.5% target for them ("always the
+    # same proportion"). Fall back to the live price, then market_value/qty, so
+    # EVERY position gets a real per-stock ATR-based target.
+    def _price_ref(p) -> float:
+        for k in ("avg_entry_price", "current_price"):
+            try:
+                v = float(p.get(k, 0) or 0)
+            except Exception:
+                v = 0.0
+            if v > 0:
+                return v
+        try:
+            mv = abs(float(p.get("market_value", 0) or 0))
+            q  = abs(float(p.get("qty", 0) or 0))
+            if mv > 0 and q > 0:
+                return mv / q
+        except Exception:
+            pass
+        return 0.0
+
     # Pre-fetch every ticker's ATR concurrently. _ticker_atr_pct is cached for
     # an hour, but on a cold cache a bot with N positions used to make N
     # sequential yfinance calls (~1s each) — the main cause of slow chart
     # loading. Run them in a small thread pool so it's one round-trip instead.
     syms = [p.get("symbol") for p in positions
-            if p.get("symbol") and float(p.get("avg_entry_price", 0)) > 0]
+            if p.get("symbol") and _price_ref(p) > 0]
     atr_by_sym: dict = {}
     if syms:
         from concurrent.futures import ThreadPoolExecutor
@@ -406,8 +429,8 @@ def position_meta(positions: list, side: str,
             atr_by_sym = {s: _ticker_atr_pct(s) for s in syms}
     for p in positions:
         sym = p.get("symbol")
-        entry = float(p.get("avg_entry_price", 0))
-        if not sym or entry <= 0:
+        ref = _price_ref(p)
+        if not sym or ref <= 0:
             continue
         atr_pct = atr_by_sym.get(sym) or _ticker_atr_pct(sym)
         if side == "SHORT":
@@ -420,8 +443,8 @@ def position_meta(positions: list, side: str,
             "atr_pct":    atr_pct,
             "stop_pct":   stop_pct * 100,
             "tp_pct":     tp_pct   * 100,
-            "stop_price": round(entry * (1 + stop_pct), 2),
-            "tp_price":   round(entry * (1 + tp_pct),   2),
+            "stop_price": round(ref * (1 + stop_pct), 2),
+            "tp_price":   round(ref * (1 + tp_pct),   2),
         }
     return meta
 

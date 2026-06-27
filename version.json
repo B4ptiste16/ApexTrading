@@ -1,4 +1,4 @@
 {
-  "version": "4.6.142",
-  "notes": "v4.6.142 \u2014 Fix 1-Month (and longer) Period P/L on IBKR bots\n\n\ud83d\udee0 For IBKR bots, the 1M / 3M / ALL Period P/L could show the bot's FULL portfolio value as 'P/L' at +0.0%, or a wild % \u2014 because the baseline landed on an empty start-up snapshot from before the bot was funded. Those invalid snapshots are now skipped, so every period measures from the bot's first real (funded) point and is deposit-adjusted.\n\nUpdate via the in-app banner.\n"
+  "version": "4.6.143",
+  "notes": "v4.6.143 \u2014 Position gauge: show every position + realistic per-stock targets\n\n\ud83c\udfaf The position gauge now ALWAYS shows every open position. Positions whose broker doesn't report an entry price (some IBKR sub-portfolios) were being dropped from the DAY bot's gauge \u2014 they now render at break-even instead of vanishing.\n\n\ud83d\udcd0 For bots without their own take-profit/stop-loss, the gauge's target/stop zones are no longer a flat one-size-fits-all band: every position now gets a realistic target sized by that stock's own ATR (volatility), so a calm stock and a volatile one show different objectives.\n\nUpdate via the in-app banner.\n"
 }
