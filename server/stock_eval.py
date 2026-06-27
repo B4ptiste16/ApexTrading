@@ -51,6 +51,7 @@ PROVIDERS = {
     "google":    ("GOOGLE_AI_API_KEY",  "gemini-2.0-flash",          "Gemini"),
     "xai":       ("XAI_API_KEY",        "grok-4-fast",               "Grok"),
     "groq":      ("GROQ_API_KEY",       "llama-3.3-70b-versatile",   "Llama"),
+    "glm":       ("GLM_API_KEY",        "glm-4.6",                   "GLM"),
 }
 
 # V4.6.137 — DEDICATED SERVER AI keys. A single set of keys owned by the server
@@ -64,6 +65,7 @@ _SERVER_KEY_ENV = {
     "xai":       "APEX_SERVER_XAI_KEY",
     "google":    "APEX_SERVER_GOOGLE_AI_KEY",
     "groq":      "APEX_SERVER_GROQ_KEY",
+    "glm":       "APEX_SERVER_GLM_KEY",
 }
 
 _RATING_SCORE = {
@@ -320,6 +322,9 @@ def _call_provider(provider: str, prompt: str, model: str, key: str) -> str:
     if provider == "groq":
         return _call_openai_compat(prompt, model, key,
                                    "https://api.groq.com/openai/v1")
+    if provider == "glm":
+        return _call_openai_compat(prompt, model, key,
+                                   "https://api.z.ai/api/paas/v4")
     raise ValueError(f"unknown provider {provider}")
 
 

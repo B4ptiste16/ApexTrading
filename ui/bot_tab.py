@@ -432,7 +432,7 @@ class BotTab(QWidget):
         cr2 = QHBoxLayout()
         self.cost_total   = MetricCard("TOTAL SPENT",  "—", C["yellow"])
         self.cost_per_day = MetricCard("PER DAY",      "—", C["muted"])
-        self.cost_calls   = MetricCard("CLAUDE CALLS", "—", C["muted"])
+        self.cost_calls   = MetricCard("AI CALLS",     "—", C["muted"])
         for c in [self.cost_total, self.cost_per_day, self.cost_calls]:
             cr2.addWidget(c)
         cr2.addStretch()
@@ -644,6 +644,14 @@ class BotTab(QWidget):
 
         self._bot_prov_combo.currentIndexChanged.connect(_on_prov)
         _on_prov(0)   # populate model list immediately
+
+        # Live cost indicator: refresh whenever the selected provider/model
+        # changes (the delay_cost label is built later, hence the hasattr guard).
+        def _cost_refresh(*_a):
+            if hasattr(self, "delay_cost"):
+                self._update_delay_cost()
+        self._bot_prov_combo.currentIndexChanged.connect(_cost_refresh)
+        self._bot_model_combo.currentIndexChanged.connect(_cost_refresh)
         return frame
 
     def _save_ai_config(self):
@@ -719,14 +727,25 @@ class BotTab(QWidget):
         QTimer.singleShot(2000, lambda: self.conf_saved.setText(""))
 
     def _update_delay_cost(self):
-        """Live preview of the projected cost at the selected call delay."""
+        """Live cost indicator for the SELECTED model + call delay. Reads the
+        provider/model from the dropdowns (even before Save) so you can compare
+        what each model would cost to run."""
         try:
             v = self.delay_spin.value()
-            est = D.estimate_daily_cost_at_delay(self.side, v)
+            prov = (self._bot_prov_combo.currentData()
+                    if hasattr(self, "_bot_prov_combo") else None)
+            model = (self._bot_model_combo.currentText().strip()
+                     if hasattr(self, "_bot_model_combo") else None)
+            est = D.estimate_daily_cost_at_delay(self.side, v,
+                                                 provider=prov, model=model)
             warn = "  ⚠ very frequent" if v < 60 else ""
+            label = (model or prov or "AI")
+            free = est["per_day"] < 1e-9
+            cost = ("FREE" if free else
+                    f"${est['per_call']:.4f}/call · ${est['per_day']:.2f}/day · "
+                    f"${est['per_month']:.2f}/mo")
             self.delay_cost.setText(
-                f"≈ {est['calls_per_day']:.0f} calls/day · "
-                f"${est['per_day']:.2f}/day · ${est['per_month']:.2f}/mo{warn}")
+                f"{label} · ≈{est['calls_per_day']:.0f} calls/day · {cost}{warn}")
             self.delay_cost.setStyleSheet(
                 f"color:{C['red'] if v < 60 else C['muted']};font-size:10px;")
         except Exception:

@@ -28,6 +28,7 @@ PROVIDER_DEFAULTS: dict[str, str] = {
     "google":    "gemini-2.0-flash",
     "xai":       "grok-2-vision-1212",
     "groq":      "llama-3.3-70b-versatile",
+    "glm":       "glm-4.6v",          # V4.6.144 — Zhipu/Z.ai, vision default
 }
 
 PROVIDER_ENV_KEY: dict[str, str] = {
@@ -35,6 +36,7 @@ PROVIDER_ENV_KEY: dict[str, str] = {
     "google":    "GOOGLE_AI_API_KEY",
     "xai":       "XAI_API_KEY",
     "groq":      "GROQ_API_KEY",
+    "glm":       "GLM_API_KEY",
 }
 
 PROVIDER_LABELS: dict[str, str] = {
@@ -42,7 +44,11 @@ PROVIDER_LABELS: dict[str, str] = {
     "google":    "Google (Gemini) — FREE · vision",
     "xai":       "xAI (Grok) — vision",
     "groq":      "Groq (Llama) — FREE · text-only",
+    "glm":       "Zhipu (GLM) — vision · cheap",
 }
+
+# V4.6.144 — Z.ai (Zhipu) GLM is OpenAI-compatible; this is its API base URL.
+GLM_BASE_URL = "https://api.z.ai/api/paas/v4"
 
 PROVIDER_MODELS: dict[str, list[str]] = {
     # V4.6.102 — current Claude lineup (newest first), including Fable 5.
@@ -69,6 +75,18 @@ PROVIDER_MODELS: dict[str, list[str]] = {
         "llama-3.1-8b-instant",
         "mixtral-8x7b-32768",
         "gemma2-9b-it",
+    ],
+    # V4.6.144 — Zhipu / Z.ai GLM (OpenAI-compatible). Vision models first
+    # (the bots send charts). IDs per Z.ai's API; adjust in the dropdown if Z.ai
+    # renames one (cost/availability vary by model).
+    "glm": [
+        "glm-4.6v",       # vision (recommended for chart-reading bots)
+        "glm-4.5v",       # vision
+        "glm-4.6",        # text, flagship
+        "glm-4.5",        # text
+        "glm-4.5-air",    # text, cheapest
+        "glm-4.7",        # newer
+        "glm-5",          # newest
     ],
 }
 
@@ -102,6 +120,67 @@ def _canonical_model(provider: str, model: str) -> str:
         print(f"[ai_client] model '{m}' is retired — using '{repl}' instead")
         return repl
     return m or PROVIDER_DEFAULTS.get(provider, "")
+
+
+# V4.6.144 — per-MODEL token pricing (USD per 1M tokens): (input, output). Single
+# source of truth for the cost indicator + API-cost estimates. Approximate public
+# list prices; free-tier providers (Gemini/Groq) are shown at paid rates as a
+# conservative upper bound. Update as providers change pricing.
+MODEL_PRICING: dict[str, tuple] = {
+    # Anthropic (Claude)
+    "claude-haiku-4-5-20251001": (1.00, 5.00),
+    "claude-haiku-4-5":          (1.00, 5.00),
+    "claude-sonnet-4-6":         (3.00, 15.00),
+    "claude-sonnet-4-5":         (3.00, 15.00),
+    "claude-opus-4-8":           (5.00, 25.00),
+    "claude-opus-4-7":           (5.00, 25.00),
+    "claude-opus-4-6":           (5.00, 25.00),
+    "claude-fable-5":            (10.00, 50.00),
+    # Zhipu / Z.ai (GLM)
+    "glm-4.6v":     (0.30, 0.90),
+    "glm-4.5v":     (0.30, 0.90),
+    "glm-4.6":      (0.43, 1.74),
+    "glm-4.5":      (0.43, 1.74),
+    "glm-4.5-air":  (0.14, 0.86),
+    "glm-4.7":      (0.45, 1.80),
+    "glm-5":        (0.60, 2.20),
+    # xAI (Grok)
+    "grok-2-vision-1212": (2.00, 10.00),
+    "grok-2-mini":        (0.30, 0.50),
+    "grok-4-fast":        (0.20, 0.50),
+    "grok-4":             (3.00, 15.00),
+    "grok-3":             (3.00, 15.00),
+    "grok-3-mini":        (0.30, 0.50),
+    # Google (Gemini) — generous free tier; paid rates shown
+    "gemini-2.0-flash":   (0.10, 0.40),
+    "gemini-1.5-flash":   (0.075, 0.30),
+    "gemini-1.5-pro":     (1.25, 5.00),
+    # Groq (Llama) — free tier; paid rates shown
+    "llama-3.3-70b-versatile": (0.59, 0.79),
+    "llama-3.1-8b-instant":    (0.05, 0.08),
+    "mixtral-8x7b-32768":      (0.24, 0.24),
+    "gemma2-9b-it":            (0.20, 0.20),
+}
+
+_PROVIDER_FALLBACK_PRICING: dict[str, tuple] = {
+    "anthropic": (1.00, 5.00),
+    "glm":       (0.43, 1.74),
+    "xai":       (2.00, 10.00),
+    "google":    (0.10, 0.40),
+    "groq":      (0.59, 0.79),
+}
+
+
+def model_pricing(provider: str, model: str = "") -> tuple:
+    """(input_per_1M, output_per_1M) USD for a provider/model. Exact match first,
+    then a loose prefix match, then the provider fallback."""
+    m = _canonical_model(provider, model) if model else PROVIDER_DEFAULTS.get(provider, "")
+    if m in MODEL_PRICING:
+        return MODEL_PRICING[m]
+    for k, v in MODEL_PRICING.items():
+        if m and (m.startswith(k) or k.startswith(m)):
+            return v
+    return _PROVIDER_FALLBACK_PRICING.get(provider, (1.00, 5.00))
 
 
 def provider_supports_vision(provider: str) -> bool:
@@ -170,6 +249,9 @@ def call_ai_vision(content_parts: list, provider: str, model: str,
     if provider == "xai":
         return _call_openai_compat(content_parts, model, api_key, max_tokens,
                                    base_url="https://api.x.ai/v1")
+    if provider == "glm":
+        return _call_openai_compat(content_parts, model, api_key, max_tokens,
+                                   base_url=GLM_BASE_URL)
     raise ValueError(f"[ai_client] Unknown provider: {provider}")
 
 
@@ -196,6 +278,10 @@ def call_ai_text(prompt: str, provider: str, model: str,
         return _call_openai_compat([{"type": "text", "text": prompt}],
                                    model, api_key, max_tokens,
                                    base_url="https://api.groq.com/openai/v1")
+    if provider == "glm":
+        return _call_openai_compat([{"type": "text", "text": prompt}],
+                                   model, api_key, max_tokens,
+                                   base_url=GLM_BASE_URL)
     raise ValueError(f"[ai_client] Unknown provider: {provider}")
 
 

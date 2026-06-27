@@ -202,11 +202,25 @@ def day_state_path() -> Path:
         return DAY_STATE
     return broker_data_dir() / "daybot_state.json"
 
-# Anthropic pricing (per million tokens) — update if pricing changes
-HAIKU_INPUT_PER_M  = 0.80
-HAIKU_OUTPUT_PER_M = 4.00
+# Anthropic pricing (per million tokens) — fallback only; the live cost uses the
+# bot's SELECTED model via _bot_model_pricing() / ai_client.MODEL_PRICING.
+HAIKU_INPUT_PER_M  = 1.00      # V4.6.144 — current Haiku 4.5 list price
+HAIKU_OUTPUT_PER_M = 5.00
 SONNET_INPUT_PER_M = 3.00
 SONNET_OUTPUT_PER_M= 15.00
+
+
+def _bot_model_pricing(side: str) -> tuple:
+    """V4.6.144 — (input_per_1M, output_per_1M) USD for THIS bot's SELECTED
+    provider+model, so cost estimates reflect GLM / Grok / Gemini / etc. rather
+    than always assuming Claude. Falls back to Haiku pricing if unavailable."""
+    try:
+        from core import ai_client as _ai
+        cfg = get_bot_ai_config(side)
+        return _ai.model_pricing(cfg.get("provider") or "anthropic",
+                                 cfg.get("model") or "")
+    except Exception:
+        return (HAIKU_INPUT_PER_M, HAIKU_OUTPUT_PER_M)
 
 # Alpaca period map
 # V4.6.107 — "ALL" was missing, so `.get(period, ("1D","5Min"))` collapsed the
@@ -1225,25 +1239,39 @@ def resolve_call_delay(side: str) -> int:
     return max(CALL_DELAY_FLOOR, get_bot_call_delay(side, DEFAULT_CALL_DELAY))
 
 
-def estimate_call_cost(side: str) -> float:
-    """Approx $ per AI call for this bot (Haiku pricing, token estimate)."""
+def estimate_call_cost(side: str, provider: str | None = None,
+                       model: str | None = None) -> float:
+    """Approx $ per AI call for this bot, priced at the SELECTED model. Pass
+    provider/model to price a not-yet-saved dropdown choice (live preview)."""
     est = _CALL_TOKENS.get(side.upper(), {"input": 8000, "output": 500})
-    return (est["input"]  / 1_000_000 * HAIKU_INPUT_PER_M +
-            est["output"] / 1_000_000 * HAIKU_OUTPUT_PER_M)
+    if provider:
+        try:
+            from core import ai_client as _ai
+            in_per_m, out_per_m = _ai.model_pricing(provider, model or "")
+        except Exception:
+            in_per_m, out_per_m = _bot_model_pricing(side)
+    else:
+        in_per_m, out_per_m = _bot_model_pricing(side)
+    return (est["input"]  / 1_000_000 * in_per_m +
+            est["output"] / 1_000_000 * out_per_m)
 
 
-def estimate_daily_cost_at_delay(side: str, delay_seconds: int) -> dict:
-    """Projected cost if the bot calls the AI every `delay_seconds`.
-    Assumes ~continuous operation (crypto 24/7; stock bots only call during
-    market hours, so this is a conservative upper bound)."""
+def estimate_daily_cost_at_delay(side: str, delay_seconds: int,
+                                 provider: str | None = None,
+                                 model: str | None = None) -> dict:
+    """Projected cost if the bot calls the AI every `delay_seconds`, priced at the
+    SELECTED model. Pass provider/model for a live dropdown preview. Assumes
+    ~continuous operation (crypto 24/7; stock bots only call during market hours,
+    so this is a conservative upper bound)."""
     delay = max(1, int(delay_seconds))
     calls_per_day = 86400.0 / delay
-    per_call = estimate_call_cost(side)
+    per_call = estimate_call_cost(side, provider, model)
     return {
         "calls_per_day": calls_per_day,
         "per_call":      per_call,
         "per_day":       calls_per_day * per_call,
         "per_month":     calls_per_day * per_call * 30.0,
+        "model":         (model or provider or ""),
     }
 
 
@@ -1996,8 +2024,10 @@ def estimate_api_costs(side: str) -> dict:
     }
     est = token_estimates.get(side, {"input": 8000, "output": 500})
 
-    input_cost  = calls * est["input"]  / 1_000_000 * HAIKU_INPUT_PER_M
-    output_cost = calls * est["output"] / 1_000_000 * HAIKU_OUTPUT_PER_M
+    # V4.6.144 — price at the bot's SELECTED model, not always Haiku.
+    in_per_m, out_per_m = _bot_model_pricing(side)
+    input_cost  = calls * est["input"]  / 1_000_000 * in_per_m
+    output_cost = calls * est["output"] / 1_000_000 * out_per_m
     total       = round(input_cost + output_cost, 4)
 
     # Per day estimate
@@ -2007,11 +2037,16 @@ def estimate_api_costs(side: str) -> dict:
     else:
         per_day = 0.0
 
+    try:
+        _cfg = get_bot_ai_config(side)
+        _model_label = (_cfg.get("model") or _cfg.get("provider") or "ai")
+    except Exception:
+        _model_label = "ai"
     return {
         "total":   total,
         "calls":   calls,
         "per_day": per_day,
-        "model":   "haiku",
+        "model":   _model_label,
     }
 
 
