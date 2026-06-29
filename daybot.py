@@ -248,6 +248,43 @@ def live_max_brackets() -> int:
     except Exception:
         pass
     return 0   # default: unlimited
+
+
+MIN_POSITIONS = 5   # default floor (matches LONG); 0 = legacy one-at-a-time
+
+
+def live_min_positions() -> int:
+    """App-adjustable FLOOR on concurrent bracket positions. When > 0 the bot
+    keeps at least this many top-ranked names open during the session — it
+    deploys the best candidates WITHOUT waiting for AI approval instead of
+    opening one name at a time. 0 = fully cautious (legacy behaviour). Read
+    fresh every cycle (no restart).
+
+    V4.6.145 — daybot now honours the 'Min positions to hold' setting like the
+    LONG/SHORT bots. Cloud bots get it via APEX_MIN_POSITIONS_DAY (per-broker,
+    injected by the server); local reads the per-broker setting in
+    apex_settings.json, then the legacy side-only key."""
+    import os as _os
+    _ev = _os.environ.get("APEX_MIN_POSITIONS_DAY")
+    if _ev not in (None, ""):
+        try:
+            _iv = int(_ev)
+            if 0 <= _iv <= 50:
+                return _iv
+        except (TypeError, ValueError):
+            pass
+    try:
+        _bk = (_os.environ.get("APEX_BROKER", "alpaca") or "alpaca").lower()
+        with open("apex_settings.json", "r", encoding="utf-8") as _f:
+            _sd = json.load(_f).get("DAY", {})
+        _v = _sd.get(f"min_positions_{_bk}", _sd.get("min_positions"))
+        if _v is not None:
+            _v = int(_v)
+            if 0 <= _v <= 50:
+                return _v
+    except Exception:
+        pass
+    return MIN_POSITIONS
 EARNINGS_BLACKOUT     = 3      # skip if earnings within 3 days
 
 # -- Timing -----------------------------------------------
@@ -1361,6 +1398,65 @@ def print_stats(state: dict):
 # MAIN LOOP
 # =========================================================
 
+def fill_min_positions(state: dict, portfolio: dict, candidates: list) -> tuple:
+    """V4.6.145 — minimum-positions floor (matches the LONG bot).
+
+    When the bot holds fewer than live_min_positions() names, deploy the
+    next best-ranked candidates as brackets WITHOUT waiting for AI approval,
+    until the floor is reached (or candidates / buying power run out). The
+    floor is capped by live_max_brackets() so it never exceeds the ceiling.
+    Each floor entry gets its own ATR stop-loss + take-profit, exactly like a
+    discretionary entry. Returns (state, n_placed)."""
+    floor = live_min_positions()
+    if floor <= 0:
+        return state, 0
+    cap = live_max_brackets()              # 0 = unlimited
+    if cap > 0:
+        floor = min(floor, cap)
+    n_open = count_open_brackets(state)
+    if n_open >= floor:
+        return state, 0
+
+    placed = 0
+    buying_power = float(portfolio.get("buying_power", 0))
+    held = state.setdefault("open_brackets", {})
+    for c in candidates:
+        if n_open >= floor:
+            break
+        ticker = c["ticker"]
+        if ticker in held:
+            continue                       # don't stack a 2nd bracket
+        qty = calculate_position_size(portfolio, c["price"], c["stop_loss"])
+        if qty <= 0:
+            continue
+        notional = round(qty * c["price"], 2)
+        if notional > buying_power:
+            continue                       # try the next (cheaper) name
+        if not place_bracket(ticker, c["price"], c["stop_loss"],
+                             c["take_profit"], qty):
+            continue
+        held[ticker] = {
+            "entry": c["price"],
+            "stop":  c["stop_loss"],
+            "tp":    c["take_profit"],
+            "qty":   qty,
+            "time":  datetime.now(timezone.utc).isoformat(),
+        }
+        state["trades_today"] = state.get("trades_today", 0) + 1
+        buying_power -= notional
+        n_open += 1
+        placed += 1
+        msg = (f"FLOOR ENTRY {n_open}/{floor}: {ticker} | "
+               f"qty={int(qty)} | ~${notional:.0f} | "
+               f"SL=${c['stop_loss']:.2f} | TP=${c['take_profit']:.2f}")
+        print(f"  {msg}")
+        log_run({}, msg, portfolio, c)
+    if placed:
+        print(f"  Min-positions floor: placed {placed} "
+              f"(now {n_open}/{floor} held)")
+    return state, placed
+
+
 def run_once():
     state     = load_state()
     state     = reset_daily(state)
@@ -1396,6 +1492,20 @@ def run_once():
         log_run({}, "No valid candidates", portfolio, None, skipped=True)
         save_state(state)
         return
+
+    # -- Minimum-positions floor (V4.6.145) ----------------
+    # Force the top-ranked names open WITHOUT waiting for AI approval until the
+    # bot holds at least live_min_positions() (matches the LONG bot). The
+    # discretionary AI entry below still runs to add a name ABOVE the floor,
+    # capped by live_max_brackets().
+    state, _floor_n = fill_min_positions(state, portfolio, candidates)
+    if _floor_n:
+        portfolio = get_portfolio()              # buying power changed
+        n_open    = count_open_brackets(state)
+        if mb > 0 and n_open >= mb:
+            print(f"  Floor satisfied ({n_open}/{mb})  -  no discretionary entry")
+            save_state(state)
+            return
 
     best = candidates[0]
 
@@ -1535,7 +1645,8 @@ def main():
     print(f"Universe: {UNIVERSE_FILE}  |  Model: {_AI_MODEL}")
     print(f"R/R: 1:{live_tp_atr_mult()/max(live_stop_atr_mult(),1e-9):.1f}  |  "
           f"Risk/trade: {RISK_PER_TRADE_PCT:.0%}  |  "
-          f"Max brackets: {live_max_brackets() or 'unlimited'}")
+          f"Max brackets: {live_max_brackets() or 'unlimited'}  |  "
+          f"Min positions: {live_min_positions() or 'off'}")
     print(f"Min score for Claude call: {MIN_SCORE_FOR_CLAUDE}  |  "
           f"Min confidence: {MIN_CONFIDENCE:.0%}")
     print("=" * 65)
